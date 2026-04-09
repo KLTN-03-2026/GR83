@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 220" fill="none">
+  <ellipse cx="194" cy="180" rx="132" ry="16" fill="#25192D" opacity="0.16"/>
+  <path d="M78 144h265c7 0 12 6 12 13v8H63l4-12c3-6 7-9 11-9Z" fill="#1A2431" opacity="0.16"/>
+  <path d="M85 137c10-17 25-30 49-30h142c30 0 47 10 62 34l-2 5H78Z" fill="#B6F03E"/>
+  <path d="M118 103h54l18 38H92c4-14 14-28 26-38Z" fill="#93E030"/>
+  <path d="M171 103h95c26 0 41 9 57 31H188Z" fill="#BDEF63"/>
+  <path d="M123 111h48l11 28h-56Z" fill="#5AB2FF"/>
+  <path d="M177 111h65l20 28h-57Z" fill="#4A90E2"/>
+  <path d="M63 155h288" stroke="#1C1C23" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="110" cy="160" r="28" fill="#2B3540"/>
+  <circle cx="110" cy="160" r="16" fill="#90A1AD"/>
+  <circle cx="278" cy="160" r="28" fill="#2B3540"/>
+  <circle cx="278" cy="160" r="16" fill="#90A1AD"/>
+  <path d="M122 96h75l-16-24h-39Z" fill="#D7EF86"/>
+  <rect x="172" y="67" width="78" height="23" rx="7" fill="#D7EF86"/>
+  <text x="211" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#2D6630">TAXI</text>
+  <path d="M290 118h41c11 0 20 9 20 20v5h-65Z" fill="#94DA3B"/>
+  <circle cx="302" cy="139" r="6" fill="#ECF5FF"/>
+  <circle cx="326" cy="139" r="8" fill="#ECF5FF"/>
+</svg>

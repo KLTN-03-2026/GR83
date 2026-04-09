@@ -1,0 +1,20 @@
+Bảng giá sau: 
+Giá theo: <2km;>2km
+Xe máy
+- Tiết kiệm             13k;    13k+5000/1km
+- Phổ thông             15k;    15k+5200/1km
+- Plus                  17k;    17k+5400/1km
+Ô tô
+- Tiết kiệm(4 chỗ):     25k;    25k+10000/1km
+- Vip(4 chỗ):           27k;    27k+11000/1km
+- Plus(7 chỗ):          28k;    28k+12000/1km
+- MiniBus(16 chỗ):      30k;    30k+14000/1km
+- Bus(30 chỗ):          32k;    32k+15000/1km
+Giá theo: <50km; >50km
+Xe liên tỉnh(đặt ghép theo chỗ ngồi)
+- Tiết kiệm(4 chỗ):     100k/1 chỗ;    100k+20000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
+- Vip(4 chỗ):           120k/1 chỗ;    120k+24000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
+- Plus(7 chỗ):          125k/1 chỗ;    125k+25000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
+- MiniBus(16 chỗ):      120k/1 chỗ;    120k+24000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
+- Bus(30 chỗ):          110k/1 chỗ;    110k+22000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
+
