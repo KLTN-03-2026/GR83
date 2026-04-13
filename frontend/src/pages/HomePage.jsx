@@ -1,7 +1,9 @@
 import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
 import DestinationPickerModal from '../components/ui/DestinationPickerModal';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 import RoutePreviewMap from '../components/ui/RoutePreviewMap';
+import RideTrackingModal from '../components/ui/RideTrackingModal';
 import SectionHeading from '../components/ui/SectionHeading';
 import { createLocationRecord, useAppContext } from '../context/AppContext';
 import {
@@ -833,6 +835,7 @@ export default function HomePage() {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(null);
+  const [bookingTrackingModalOpen, setBookingTrackingModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewSelectedRideId, setPreviewSelectedRideId] = useState(null);
   const [bookingPaymentMethod, setBookingPaymentMethod] = useState('cash');
@@ -880,6 +883,7 @@ export default function HomePage() {
   const [credentialLockRemainingSeconds, setCredentialLockRemainingSeconds] = useState(0);
   const [miniToast, setMiniToast] = useState(null);
   const [authenticatedUser, setAuthenticatedUser] = useState(null);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [driverFeatureLockModalOpen, setDriverFeatureLockModalOpen] = useState(false);
   const [driverFeatureLockMessage, setDriverFeatureLockMessage] = useState(DRIVER_FEATURE_LOCK_DEFAULT_MESSAGE);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -1051,6 +1055,7 @@ export default function HomePage() {
   useEffect(() => {
     if (
       !previewModalOpen &&
+      !bookingTrackingModalOpen &&
       !loginModalOpen &&
       !registerModalOpen &&
       !forgotPasswordModalOpen &&
@@ -1092,6 +1097,11 @@ export default function HomePage() {
           return;
         }
 
+        if (bookingTrackingModalOpen) {
+          closeBookingTrackingModal();
+          return;
+        }
+
         if (loginModalOpen) {
           closeLoginModal();
           return;
@@ -1120,6 +1130,7 @@ export default function HomePage() {
     driverSignupModalOpen,
     forgotPasswordModalOpen,
     loginModalOpen,
+    bookingTrackingModalOpen,
     previewModalOpen,
     profileModalOpen,
     registerModalOpen,
@@ -1218,6 +1229,11 @@ export default function HomePage() {
   };
 
   const runRideSearch = async (vehicleOverride = activeVehicle) => {
+    if (bookingSuccess) {
+      setBookingTrackingModalOpen(true);
+      return;
+    }
+
     const pickupLabel = route.pickup.label.trim();
     const destinationLabel = route.destination.label.trim();
 
@@ -1287,7 +1303,13 @@ export default function HomePage() {
         setSelectedRideId(resolvedRideId);
       }
 
-      setBookingSuccess(response.booking ?? null);
+      const nextBooking = response.booking ?? null;
+      setBookingSuccess(nextBooking);
+
+      if (nextBooking) {
+        setBookingTrackingModalOpen(true);
+        closePreviewModal();
+      }
     } catch (error) {
       setBookingError(error.message || 'Không thể đặt xe lúc này.');
     } finally {
@@ -1798,6 +1820,11 @@ export default function HomePage() {
   };
 
   const openPreviewForVehicle = (vehicleId, preferredRideId = null) => {
+    if (bookingSuccess) {
+      setBookingTrackingModalOpen(true);
+      return;
+    }
+
     const resolvedVehicleId = vehicleTabs.some((tab) => tab.id === vehicleId) ? vehicleId : activeVehicle;
     const apiResults =
       searchResult?.vehicle === resolvedVehicleId && Array.isArray(searchResult?.results) ? searchResult.results : [];
@@ -1839,6 +1866,27 @@ export default function HomePage() {
     setBookingPaymentProvider('zalopay');
     setBookingPaymentPanelOpen(false);
     setPreviewModalOpen(false);
+  };
+
+  const closeBookingTrackingModal = () => {
+    setBookingTrackingModalOpen(false);
+  };
+
+  const handleCancelBooking = () => {
+    setBookingTrackingModalOpen(false);
+    setBookingSuccess(null);
+    setBookingError('');
+    setSearchError('');
+    setSearchResult(null);
+    setSelectedRideId(null);
+    setPreviewSelectedRideId(null);
+    setBookingLoading(false);
+    setSearchLoading(false);
+    setBookingPaymentPanelOpen(false);
+    setBookingPaymentMethod('cash');
+    setBookingPaymentProvider('zalopay');
+    setPreviewModalOpen(false);
+    showMiniToast('Đã hủy chuyến.', 'success');
   };
 
   const resetRegisterVerificationState = () => {
@@ -2411,12 +2459,26 @@ export default function HomePage() {
     clearForgotPasswordFormState();
     clearChangePasswordFormState();
     setAuthenticatedUser(null);
+    setBookingTrackingModalOpen(false);
+    setBookingSuccess(null);
+    setBookingError('');
+    setSearchError('');
+    setSearchResult(null);
+    setSelectedRideId(null);
+    setPreviewSelectedRideId(null);
+    setBookingLoading(false);
+    setSearchLoading(false);
+    setBookingPaymentPanelOpen(false);
+    setBookingPaymentMethod('cash');
+    setBookingPaymentProvider('zalopay');
+    setPreviewModalOpen(false);
     setDriverFeatureLockModalOpen(false);
     setDriverFeatureLockMessage(DRIVER_FEATURE_LOCK_DEFAULT_MESSAGE);
     clearDriverSignupDraftCache();
     setMiniToast(null);
     setLoginModalOpen(false);
     setRegisterModalOpen(false);
+    setLogoutConfirmOpen(false);
     setDriverSignupModalOpen(false);
     setDriverDetailModalOpen(false);
     setProfileModalOpen(false);
@@ -2438,11 +2500,16 @@ export default function HomePage() {
       return;
     }
 
-    const shouldLogout = window.confirm('Bạn muốn đăng xuất khỏi tài khoản không?');
+    setLogoutConfirmOpen(true);
+  };
 
-    if (shouldLogout) {
-      handleLogout();
-    }
+  const cancelLogoutConfirm = () => {
+    setLogoutConfirmOpen(false);
+  };
+
+  const confirmLogout = () => {
+    setLogoutConfirmOpen(false);
+    handleLogout();
   };
 
   const handleDriverItemSelect = (itemId) => {
@@ -3921,7 +3988,7 @@ export default function HomePage() {
       const result = await driverSignupService.submitApplication(applicationPayload);
       const successMessage =
         result?.message ??
-        'Đã nộp hồ sơ, đang chờ duyệt từ quản trị viên. Vui lòng chú ý thông báo Email để nhận kết quả duyệt và hướng dẫn kích hoạt tài khoản tài xế.';
+        'Đã nộp hồ sơ, đang chờ duyệt từ quản trị viên. Vui lòng chú ý thông báo Email để nhận kết quả.';
 
       setDriverSignupStatus(successMessage);
       setDriverDetailModalOpen(false);
@@ -4353,8 +4420,6 @@ export default function HomePage() {
       ? `Xin chào, ${(authenticatedUser.givenName || authenticatedUser.name).split(' ')[0]}`
       : 'Đăng nhập';
   const normalizedUserRoleCode = normalizeAppRoleCode(authenticatedUser?.roleCode);
-  const shouldShowDriverSignupButton = !authenticatedUser || normalizedUserRoleCode === 'Q2';
-  const isDriverSignupButtonBlocked = !authenticatedUser;
 
   const handleDriverSignupButtonClick = async () => {
     if (!authenticatedUser) {
@@ -4454,6 +4519,7 @@ export default function HomePage() {
         accountRoleCode={authenticatedUser?.roleCode ?? ''}
         onProfile={openProfileModal}
         onBooking={handleOpenBookingForm}
+        onDriverSignup={handleDriverSignupButtonClick}
         onChangePassword={openChangePasswordModal}
         onLogout={handleLogout}
         onLogin={openLoginModal}
@@ -4476,22 +4542,6 @@ export default function HomePage() {
                 >
                   {loginButtonLabel}
                 </button>
-
-                {shouldShowDriverSignupButton ? (
-                  <button
-                    className={classNames(
-                      'hero-auth-button',
-                      'driver-signup-button',
-                      driverSignupModalOpen && 'is-active',
-                      isDriverSignupButtonBlocked && 'is-blocked',
-                    )}
-                    type="button"
-                    aria-disabled={isDriverSignupButtonBlocked}
-                    onClick={handleDriverSignupButtonClick}
-                  >
-                    Đăng ký Tài xế
-                  </button>
-                ) : null}
 
                 <button className="chatbot-shortcut" type="button" aria-label="Mở chatbot">
                   <span className="chatbot-shortcut__bubble">
@@ -5367,7 +5417,7 @@ export default function HomePage() {
                         </label>
 
                         <button className="login-popup-modal__continue" type="submit" disabled={registerSubmitting || googleSignupLoading}>
-                          {registerSubmitting ? 'Đang gửi mã...' : 'Nhận mã xác nhận'}
+                          {registerSubmitting ? 'Đang gửi mã...' : 'Tiếp tục'}
                         </button>
 
                         <p className="login-popup-modal__separator">hoặc tiếp tục với</p>
@@ -7004,6 +7054,25 @@ export default function HomePage() {
               document.body,
             )
           : null}
+
+        <RideTrackingModal
+          open={bookingTrackingModalOpen}
+          booking={bookingSuccess}
+          onClose={closeBookingTrackingModal}
+          onCancel={handleCancelBooking}
+        />
+
+        <ConfirmDialog
+          open={logoutConfirmOpen}
+          title="Xác nhận đăng xuất"
+          description="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản không?"
+          confirmLabel="Đăng xuất"
+          cancelLabel="Hủy"
+          confirmTone="danger"
+          onCancel={cancelLogoutConfirm}
+          onConfirm={confirmLogout}
+          ariaLabel="Xác nhận đăng xuất"
+        />
       </main>
 
       <DestinationPickerModal

@@ -95,7 +95,15 @@ function renderRouteMap(container, pathPoints, pickup, destination, interactive)
   return map;
 }
 
-export default function RoutePreviewMap({ pickupPosition, destinationPosition, routeGeometry, routeProvider }) {
+export default function RoutePreviewMap({
+  pickupPosition,
+  destinationPosition,
+  routeGeometry,
+  routeProvider,
+  className = '',
+  showProviderLabel = true,
+  showExpandButton = true,
+}) {
   const [isExpanded, setIsExpanded] = useState(false);
   const previewMapRef = useRef(null);
   const expandedMapRef = useRef(null);
@@ -184,17 +192,19 @@ export default function RoutePreviewMap({ pickupPosition, destinationPosition, r
 
   return (
     <>
-      <div className="route-preview-map" aria-label="Ban do tuyen duong">
+      <div className={["route-preview-map", className, pathPoints.length < 2 ? 'route-preview-map--empty' : ''].filter(Boolean).join(' ')} aria-label="Ban do tuyen duong">
         <div className="route-preview-map__canvas" ref={previewMapContainerRef} />
-        <span className="route-preview-map__provider">Tuyen duong: {getProviderLabel(routeProvider)}</span>
-        <button
-          className="route-preview-map__expand"
-          type="button"
-          onClick={() => setIsExpanded(true)}
-          aria-label="Phong to ban do"
-        >
-          Phong to
-        </button>
+        {showProviderLabel ? <span className="route-preview-map__provider">Tuyen duong: {getProviderLabel(routeProvider)}</span> : null}
+        {showExpandButton ? (
+          <button
+            className="route-preview-map__expand"
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            aria-label="Phong to ban do"
+          >
+            Phong to
+          </button>
+        ) : null}
       </div>
 
       {isExpanded

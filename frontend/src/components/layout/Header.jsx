@@ -1,6 +1,7 @@
 import { closeIcon, globeIcon, helpIcon, logoIcon, menuIcon, userIcon } from '../../assets/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import AdminNotificationManagementModal from '../admin/AdminNotificationManagementModal';
 import AdminUserManagementModal from '../admin/AdminUserManagementModal';
 import AdminDriverManagementModal from '../admin/AdminDriverManagementModal';
 
@@ -37,6 +38,7 @@ const ROLE_MENUS = {
       [{ id: 'customer-booking', label: 'Đặt xe', action: 'booking-form' }, null],
       [{ id: 'customer-history', label: 'Lịch sử chuyến', requiresAuth: true }, null],
       [{ id: 'customer-profile', label: 'Quản lý tài khoản cá nhân', action: 'profile', requiresAuth: true }, null],
+      [{ id: 'customer-driver-signup', label: 'Đăng ký Tài xế', action: 'driver-signup' }, null],
     ],
   },
   Q3: {
@@ -131,6 +133,7 @@ export default function Header({
   accountRoleCode = '',
   onProfile,
   onBooking,
+  onDriverSignup,
   onChangePassword,
   onLogout,
   onLogin,
@@ -139,6 +142,7 @@ export default function Header({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [adminUserModalOpen, setAdminUserModalOpen] = useState(false);
   const [adminDriverModalOpen, setAdminDriverModalOpen] = useState(false);
+  const [adminNotificationModalOpen, setAdminNotificationModalOpen] = useState(false);
   const [selectedRoleItemId, setSelectedRoleItemId] = useState('');
   const [activeRolePopupItem, setActiveRolePopupItem] = useState(null);
   const roleMenuRef = useRef(null);
@@ -169,10 +173,21 @@ export default function Header({
     if (normalizedRoleCode !== 'Q1' && adminDriverModalOpen) {
       setAdminDriverModalOpen(false);
     }
-  }, [activeRoleMenu, activeRolePopupItem, adminDriverModalOpen, adminUserModalOpen, normalizedRoleCode, selectedRoleItemId]);
+
+    if (normalizedRoleCode !== 'Q1' && adminNotificationModalOpen) {
+      setAdminNotificationModalOpen(false);
+    }
+  }, [activeRoleMenu, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminUserModalOpen, normalizedRoleCode, selectedRoleItemId]);
 
   useEffect(() => {
-    if (!accountMenuOpen && !roleMenuOpen && !activeRolePopupItem && !adminDriverModalOpen && !adminUserModalOpen) {
+    if (
+      !accountMenuOpen &&
+      !roleMenuOpen &&
+      !activeRolePopupItem &&
+      !adminDriverModalOpen &&
+      !adminNotificationModalOpen &&
+      !adminUserModalOpen
+    ) {
       return undefined;
     }
 
@@ -194,6 +209,7 @@ export default function Header({
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
+      setAdminNotificationModalOpen(false);
       setRoleMenuOpen(false);
       setAccountMenuOpen(false);
     };
@@ -205,7 +221,7 @@ export default function Header({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [accountMenuOpen, roleMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminUserModalOpen]);
+  }, [accountMenuOpen, roleMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminUserModalOpen]);
 
   const scrollToAnchor = (anchor) => {
     if (!anchor) {
@@ -228,6 +244,11 @@ export default function Header({
 
     if (item?.action === 'booking-form') {
       onBooking?.();
+      return;
+    }
+
+    if (item?.action === 'driver-signup') {
+      onDriverSignup?.();
       return;
     }
 
@@ -257,6 +278,7 @@ export default function Header({
     if (normalizedRoleCode === 'Q1' && item.id === 'admin-users') {
       setActiveRolePopupItem(null);
       setAdminDriverModalOpen(false);
+      setAdminNotificationModalOpen(false);
       setAdminUserModalOpen(true);
       return;
     }
@@ -264,7 +286,16 @@ export default function Header({
     if (normalizedRoleCode === 'Q1' && item.id === 'admin-drivers') {
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
+      setAdminNotificationModalOpen(false);
       setAdminDriverModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q1' && item.id === 'admin-notifications') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminNotificationModalOpen(true);
       return;
     }
 
@@ -272,12 +303,23 @@ export default function Header({
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
+      setAdminNotificationModalOpen(false);
       onBooking?.();
+      return;
+    }
+
+    if (item.action === 'driver-signup') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      onDriverSignup?.();
       return;
     }
 
     setAdminUserModalOpen(false);
     setAdminDriverModalOpen(false);
+    setAdminNotificationModalOpen(false);
     setActiveRolePopupItem(buildRoleFeaturePopup(item, normalizedRoleCode, activeRoleLabel));
   };
 
@@ -473,6 +515,11 @@ export default function Header({
       <AdminUserManagementModal open={adminUserModalOpen} onClose={() => setAdminUserModalOpen(false)} />
 
       <AdminDriverManagementModal open={adminDriverModalOpen} onClose={() => setAdminDriverModalOpen(false)} />
+
+      <AdminNotificationManagementModal
+        open={adminNotificationModalOpen}
+        onClose={() => setAdminNotificationModalOpen(false)}
+      />
     </header>
   );
 }

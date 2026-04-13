@@ -1,5 +1,6 @@
 import { closeIcon } from '../../assets/icons';
 import { adminDriverService } from '../../services/adminDriverService';
+import ConfirmDialog from '../ui/ConfirmDialog';
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -427,6 +428,40 @@ function buildDriverFormFromDriver(driver = null) {
   };
 }
 
+function buildDriverFormSnapshot(driverForm = null) {
+  if (!driverForm) {
+    return createEmptyDriverForm();
+  }
+
+  return {
+    fullName: String(driverForm.fullName ?? '').trim(),
+    phone: String(driverForm.phone ?? '').trim(),
+    email: String(driverForm.email ?? '').trim(),
+    address: String(driverForm.address ?? '').trim(),
+    cccd: String(driverForm.cccd ?? '').trim(),
+    avatar: String(driverForm.avatar ?? '').trim(),
+    licenseImage: String(driverForm.licenseImage ?? '').trim(),
+    identityFrontImage: String(driverForm.identityFrontImage ?? '').trim(),
+    identityBackImage: String(driverForm.identityBackImage ?? '').trim(),
+    licenseFrontImage: String(driverForm.licenseFrontImage ?? '').trim(),
+    licenseBackImage: String(driverForm.licenseBackImage ?? '').trim(),
+    backgroundImage: String(driverForm.backgroundImage ?? '').trim(),
+    vehicleName: String(driverForm.vehicleName ?? '').trim(),
+    vehicleImage: String(driverForm.vehicleImage ?? '').trim(),
+    vehicleFrontImage: String(driverForm.vehicleFrontImage ?? '').trim(),
+    vehicleSideImage: String(driverForm.vehicleSideImage ?? '').trim(),
+    vehicleRearImage: String(driverForm.vehicleRearImage ?? '').trim(),
+    licensePlate: String(driverForm.licensePlate ?? '').trim(),
+    bankName: String(driverForm.bankName ?? '').trim(),
+    bankAccountNumber: String(driverForm.bankAccountNumber ?? '').trim(),
+    bankAccountHolder: String(driverForm.bankAccountHolder ?? '').trim(),
+    emergencyRelationship: String(driverForm.emergencyRelationship ?? '').trim(),
+    emergencyFullName: String(driverForm.emergencyFullName ?? '').trim(),
+    emergencyPhone: String(driverForm.emergencyPhone ?? '').trim(),
+    emergencyAddress: String(driverForm.emergencyAddress ?? '').trim(),
+  };
+}
+
 function buildPayloadFromDriverForm(driverForm = {}) {
   const identityImages = {
     front: String(driverForm.identityFrontImage ?? '').trim(),
@@ -522,12 +557,14 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
   const [editorMode, setEditorMode] = useState('none');
   const [editingDriverId, setEditingDriverId] = useState('');
   const [driverForm, setDriverForm] = useState(createEmptyDriverForm);
+  const [driverInitialSnapshot, setDriverInitialSnapshot] = useState(createEmptyDriverForm);
   const [driverDocumentFiles, setDriverDocumentFiles] = useState(createEmptyDriverDocumentFiles);
   const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
   const [formError, setFormError] = useState('');
   const [requestError, setRequestError] = useState('');
   const [actionFeedback, setActionFeedback] = useState('');
   const [activeActionKey, setActiveActionKey] = useState('');
+  const [driverLockConfirm, setDriverLockConfirm] = useState(null);
 
   const editingDriver = useMemo(
     () => drivers.find((driver) => String(driver.id) === String(editingDriverId)) ?? null,
@@ -631,12 +668,14 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
     setEditorMode('none');
     setEditingDriverId('');
     setDriverForm(createEmptyDriverForm());
+    setDriverInitialSnapshot(createEmptyDriverForm());
     setDriverDocumentFiles(createEmptyDriverDocumentFiles());
     setBankDropdownOpen(false);
     setFormError('');
     setRequestError('');
     setActionFeedback('');
     setActiveActionKey('');
+    setDriverLockConfirm(null);
   }, [open]);
 
   useEffect(() => {
@@ -674,6 +713,7 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
     setEditorMode('none');
     setEditingDriverId('');
     setDriverForm(createEmptyDriverForm());
+    setDriverInitialSnapshot(createEmptyDriverForm());
     setDriverDocumentFiles(createEmptyDriverDocumentFiles());
     setBankDropdownOpen(false);
     setFormError('');
@@ -683,6 +723,7 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
     setEditorMode('create');
     setEditingDriverId('');
     setDriverForm(createEmptyDriverForm());
+    setDriverInitialSnapshot(createEmptyDriverForm());
     setDriverDocumentFiles(createEmptyDriverDocumentFiles());
     setBankDropdownOpen(false);
     setFormError('');
@@ -692,7 +733,10 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
   const openViewDriver = (driver) => {
     setEditorMode('view');
     setEditingDriverId(driver.id);
-    setDriverForm(buildDriverFormFromDriver(driver));
+    const nextDriverForm = buildDriverFormFromDriver(driver);
+
+    setDriverForm(nextDriverForm);
+    setDriverInitialSnapshot(buildDriverFormSnapshot(nextDriverForm));
     setDriverDocumentFiles(createEmptyDriverDocumentFiles());
     setBankDropdownOpen(false);
     setFormError('');
@@ -701,7 +745,10 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
   const openEditDriver = (driver) => {
     setEditorMode('edit');
     setEditingDriverId(driver.id);
-    setDriverForm(buildDriverFormFromDriver(driver));
+    const nextDriverForm = buildDriverFormFromDriver(driver);
+
+    setDriverForm(nextDriverForm);
+    setDriverInitialSnapshot(buildDriverFormSnapshot(nextDriverForm));
     setDriverDocumentFiles(createEmptyDriverDocumentFiles());
     setBankDropdownOpen(false);
     setFormError('');
@@ -768,20 +815,42 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
       return;
     }
 
-    if (driver.status === 'locked') {
+    const driverName = String(driver.name ?? 'tài xế này').trim() || 'tài xế này';
+    const isUnlockAction = driver.status === 'locked';
+
+    setDriverLockConfirm({
+      driverId: String(driver.id),
+      driverName,
+      action: isUnlockAction ? 'unlock' : 'lock',
+    });
+  };
+
+  const confirmDriverLockAction = async () => {
+    if (!driverLockConfirm) {
+      return;
+    }
+
+    const { driverId, action } = driverLockConfirm;
+    setDriverLockConfirm(null);
+
+    if (action === 'unlock') {
       await runDriverAction(
-        `unlock-${driver.id}`,
-        () => adminDriverService.unlockDriver(driver.id),
+        `unlock-${driverId}`,
+        () => adminDriverService.unlockDriver(driverId),
         'Đã mở lại chức năng Tài xế và khôi phục quyền Tài xế.',
       );
       return;
     }
 
     await runDriverAction(
-      `lock-${driver.id}`,
-      () => adminDriverService.lockDriver(driver.id),
+      `lock-${driverId}`,
+      () => adminDriverService.lockDriver(driverId),
       'Đã khóa chức năng Tài xế (không khóa tài khoản). Quyền đã chuyển về Khách hàng.',
     );
+  };
+
+  const cancelDriverLockConfirm = () => {
+    setDriverLockConfirm(null);
   };
 
   const handleDriverFormChange = (field, value) => {
@@ -899,6 +968,17 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
       return;
     }
 
+    if (editorMode === 'edit') {
+      const hasDriverDocumentChanges = Object.values(driverDocumentFiles).some((fileValue) => Boolean(fileValue));
+      const currentSnapshot = buildDriverFormSnapshot(driverForm);
+      const baselineSnapshot = driverInitialSnapshot ?? createEmptyDriverForm();
+
+      if (!hasDriverDocumentChanges && JSON.stringify(currentSnapshot) === JSON.stringify(baselineSnapshot)) {
+        setFormError('Thông tin chưa thay đổi. Hãy chỉnh sửa trước khi Lưu thay đổi.');
+        return;
+      }
+    }
+
     setActiveActionKey('save-driver');
 
     try {
@@ -950,15 +1030,37 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
         </button>
 
         <header className="admin-driver-modal__header">
-          <h3>Quản lý tài xế</h3>
-          <p>Điều phối hồ sơ tài xế và trạng thái hoạt động</p>
+          <div className="admin-driver-modal__header-copy">
+            <p className="admin-driver-modal__eyebrow">ADMIN / TÀI XẾ</p>
+            <h3>Quản lý tài xế</h3>
+            <p>Điều phối hồ sơ tài xế và trạng thái hoạt động</p>
+          </div>
+
+          <div className="admin-driver-modal__header-stats" aria-label="Thống kê tài xế">
+            <div className="admin-driver-modal__stat-card">
+              <strong>{filterCounts.all}</strong>
+              <span>Tổng tài xế</span>
+            </div>
+
+            <div className="admin-driver-modal__stat-card">
+              <strong>{filterCounts.active}</strong>
+              <span>Hoạt động</span>
+            </div>
+
+            <div className="admin-driver-modal__stat-card">
+              <strong>{filterCounts.locked}</strong>
+              <span>Bị khóa</span>
+            </div>
+
+            <div className="admin-driver-modal__stat-card">
+              <strong>{filterCounts.pending}</strong>
+              <span>Chờ duyệt</span>
+            </div>
+          </div>
         </header>
 
         <div className="admin-driver-modal__toolbar">
           <label className="admin-driver-modal__search" htmlFor="admin-driver-search-input">
-            <span className="admin-driver-modal__search-icon" aria-hidden="true">
-              S
-            </span>
             <span className="admin-driver-modal__sr-only">Tìm kiếm tài xế</span>
             <input
               id="admin-driver-search-input"
@@ -1478,6 +1580,22 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
           </section>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={Boolean(driverLockConfirm)}
+        title={driverLockConfirm?.action === 'unlock' ? 'Xác nhận mở chức năng Tài xế' : 'Xác nhận khóa chức năng Tài xế'}
+        description={
+          driverLockConfirm?.action === 'unlock'
+            ? `Bạn có chắc chắn muốn mở chức năng Tài xế cho ${driverLockConfirm?.driverName ?? 'tài xế này'} không?`
+            : `Bạn có chắc chắn muốn khóa chức năng Tài xế cho ${driverLockConfirm?.driverName ?? 'tài xế này'} không?`
+        }
+        confirmLabel={driverLockConfirm?.action === 'unlock' ? 'Mở' : 'Khóa'}
+        cancelLabel="Hủy"
+        confirmTone="danger"
+        onCancel={cancelDriverLockConfirm}
+        onConfirm={confirmDriverLockAction}
+        ariaLabel={driverLockConfirm?.action === 'unlock' ? 'Xác nhận mở chức năng Tài xế' : 'Xác nhận khóa chức năng Tài xế'}
+      />
     </div>,
     document.body,
   );
