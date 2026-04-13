@@ -350,7 +350,113 @@ VALUES
 );
 GO
 
-SELECT * FROM TaiKhoan;
-SELECT * FROM NganHang;
-SELECT * FROM TaiXe;
+-- 7) Bảng Thông Báo
+IF OBJECT_ID(N'dbo.ThongBao', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ThongBao
+    (
+        MaTB                  INT            IDENTITY(1,1) NOT NULL,
+        TieuDe                NVARCHAR(200)  NOT NULL,
+        NoiDung               NVARCHAR(MAX)  NOT NULL,
+        NguoiNhan             VARCHAR(20)    NOT NULL CONSTRAINT DF_ThongBao_NguoiNhan DEFAULT 'customer',
+        TrangThai             VARCHAR(20)    NOT NULL CONSTRAINT DF_ThongBao_TrangThai DEFAULT 'scheduled',
+        ThoiGianGuiDuKien     DATETIME2(0)   NOT NULL,
+        NgayTao               DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayTao DEFAULT SYSDATETIME(),
+        NgayCapNhat           DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayCapNhat DEFAULT SYSDATETIME(),
+
+        CONSTRAINT PK_ThongBao PRIMARY KEY (MaTB),
+        CONSTRAINT CK_ThongBao_NguoiNhan CHECK (NguoiNhan IN ('all', 'customer', 'driver')),
+        CONSTRAINT CK_ThongBao_TrangThai CHECK (TrangThai IN ('scheduled', 'sent'))
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.ThongBao)
+BEGIN
+    INSERT INTO dbo.ThongBao
+    (
+        TieuDe,
+        NoiDung,
+        NguoiNhan,
+        TrangThai,
+        ThoiGianGuiDuKien,
+        NgayTao,
+        NgayCapNhat
+    )
+    VALUES
+    (
+        N'Giảm giá 20%',
+        N'Áp dụng giảm giá 20% cho khách hàng sử dụng RiBike trong khung giờ cao điểm.',
+        'customer',
+        'sent',
+        '2026-04-02T09:00:00',
+        '2026-04-01T08:00:00',
+        '2026-04-01T08:00:00'
+    ),
+    (
+        N'Sự kiện lễ hội',
+        N'Thông báo sự kiện lễ hội và các ưu đãi dành cho khách hàng trong tuần.',
+        'customer',
+        'scheduled',
+        '2026-04-12T18:00:00',
+        '2026-04-02T10:00:00',
+        '2026-04-02T10:00:00'
+    ),
+    (
+        N'Chúc mừng sinh nhật',
+        N'Tặng lời chúc và mã ưu đãi sinh nhật riêng cho khách hàng thân thiết.',
+        'customer',
+        'sent',
+        '2026-04-03T09:30:00',
+        '2026-04-03T09:00:00',
+        '2026-04-03T09:00:00'
+    ),
+    (
+        N'Khuyến mãi 50%',
+        N'Chương trình khuyến mãi 50% cho các chuyến xe chọn lọc trong cuối tuần.',
+        'customer',
+        'sent',
+        '2026-04-06T12:00:00',
+        '2026-04-04T11:00:00',
+        '2026-04-04T11:00:00'
+    ),
+    (
+        N'Thông báo bảo trì',
+        N'Lịch bảo trì hệ thống và hướng dẫn cập nhật ứng dụng dành cho tài xế.',
+        'driver',
+        'sent',
+        '2026-04-05T22:00:00',
+        '2026-04-05T07:00:00',
+        '2026-04-05T07:00:00'
+    ),
+    (
+        N'Flash Sale',
+        N'Thông báo flash sale theo khung giờ cho khách hàng hoạt động trong khu vực trung tâm.',
+        'customer',
+        'scheduled',
+        '2026-04-13T20:00:00',
+        '2026-04-06T09:00:00',
+        '2026-04-06T09:00:00'
+    ),
+    (
+        N'Tăng voucher',
+        N'Cộng thêm voucher cho khách hàng hoàn tất đủ số chuyến trong tháng.',
+        'customer',
+        'scheduled',
+        '2026-04-14T09:00:00',
+        '2026-04-07T08:00:00',
+        '2026-04-07T08:00:00'
+    ),
+    (
+        N'Event cuối tuần',
+        N'Tổng hợp sự kiện cuối tuần dành cho khách hàng và tài xế đang hoạt động.',
+        'all',
+        'scheduled',
+        '2026-04-15T18:00:00',
+        '2026-04-08T09:00:00',
+        '2026-04-08T09:00:00'
+    );
+END
+GO
+
 

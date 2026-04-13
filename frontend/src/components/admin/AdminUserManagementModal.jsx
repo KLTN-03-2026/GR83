@@ -1,4 +1,5 @@
 import { closeIcon } from '../../assets/icons';
+import ConfirmDialog from '../ui/ConfirmDialog';
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DatePicker, { registerLocale } from 'react-datepicker';
@@ -157,6 +158,26 @@ function buildUserFormFromUser(user = null) {
   };
 }
 
+function buildUserFormSnapshot(userForm = null) {
+  if (!userForm) {
+    return createEmptyUserForm();
+  }
+
+  return {
+    id: String(userForm.id ?? '').trim(),
+    username: sanitizeUsername(userForm.username),
+    fullName: String(userForm.fullName ?? '').trim(),
+    email: String(userForm.email ?? '').trim(),
+    phone: sanitizePhone(userForm.phone),
+    address: String(userForm.address ?? '').trim(),
+    dateOfBirth: String(userForm.dateOfBirth ?? '').trim(),
+    gender: String(userForm.gender ?? '').trim(),
+    avatar: String(userForm.avatar ?? '').trim(),
+    roleCode: normalizeRoleCode(userForm.roleCode ?? 'Q2'),
+    status: normalizeUserStatus(userForm.status ?? 'active'),
+  };
+}
+
 function validateUserForm(userForm = {}, { requirePhone = true, requireUsername = false } = {}) {
   const fullName = String(userForm.fullName ?? '').trim();
   const email = String(userForm.email ?? '').trim();
@@ -240,11 +261,13 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
   const [editorMode, setEditorMode] = useState('none');
   const [editingUserId, setEditingUserId] = useState('');
   const [userForm, setUserForm] = useState(createEmptyUserForm);
+  const [userInitialSnapshot, setUserInitialSnapshot] = useState(createEmptyUserForm);
   const [formError, setFormError] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [editorLoading, setEditorLoading] = useState(false);
   const [actionLoadingUserId, setActionLoadingUserId] = useState('');
   const [deleteTargetUser, setDeleteTargetUser] = useState(null);
+  const [userLockConfirm, setUserLockConfirm] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('');
   const [birthDatePickerOpen, setBirthDatePickerOpen] = useState(false);
@@ -381,11 +404,13 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
     setEditorMode('none');
     setEditingUserId('');
     setUserForm(createEmptyUserForm());
+    setUserInitialSnapshot(createEmptyUserForm());
     setFormError('');
     setFeedbackMessage('');
     setEditorLoading(false);
     setActionLoadingUserId('');
     setDeleteTargetUser(null);
+    setUserLockConfirm(null);
     setAvatarFile(null);
     setAvatarPreviewUrl('');
     setBirthDatePickerOpen(false);
@@ -413,7 +438,10 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
 
         const accountRecord = response?.account ?? response?.user ?? response?.profile ?? response;
         const normalizedUser = normalizeApiUser(accountRecord);
-        setUserForm(buildUserFormFromUser(normalizedUser));
+        const nextUserForm = buildUserFormFromUser(normalizedUser);
+
+        setUserForm(nextUserForm);
+        setUserInitialSnapshot(buildUserFormSnapshot(nextUserForm));
       })
       .catch((error) => {
         if (!isActive || error?.name === 'AbortError') {
@@ -482,6 +510,7 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
     setEditorMode('none');
     setEditingUserId('');
     setUserForm(createEmptyUserForm());
+    setUserInitialSnapshot(createEmptyUserForm());
     setFormError('');
     setEditorLoading(false);
     setActionLoadingUserId('');
@@ -494,9 +523,11 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
     setEditorMode('create');
     setEditingUserId('');
     setUserForm(createEmptyUserForm());
+    setUserInitialSnapshot(createEmptyUserForm());
     setFormError('');
     setFeedbackMessage('');
     setDeleteTargetUser(null);
+    setUserLockConfirm(null);
     setBirthDatePickerOpen(false);
     clearAvatarSelection();
   };
@@ -504,10 +535,14 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
   const openViewUser = (user) => {
     setEditorMode('view');
     setEditingUserId(user.id);
-    setUserForm(buildUserFormFromUser(user));
+    const nextUserForm = buildUserFormFromUser(user);
+
+    setUserForm(nextUserForm);
+    setUserInitialSnapshot(buildUserFormSnapshot(nextUserForm));
     setFormError('');
     setFeedbackMessage('');
     setDeleteTargetUser(null);
+    setUserLockConfirm(null);
     setBirthDatePickerOpen(false);
     clearAvatarSelection();
   };
@@ -515,10 +550,14 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
   const openEditUser = (user) => {
     setEditorMode('edit');
     setEditingUserId(user.id);
-    setUserForm(buildUserFormFromUser(user));
+    const nextUserForm = buildUserFormFromUser(user);
+
+    setUserForm(nextUserForm);
+    setUserInitialSnapshot(buildUserFormSnapshot(nextUserForm));
     setFormError('');
     setFeedbackMessage('');
     setDeleteTargetUser(null);
+    setUserLockConfirm(null);
     setBirthDatePickerOpen(false);
     clearAvatarSelection();
   };
@@ -562,6 +601,16 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
     if (validationError) {
       setFormError(validationError);
       return;
+    }
+
+    if (editorMode === 'edit' && !avatarFile) {
+      const currentSnapshot = buildUserFormSnapshot(userForm);
+      const baselineSnapshot = userInitialSnapshot ?? createEmptyUserForm();
+
+      if (JSON.stringify(currentSnapshot) === JSON.stringify(baselineSnapshot)) {
+        setFormError('Thông tin chưa thay đổi. Hãy chỉnh sửa trước khi Lưu thay đổi.');
+        return;
+      }
     }
 
     const baseUserRecord = {
@@ -694,17 +743,34 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
     }
 
     const isLocked = user.status === 'locked';
-    setActionLoadingUserId(user.id);
+    const userLabel = String(user.fullName ?? user.username ?? 'tài khoản này').trim() || 'tài khoản này';
+
+    setUserLockConfirm({
+      userId: String(user.id),
+      userLabel,
+      action: isLocked ? 'unlock' : 'lock',
+    });
+  };
+
+  const confirmUserLockAction = async () => {
+    if (!userLockConfirm) {
+      return;
+    }
+
+    const { userId, userLabel, action } = userLockConfirm;
+    setUserLockConfirm(null);
+
+    setActionLoadingUserId(userId);
 
     try {
-      const response = isLocked
-        ? await adminUserService.unlockUser(user.id)
-        : await adminUserService.lockUser(user.id);
+      const response = action === 'unlock'
+        ? await adminUserService.unlockUser(userId)
+        : await adminUserService.lockUser(userId);
       const updatedAccount = normalizeApiUser(response?.account ?? response?.user ?? response?.profile ?? response);
 
       setUsers((current) =>
         current.map((entry) =>
-          String(entry.id) === String(user.id)
+          String(entry.id) === String(userId)
             ? {
                 ...entry,
                 ...updatedAccount,
@@ -713,13 +779,17 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
         ),
       );
 
-      setFeedbackMessage(response?.message ?? (isLocked ? `Đã mở khóa tài khoản ${user.fullName}.` : `Đã khóa tài khoản ${user.fullName}.`));
+      setFeedbackMessage(response?.message ?? (action === 'unlock' ? `Đã mở khóa tài khoản ${userLabel}.` : `Đã khóa tài khoản ${userLabel}.`));
       refreshUsers();
     } catch (error) {
       setFeedbackMessage(error?.message ?? 'Không thể cập nhật trạng thái tài khoản lúc này.');
     } finally {
       setActionLoadingUserId('');
     }
+  };
+
+  const cancelUserLockConfirm = () => {
+    setUserLockConfirm(null);
   };
 
   const editorTitle =
@@ -1248,6 +1318,22 @@ export default function AdminUserManagementModal({ open = false, onClose }) {
           </section>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={Boolean(userLockConfirm)}
+        title={userLockConfirm?.action === 'unlock' ? 'Xác nhận mở khóa tài khoản' : 'Xác nhận khóa tài khoản'}
+        description={
+          userLockConfirm?.action === 'unlock'
+            ? `Bạn có chắc chắn muốn mở khóa tài khoản ${userLockConfirm?.userLabel ?? 'này'} không?`
+            : `Bạn có chắc chắn muốn khóa tài khoản ${userLockConfirm?.userLabel ?? 'này'} không?`
+        }
+        confirmLabel={userLockConfirm?.action === 'unlock' ? 'Mở khóa' : 'Khóa tài khoản'}
+        cancelLabel="Hủy"
+        confirmTone="danger"
+        onCancel={cancelUserLockConfirm}
+        onConfirm={confirmUserLockAction}
+        ariaLabel={userLockConfirm?.action === 'unlock' ? 'Xác nhận mở khóa tài khoản' : 'Xác nhận khóa tài khoản'}
+      />
     </div>,
     document.body,
   );

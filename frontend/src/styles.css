@@ -548,6 +548,495 @@ svg {
   filter: brightness(0) invert(1);
 }
 
+.booking-tracking-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 195;
+  display: grid;
+  place-items: center;
+  padding: 0.9rem;
+}
+
+.booking-tracking-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 15, 20, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.booking-tracking-modal__window {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, calc(100vw - 1.4rem));
+  max-height: calc(100vh - 1.4rem);
+  overflow: auto;
+  border-radius: 1.35rem;
+  border: 1px solid rgba(16, 24, 32, 0.14);
+  background: linear-gradient(180deg, #f7faf7 0%, #eef2f5 100%);
+  box-shadow: 0 28px 70px rgba(3, 10, 16, 0.38);
+  padding: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.booking-tracking-modal__close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(17, 24, 31, 0.82);
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+
+.booking-tracking-modal__close-icon {
+  width: 0.82rem;
+  height: 0.82rem;
+  filter: brightness(0) invert(1);
+}
+
+.booking-tracking-modal__header {
+  border-radius: 1rem;
+  border: 1px solid rgba(16, 24, 32, 0.12);
+  background: linear-gradient(90deg, #c1f169 0%, #ace95f 100%);
+  padding: 0.95rem 1.05rem 1rem;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.booking-tracking-modal__eyebrow {
+  margin: 0;
+  color: #294049;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.booking-tracking-modal__header h3 {
+  margin: 0;
+  color: #101820;
+  font-size: clamp(1.5rem, 2.3vw, 2.2rem);
+  line-height: 1.08;
+}
+
+.booking-tracking-modal__description {
+  margin: 0;
+  color: #33414b;
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.booking-tracking-modal__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.booking-tracking-modal__left,
+.booking-tracking-modal__right {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.booking-tracking-modal__route-card,
+.booking-tracking-modal__trip-card,
+.booking-tracking-modal__status-card {
+  border: 1px solid rgba(16, 24, 32, 0.12);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 14px 30px rgba(18, 28, 36, 0.08);
+}
+
+.booking-tracking-modal__route-card {
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.booking-tracking-modal__route-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.booking-tracking-modal__route-icon {
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.booking-tracking-modal__route-icon--pickup {
+  background: rgba(66, 133, 244, 0.12);
+}
+
+.booking-tracking-modal__route-icon--destination {
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.booking-tracking-modal__route-icon-img {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.booking-tracking-modal__route-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.booking-tracking-modal__route-copy span {
+  color: #62717e;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.booking-tracking-modal__route-copy strong {
+  color: #121b24;
+  font-size: clamp(1.15rem, 1.45vw, 1.45rem);
+  line-height: 1.28;
+}
+
+.booking-tracking-modal__route-divider {
+  margin-left: 1.2rem;
+  width: calc(100% - 1.2rem);
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(110, 120, 130, 0.15) 0%, rgba(110, 120, 130, 0.32) 50%, rgba(110, 120, 130, 0.15) 100%);
+}
+
+.booking-tracking-modal__trip-card {
+  padding: 1rem;
+  display: grid;
+  gap: 0.95rem;
+}
+
+.booking-tracking-modal__trip-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.booking-tracking-modal__trip-kicker {
+  display: block;
+  margin-bottom: 0.18rem;
+  color: #4c5a66;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.booking-tracking-modal__trip-head h4 {
+  margin: 0;
+  color: #101820;
+  font-size: clamp(1.2rem, 1.75vw, 1.7rem);
+  line-height: 1.16;
+}
+
+.booking-tracking-modal__booking-code {
+  min-width: 9.5rem;
+  text-align: right;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.booking-tracking-modal__booking-code span {
+  color: #62717e;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.booking-tracking-modal__booking-code strong {
+  color: #111827;
+  font-size: clamp(1.1rem, 1.6vw, 1.45rem);
+  line-height: 1.15;
+}
+
+.booking-tracking-modal__details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.booking-tracking-modal__detail-item {
+  border-radius: 0.85rem;
+  border: 1px solid rgba(16, 24, 32, 0.1);
+  background: #f8fbfd;
+  padding: 0.74rem 0.8rem;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.booking-tracking-modal__detail-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  color: #5b6672;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.booking-tracking-modal__detail-icon {
+  width: 0.92rem;
+  height: 0.92rem;
+  opacity: 0.76;
+}
+
+.booking-tracking-modal__detail-item strong {
+  color: #101820;
+  font-size: 1rem;
+  line-height: 1.22;
+}
+
+.booking-tracking-modal__map-shell {
+  position: relative;
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(16, 24, 32, 0.12);
+  background: #dbe5eb;
+  min-height: 21rem;
+}
+
+.booking-tracking-modal__map-shell .route-preview-map {
+  height: 100%;
+  border-radius: 1rem;
+}
+
+.booking-tracking-modal__map-shell .route-preview-map__canvas {
+  height: 100%;
+  min-height: 21rem;
+}
+
+.booking-tracking-modal__map-shell .leaflet-container {
+  background: #dbe5eb;
+}
+
+.booking-tracking-modal__map-badge {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 5;
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f1720;
+  font-size: 0.78rem;
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(18, 28, 36, 0.12);
+}
+
+.booking-tracking-modal__status-card {
+  padding: 0.95rem 1rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.booking-tracking-modal__status-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.booking-tracking-modal__status-dot {
+  width: 0.86rem;
+  height: 0.86rem;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.38);
+  animation: bookingTrackingPulse 1.8s infinite;
+}
+
+.booking-tracking-modal__status-head strong {
+  color: #101820;
+  font-size: 1.02rem;
+  line-height: 1.2;
+}
+
+.booking-tracking-modal__status-card p {
+  margin: 0;
+  color: #54606c;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.booking-tracking-modal__progress {
+  width: 100%;
+  height: 0.7rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(110, 120, 130, 0.14);
+}
+
+.booking-tracking-modal__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #18a5b7 0%, #64d85a 100%);
+  transition: width 0.5s ease;
+}
+
+.booking-tracking-modal__timeline {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.booking-tracking-modal__timeline-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: start;
+  padding: 0.65rem 0.7rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(16, 24, 32, 0.08);
+  background: #fbfdff;
+}
+
+.booking-tracking-modal__timeline-item.is-active {
+  border-color: rgba(48, 160, 85, 0.34);
+  background: rgba(106, 216, 96, 0.12);
+}
+
+.booking-tracking-modal__timeline-item.is-complete {
+  background: rgba(18, 162, 184, 0.08);
+}
+
+.booking-tracking-modal__timeline-index {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 162, 184, 0.16);
+  color: #0b6c79;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.booking-tracking-modal__timeline-item.is-active .booking-tracking-modal__timeline-index {
+  background: #12a2b8;
+  color: #fff;
+}
+
+.booking-tracking-modal__timeline-item.is-complete .booking-tracking-modal__timeline-index {
+  background: #64d85a;
+  color: #0d1b12;
+}
+
+.booking-tracking-modal__timeline-item strong {
+  display: block;
+  color: #101820;
+  font-size: 0.92rem;
+  line-height: 1.22;
+}
+
+.booking-tracking-modal__timeline-item p {
+  margin: 0.18rem 0 0;
+  color: #5e6b77;
+  font-size: 0.82rem;
+  line-height: 1.42;
+}
+
+.booking-tracking-modal__footer {
+  display: grid;
+}
+
+.booking-tracking-modal__cancel {
+  min-height: 4rem;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #df2f2d 0%, #cf2120 100%);
+  color: #fff;
+  font-size: clamp(1.2rem, 1.9vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 16px 34px rgba(207, 33, 32, 0.28);
+}
+
+@keyframes bookingTrackingPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.34);
+  }
+
+  70% {
+    box-shadow: 0 0 0 0.6rem rgba(34, 197, 94, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+@media (max-width: 1120px) {
+  .booking-tracking-modal__body {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-tracking-modal__map-shell {
+    min-height: 18rem;
+  }
+
+  .booking-tracking-modal__map-shell .route-preview-map__canvas {
+    min-height: 18rem;
+  }
+}
+
+@media (max-width: 860px) {
+  .booking-tracking-modal {
+    padding: 0.55rem;
+  }
+
+  .booking-tracking-modal__window {
+    width: min(100vw - 0.8rem, 1180px);
+    padding: 0.85rem;
+  }
+
+  .booking-tracking-modal__details {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-tracking-modal__trip-head {
+    flex-direction: column;
+  }
+
+  .booking-tracking-modal__booking-code {
+    min-width: 0;
+    text-align: left;
+  }
+}
+
+@media (max-width: 560px) {
+  .booking-tracking-modal__header,
+  .booking-tracking-modal__route-card,
+  .booking-tracking-modal__trip-card,
+  .booking-tracking-modal__status-card {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+
+  .booking-tracking-modal__map-badge {
+    font-size: 0.72rem;
+  }
+
+  .booking-tracking-modal__cancel {
+    min-height: 3.5rem;
+    font-size: 1.05rem;
+  }
+}
+
 .site-header {
   position: sticky;
   top: 0;
@@ -888,8 +1377,8 @@ svg {
   overflow: auto;
   border: 1px solid rgba(16, 24, 32, 0.18);
   border-radius: 1rem;
-  background: linear-gradient(180deg, #f1f3f5 0%, #e8ecef 100%);
-  box-shadow: 0 26px 58px rgba(6, 14, 20, 0.4);
+  background: linear-gradient(180deg, #f7f9fb 0%, #eef3f6 100%);
+  box-shadow: 0 24px 52px rgba(6, 14, 20, 0.3);
   padding: 0.95rem 1rem 1rem;
   display: grid;
   gap: 0.85rem;
@@ -914,53 +1403,100 @@ svg {
 }
 
 .admin-driver-modal__header {
-  border-radius: 0.85rem;
+  border-radius: 0.95rem;
   border: 1px solid rgba(16, 24, 32, 0.1);
-  background: linear-gradient(90deg, #7fce61 0%, #74c85b 100%);
-  color: #0d171f;
-  padding: 0.88rem 1rem;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.16), transparent 30%),
+    linear-gradient(90deg, #1c9fb0 0%, #31b58f 46%, #85d95c 100%);
+  color: #fff;
+  padding: 1rem 1.1rem 1.05rem;
   display: grid;
-  gap: 0.2rem;
+  grid-template-columns: minmax(0, 1.25fr) minmax(18rem, 0.95fr);
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.admin-driver-modal__header-copy {
+  display: grid;
+  gap: 0.3rem;
+  align-content: start;
+}
+
+.admin-driver-modal__eyebrow {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .admin-driver-modal__header h3 {
   margin: 0;
   text-transform: uppercase;
-  font-size: clamp(1.65rem, 2.4vw, 2.2rem);
-  line-height: 1.05;
+  font-size: clamp(1.45rem, 2.1vw, 1.95rem);
+  line-height: 1.06;
+  letter-spacing: 0.08em;
 }
 
 .admin-driver-modal__header p {
   margin: 0;
-  color: #20303e;
+  max-width: 42rem;
+  color: rgba(255, 255, 255, 0.92);
   font-size: 0.92rem;
-  font-weight: 600;
+  line-height: 1.52;
+}
+
+.admin-driver-modal__header-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  align-content: center;
+}
+
+.admin-driver-modal__stat-card {
+  min-height: 4.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0.88rem;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  padding: 0.72rem 0.76rem;
+  display: grid;
+  align-content: start;
+  gap: 0.24rem;
+}
+
+.admin-driver-modal__stat-card strong {
+  color: #fff;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.admin-driver-modal__stat-card span {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .admin-driver-modal__toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.72rem;
+  align-items: end;
+  gap: 0.66rem;
 }
 
 .admin-driver-modal__search {
   position: relative;
   width: 100%;
-  border-radius: 0.85rem;
-  border: 1px solid rgba(16, 24, 32, 0.2);
-  background: rgba(255, 255, 255, 0.84);
+  border-radius: 0.82rem;
+  border: 1px solid rgba(16, 24, 32, 0.14);
+  background: #fff;
   display: inline-flex;
   align-items: center;
-  gap: 0.52rem;
-  padding: 0.6rem 0.72rem;
-}
-
-.admin-driver-modal__search-icon {
-  flex: 0 0 auto;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #45586b;
+  min-height: 3rem;
+  padding: 0 0.9rem;
+  box-shadow: inset 0 1px 2px rgba(15, 24, 32, 0.04);
 }
 
 .admin-driver-modal__sr-only {
@@ -981,7 +1517,7 @@ svg {
   outline: none;
   background: transparent;
   color: #1b2733;
-  font-size: 1.42rem;
+  font-size: 0.95rem;
   line-height: 1.1;
 }
 
@@ -991,10 +1527,11 @@ svg {
 
 .admin-driver-modal__add-button {
   min-height: 3rem;
-  padding: 0.45rem 1.7rem;
-  border-radius: 0.9rem;
-  color: #09212a;
-  font-size: clamp(1.22rem, 2vw, 1.68rem);
+  padding: 0 1.15rem;
+  border-radius: 0.82rem;
+  border: 1px solid rgba(15, 24, 32, 0.08);
+  color: #10202a;
+  font-size: 0.95rem;
   font-weight: 800;
   background: linear-gradient(92deg, #18a5b7 0%, #4eca73 56%, #7edb5f 100%);
   box-shadow: 0 10px 20px rgba(10, 90, 98, 0.25);
@@ -1003,21 +1540,22 @@ svg {
 .admin-driver-modal__filters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.7rem;
+  gap: 0.58rem;
 }
 
 .admin-driver-modal__filter {
   min-height: 2.95rem;
   border-radius: 0.82rem;
-  border: 1px solid rgba(16, 24, 32, 0.16);
+  border: 1px solid rgba(16, 24, 32, 0.12);
   padding: 0.45rem 0.72rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.42rem;
   color: #0e1821;
-  font-size: clamp(1.18rem, 1.85vw, 1.55rem);
+  font-size: 0.96rem;
   font-weight: 700;
+  box-shadow: inset 0 1px 2px rgba(15, 24, 32, 0.04);
 }
 
 .admin-driver-modal__filter strong {
@@ -1041,7 +1579,7 @@ svg {
 }
 
 .admin-driver-modal__filter.is-active {
-  box-shadow: 0 0 0 3px rgba(64, 94, 218, 0.2);
+  box-shadow: 0 0 0 3px rgba(64, 94, 218, 0.16);
 }
 
 .admin-driver-modal__loading,
@@ -1073,10 +1611,10 @@ svg {
 }
 
 .admin-driver-modal__table-wrap {
-  border: 1px solid rgba(16, 24, 32, 0.14);
-  border-radius: 0.88rem;
+  border: 1px solid rgba(16, 24, 32, 0.12);
+  border-radius: 0.9rem;
   overflow: auto;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .admin-driver-modal__table {
@@ -1086,20 +1624,20 @@ svg {
 }
 
 .admin-driver-modal__table thead tr {
-  background: #4a42c4;
+  background: linear-gradient(90deg, #4f46c7 0%, #5b54cf 100%);
 }
 
 .admin-driver-modal__table th {
   padding: 0.72rem 0.85rem;
   color: #eef2ff;
-  font-size: clamp(1.08rem, 1.7vw, 1.48rem);
+  font-size: 0.98rem;
   text-align: left;
 }
 
 .admin-driver-modal__table td {
   padding: 0.68rem 0.85rem;
   color: #151f2a;
-  font-size: clamp(1.04rem, 1.55vw, 1.34rem);
+  font-size: 0.96rem;
   border-bottom: 1px solid rgba(18, 26, 34, 0.1);
   vertical-align: middle;
 }
@@ -1135,19 +1673,24 @@ svg {
 .admin-driver-modal__row-actions {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
+  gap: 0.42rem;
+  flex-wrap: nowrap;
+  width: 100%;
 }
 
 .admin-driver-modal__action {
-  min-width: 7.1rem;
-  min-height: 2.45rem;
-  border-radius: 0.72rem;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  min-height: 2rem;
+  border-radius: 0.58rem;
   border: 1px solid rgba(16, 24, 32, 0.12);
-  padding: 0.3rem 0.74rem;
+  padding: 0.22rem 0.62rem;
   color: #111b25;
-  font-size: 1.84rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .admin-driver-modal__action--view {
@@ -1205,10 +1748,10 @@ svg {
   max-height: calc(100vh - 2rem);
   overflow: auto;
   border: 1px solid rgba(16, 24, 32, 0.14);
-  border-radius: 0.9rem;
-  background: rgba(250, 252, 253, 0.96);
-  box-shadow: 0 24px 48px rgba(7, 16, 24, 0.42);
-  padding: 0.86rem;
+  border-radius: 0.95rem;
+  background: rgba(250, 252, 253, 0.98);
+  box-shadow: 0 24px 48px rgba(7, 16, 24, 0.36);
+  padding: 0.9rem;
   display: grid;
   gap: 0.74rem;
 }
@@ -1223,7 +1766,7 @@ svg {
 .admin-driver-modal__editor-head h4 {
   margin: 0;
   color: #1a2633;
-  font-size: 1.02rem;
+  font-size: 0.98rem;
 }
 
 .admin-driver-modal__editor-close {
@@ -1284,7 +1827,7 @@ svg {
   background: rgba(255, 255, 255, 0.95);
   padding: 0.52rem 0.7rem;
   color: #172430;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   outline: none;
 }
 
@@ -1449,8 +1992,8 @@ svg {
 .admin-driver-modal__editor-button {
   min-height: 2.54rem;
   padding: 0.38rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.9rem;
+  border-radius: 0.58rem;
+  font-size: 0.86rem;
   font-weight: 700;
 }
 
@@ -1469,12 +2012,684 @@ svg {
 .admin-driver-modal__editor-hint {
   margin: 0;
   padding: 0.55rem 0.85rem;
-  border-radius: 999px;
+  border-radius: 0.75rem;
   border: 1px solid rgba(194, 133, 16, 0.35);
   background: rgba(255, 239, 205, 0.9);
   color: #7e4f00;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.admin-notification-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 189;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.admin-notification-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 14, 20, 0.54);
+  backdrop-filter: blur(3px);
+}
+
+.admin-notification-modal__window {
+  position: relative;
+  z-index: 1;
+  width: min(88rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid rgba(16, 24, 32, 0.14);
+  border-radius: 1.1rem;
+  background: linear-gradient(180deg, #fbfcfd 0%, #eef2f5 100%);
+  box-shadow: 0 28px 62px rgba(6, 14, 20, 0.38);
+  padding: 0.95rem 1rem 1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.admin-notification-modal__close {
+  position: absolute;
+  top: 0.58rem;
+  right: 0.58rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(18, 27, 35, 0.8);
+  display: grid;
+  place-items: center;
+}
+
+.admin-notification-modal__close-icon {
+  width: 0.82rem;
+  height: 0.82rem;
+  filter: brightness(0) invert(1);
+}
+
+.admin-notification-modal__header {
+  border-radius: 1rem;
+  border: 1px solid rgba(16, 24, 32, 0.1);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.2), transparent 32%),
+    linear-gradient(90deg, #1c9fb0 0%, #31b58f 46%, #85d95c 100%);
+  color: #fff;
+  padding: 1rem 1.1rem 1.05rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 0.85fr);
+  gap: 0.85rem;
+  align-items: center;
+  justify-items: stretch;
+  text-align: left;
+}
+
+.admin-notification-modal__header-copy {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 0.38rem;
+}
+
+.admin-notification-modal__eyebrow {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.admin-notification-modal__header h3 {
+  margin: 0;
+  color: inherit;
+  font-size: clamp(1.4rem, 2vw, 1.95rem);
+  line-height: 1.06;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-notification-modal__header p {
+  margin: 0;
+  max-width: 42rem;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.92rem;
+  line-height: 1.52;
+}
+
+.admin-notification-modal__header-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  align-content: center;
+}
+
+.admin-notification-modal__stat-card {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0.88rem;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  padding: 0.72rem 0.76rem;
+  min-height: 4.55rem;
+  display: grid;
+  align-content: start;
+  gap: 0.24rem;
+}
+
+.admin-notification-modal__stat-card strong {
+  color: #fff;
+  font-size: 1.22rem;
+  line-height: 1;
+}
+
+.admin-notification-modal__stat-card span {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.admin-notification-modal__toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(8.5rem, 0.65fr) minmax(8.5rem, 0.65fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.admin-notification-modal__field {
+  display: grid;
+  gap: 0.34rem;
+}
+
+.admin-notification-modal__field--search {
+  min-width: 0;
+}
+
+.admin-notification-modal__field input,
+.admin-notification-modal__field select {
+  min-height: 3rem;
+  border: 1px solid rgba(16, 24, 32, 0.14);
+  border-radius: 0.82rem;
+  background: #fff;
+  padding: 0 0.9rem;
+  color: #17212a;
+  font-size: 0.95rem;
+  box-shadow: inset 0 1px 2px rgba(15, 24, 32, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.admin-notification-modal__field input::placeholder {
+  color: #7c8894;
+}
+
+.admin-notification-modal__field input:focus,
+.admin-notification-modal__field select:focus {
+  outline: none;
+  border-color: rgba(29, 165, 167, 0.54);
+  box-shadow: 0 0 0 3px rgba(29, 165, 167, 0.14);
+}
+
+.admin-notification-modal__add-button {
+  min-height: 3rem;
+  padding: 0 1rem;
+  border-radius: 0.82rem;
+  border: 1px solid rgba(15, 24, 32, 0.08);
+  background: linear-gradient(90deg, #9de06c 0%, #6fcd44 100%);
+  color: #10202a;
+  font-size: 0.98rem;
+  font-weight: 800;
+  box-shadow: 0 10px 18px rgba(91, 167, 60, 0.18);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.admin-notification-modal__add-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 20px rgba(91, 167, 60, 0.22);
+}
+
+.admin-notification-modal__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.admin-notification-modal__feedback {
+  margin: 0;
+  padding: 0.72rem 0.9rem;
+  border-radius: 0.84rem;
+  border: 1px solid rgba(37, 106, 243, 0.16);
+  background: rgba(37, 106, 243, 0.08);
+  color: #20406d;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.admin-notification-modal__notice {
+  margin: 0;
+  padding: 0.72rem 0.9rem;
+  border-radius: 0.84rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.admin-notification-modal__notice--loading {
+  border: 1px solid rgba(37, 106, 243, 0.16);
+  background: rgba(37, 106, 243, 0.08);
+  color: #20406d;
+}
+
+.admin-notification-modal__notice--error {
+  border: 1px solid rgba(214, 77, 67, 0.18);
+  background: rgba(255, 237, 235, 0.94);
+  color: #9f2020;
+}
+
+.admin-notification-modal__table-wrap {
+  border: 1px solid rgba(16, 24, 32, 0.08);
+  border-radius: 1rem;
+  background: #fff;
+  overflow: auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.admin-notification-modal__table {
+  width: 100%;
+  min-width: 72rem;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.admin-notification-modal__table thead tr {
+  background: #294657;
+}
+
+.admin-notification-modal__table th {
+  padding: 0.7rem 0.88rem;
+  color: #eef2ff;
+  font-size: 0.84rem;
+  text-align: left;
+}
+
+.admin-notification-modal__table td {
+  padding: 0.68rem 0.88rem;
+  color: #151f2a;
+  font-size: 0.86rem;
+  border-bottom: 1px solid rgba(18, 26, 34, 0.1);
+  vertical-align: middle;
+}
+
+.admin-notification-modal__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-notification-modal__id-cell {
+  font-weight: 800;
+}
+
+.admin-notification-modal__title-cell {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.admin-notification-modal__title-cell strong {
+  font-size: 0.98em;
+  line-height: 1.18;
+}
+
+.admin-notification-modal__title-cell span {
+  color: #607080;
+  font-size: 0.84em;
+  font-weight: 700;
+}
+
+.admin-notification-modal__status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 1.8rem;
+  padding: 0.24rem 0.58rem;
+  border-radius: 999px;
+  color: #10202a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.admin-notification-modal__status-badge--sent {
+  background: rgba(38, 185, 99, 0.18);
+}
+
+.admin-notification-modal__status-badge--scheduled {
+  background: rgba(244, 114, 56, 0.18);
+}
+
+.admin-notification-modal__status-badge--draft {
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.admin-notification-modal__status-badge--sending {
+  background: rgba(34, 197, 194, 0.18);
+}
+
+.admin-notification-modal__status-dot {
+  width: 0.74rem;
+  height: 0.74rem;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.admin-notification-modal__status-dot--sent {
+  background: radial-gradient(circle at 30% 30%, #9ff6b3 0%, #38b96d 62%, #24944f 100%);
+}
+
+.admin-notification-modal__status-dot--scheduled {
+  background: radial-gradient(circle at 30% 30%, #ffd7bf 0%, #f58d44 62%, #dd6520 100%);
+}
+
+.admin-notification-modal__status-dot--draft {
+  background: radial-gradient(circle at 30% 30%, #f1f5f9 0%, #94a3b8 62%, #64748b 100%);
+}
+
+.admin-notification-modal__status-dot--sending {
+  background: radial-gradient(circle at 30% 30%, #c8fffb 0%, #29c6c0 62%, #0f9e99 100%);
+}
+
+.admin-notification-modal__row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.admin-notification-modal__action {
+  min-width: 2.95rem;
+  min-height: 2rem;
+  border-radius: 0.58rem;
+  border: 1px solid rgba(16, 24, 32, 0.12);
+  padding: 0.22rem 0.62rem;
+  color: #111b25;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.admin-notification-modal__action--view {
+  background: #b5bde9;
+}
+
+.admin-notification-modal__action--edit {
+  background: #f2c9b1;
+}
+
+.admin-notification-modal__empty-row {
+  text-align: center;
+  color: #4d5b6a;
+  font-weight: 700;
+}
+
+.admin-notification-modal__hint {
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(194, 133, 16, 0.26);
+  background: rgba(255, 247, 225, 0.92);
+  color: #7a4f06;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-notification-modal__editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 191;
+  display: grid;
+  place-items: start center;
+  padding: 1.3rem 1.2rem 1.7rem;
+}
+
+.admin-notification-modal__editor-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 14, 20, 0.52);
+  backdrop-filter: blur(2px);
+}
+
+.admin-notification-modal__editor-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(48rem, calc(100vw - 1.5rem));
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  border: 1px solid rgba(16, 24, 32, 0.14);
+  border-radius: 1.2rem;
+  background: rgba(250, 252, 253, 0.98);
+  box-shadow: 0 24px 48px rgba(7, 16, 24, 0.42);
+  padding: 1.35rem 1.35rem 1.15rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-notification-modal__editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-notification-modal__editor-head > div {
+  min-width: 0;
+}
+
+.admin-notification-modal__editor-head h4 {
+  margin: 0;
+  color: #1a2633;
+  font-size: 1.22rem;
+  line-height: 1.18;
+}
+
+.admin-notification-modal__editor-head p {
+  margin: 0.28rem 0 0;
+  color: #5a6a79;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  max-width: 32rem;
+}
+
+.admin-notification-modal__editor-close {
+  background: transparent;
+  color: #3b5de0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.admin-notification-modal__editor-summary {
+  display: none;
+}
+
+.admin-notification-modal__editor-error {
+  margin: 0;
+  color: #9f2020;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-notification-modal__editor-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.admin-notification-modal__editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem 0.95rem;
+}
+
+.admin-notification-modal__editor-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.admin-notification-modal__editor-grid label {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.admin-notification-modal__editor-grid label span {
+  color: #243445;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.admin-notification-modal__editor-grid input,
+.admin-notification-modal__editor-grid select,
+.admin-notification-modal__editor-grid textarea {
+  min-height: 2.8rem;
+  border-radius: 0.72rem;
+  border: 1px solid rgba(16, 24, 32, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.55rem 0.82rem;
+  color: #172430;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.admin-notification-modal__editor-grid textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.admin-notification-modal__editor-grid input:disabled,
+.admin-notification-modal__editor-grid select:disabled,
+.admin-notification-modal__editor-grid textarea:disabled {
+  background: #eef2f5;
+  color: #4d5b6a;
+}
+
+.admin-notification-modal__schedule-field {
+  gap: 0.45rem;
+}
+
+.admin-notification-modal__schedule-trigger {
+  cursor: pointer;
+}
+
+.admin-notification-modal__schedule-panel {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.15rem auto 0;
+  padding: 0.32rem;
+  border: 1px solid rgba(18, 28, 36, 0.1);
+  border-radius: 1.1rem;
+  background: #fcfdff;
+  box-shadow: 0 22px 46px rgba(13, 21, 28, 0.16);
+  overflow: hidden;
+  justify-self: center;
+}
+
+.admin-notification-modal__schedule-panel .react-datepicker {
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.admin-notification-modal__action--delete {
+  background: #f8c1c1;
+}
+
+.admin-notification-modal__schedule-hint {
+  margin: 0;
+  color: #5a6a79;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time-container {
+  border-left: 1px solid rgba(18, 28, 36, 0.08);
+  background: linear-gradient(180deg, #ffffff 0%, #f3f7fa 100%);
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time {
+  background: transparent;
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time-box {
+  width: 100%;
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time-list {
+  padding: 0.35rem 0;
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time-list-item {
+  margin: 0.14rem 0.35rem;
+  border-radius: 0.76rem;
+  color: #24313d;
+  font-size: 0.84rem;
+  font-weight: 700;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time-list-item:hover {
+  background: rgba(45, 126, 247, 0.09);
+  color: #15202b;
+  transform: translateY(-1px);
+}
+
+.admin-notification-modal__date-calendar .react-datepicker__time-list-item--selected,
+.admin-notification-modal__date-calendar .react-datepicker__time-list-item--keyboard-selected {
+  background: linear-gradient(135deg, #2d7ef7 0%, #16c2a7 100%);
+  color: #fff;
+  box-shadow: 0 10px 18px rgba(45, 126, 247, 0.18);
+}
+
+.admin-notification-modal__editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.admin-notification-modal__editor-button {
+  min-height: 2.25rem;
+  padding: 0.36rem 0.95rem;
+  border-radius: 0.55rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.admin-notification-modal__editor-button--ghost {
+  border: 1px solid rgba(16, 24, 32, 0.2);
+  background: #f8fafb;
+  color: #253443;
+}
+
+.admin-notification-modal__editor-button--danger {
+  border: 1px solid rgba(214, 77, 67, 0.22);
+  background: linear-gradient(180deg, #ff7b73 0%, #ef5f56 100%);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(214, 77, 67, 0.18);
+}
+
+.admin-notification-modal__editor-button--primary {
+  color: #fff;
+  background: linear-gradient(90deg, #13a5bc 0%, #72d956 100%);
+  box-shadow: 0 10px 18px rgba(9, 92, 105, 0.2);
+}
+
+@media (max-width: 1140px) {
+  .admin-notification-modal__header {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-notification-modal__toolbar {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 0.72fr)) auto;
+  }
+
+  .admin-notification-modal__add-button {
+    min-width: 9rem;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-notification-modal {
+    padding: 0.5rem;
+  }
+
+  .admin-notification-modal__window {
+    width: min(100vw - 1rem, 85rem);
+    max-height: calc(100vh - 1rem);
+  }
+
+  .admin-notification-modal__header {
+    padding: 0.85rem 0.85rem 0.9rem;
+  }
+
+  .admin-notification-modal__header-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-notification-modal__toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-notification-modal__editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-notification-modal__editor-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
 }
 
 .admin-user-modal {
@@ -1806,12 +3021,15 @@ svg {
 
 .admin-user-modal__row-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.42rem;
+  width: 100%;
 }
 
 .admin-user-modal__action {
-  min-width: 3.95rem;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
   min-height: 2.25rem;
   padding: 0.32rem 0.7rem;
   border-radius: 0.56rem;
@@ -1821,6 +3039,8 @@ svg {
   letter-spacing: 0.01em;
   box-shadow: 0 4px 10px rgba(13, 18, 24, 0.08);
   transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .admin-user-modal__action:hover {
@@ -2151,23 +3371,26 @@ svg {
   color: #9c2626;
 }
 
-.admin-user-modal__confirm-overlay {
+.admin-user-modal__confirm-overlay,
+.confirm-dialog__overlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 220;
   display: grid;
   place-items: center;
   padding: 1rem;
 }
 
-.admin-user-modal__confirm-backdrop {
+.admin-user-modal__confirm-backdrop,
+.confirm-dialog__backdrop {
   position: absolute;
   inset: 0;
   background: rgba(9, 14, 20, 0.48);
   backdrop-filter: blur(3px);
 }
 
-.admin-user-modal__confirm-sheet {
+.admin-user-modal__confirm-sheet,
+.confirm-dialog__sheet {
   position: relative;
   z-index: 1;
   width: min(31rem, calc(100vw - 2rem));
@@ -2180,33 +3403,38 @@ svg {
   gap: 0.95rem;
 }
 
-.admin-user-modal__confirm-head {
+.admin-user-modal__confirm-head,
+.confirm-dialog__head {
   display: grid;
   gap: 0.28rem;
 }
 
-.admin-user-modal__confirm-head h4 {
+.admin-user-modal__confirm-head h4,
+.confirm-dialog__head h4 {
   margin: 0;
   color: #18222c;
   font-size: 1.1rem;
   line-height: 1.25;
 }
 
-.admin-user-modal__confirm-head p {
+.admin-user-modal__confirm-head p,
+.confirm-dialog__head p {
   margin: 0;
   color: #53606c;
   font-size: 0.92rem;
   line-height: 1.5;
 }
 
-.admin-user-modal__confirm-actions {
+.admin-user-modal__confirm-actions,
+.confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.55rem;
   flex-wrap: wrap;
 }
 
-.admin-user-modal__confirm-button {
+.admin-user-modal__confirm-button,
+.confirm-dialog__button {
   min-height: 2.55rem;
   padding: 0.38rem 0.95rem;
   border-radius: 999px;
@@ -2214,13 +3442,15 @@ svg {
   font-weight: 800;
 }
 
-.admin-user-modal__confirm-button--ghost {
+.admin-user-modal__confirm-button--ghost,
+.confirm-dialog__button--ghost {
   border: 1px solid rgba(16, 24, 32, 0.18);
   background: #fff;
   color: #243140;
 }
 
-.admin-user-modal__confirm-button--danger {
+.admin-user-modal__confirm-button--danger,
+.confirm-dialog__button--danger {
   border: 1px solid rgba(193, 57, 43, 0.35);
   background: linear-gradient(180deg, #ffb3a9 0%, #f0665e 100%);
   color: #fff;
@@ -2233,7 +3463,6 @@ svg {
 
 .account-menu__trigger.is-active {
   border-radius: 0.55rem;
-  background: rgba(255, 255, 255, 0.26);
 }
 
 .account-menu__panel {
@@ -5983,6 +7212,14 @@ svg {
     gap: 0.72rem;
   }
 
+  .admin-driver-modal__header {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-driver-modal__header-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-driver-modal__header h3 {
     font-size: clamp(1.45rem, 3vw, 1.9rem);
   }
@@ -6730,7 +7967,30 @@ svg {
   }
 
   .admin-driver-modal__header {
-    padding: 0.72rem 0.75rem;
+    padding: 0.82rem 0.78rem 0.86rem;
+    gap: 0.62rem;
+  }
+
+  .admin-driver-modal__header-copy {
+    gap: 0.22rem;
+  }
+
+  .admin-driver-modal__header-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.42rem;
+  }
+
+  .admin-driver-modal__stat-card {
+    min-height: 4rem;
+    padding: 0.56rem 0.62rem;
+  }
+
+  .admin-driver-modal__stat-card strong {
+    font-size: 1rem;
+  }
+
+  .admin-driver-modal__stat-card span {
+    font-size: 0.7rem;
   }
 
   .admin-driver-modal__header h3 {

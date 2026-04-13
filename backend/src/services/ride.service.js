@@ -2,7 +2,6 @@ import sql from 'mssql';
 import { searchPlaces } from './places.service.js';
 import { env } from '../config/env.js';
 import { getSqlServerPool, isSqlServerConfigured } from './database.service.js';
-import { readFileSync, statSync } from 'node:fs';
 
 const VEHICLE_CONFIG = {
   motorbike: {
@@ -33,7 +32,6 @@ const routeCache = new Map();
 const LOCATION_CACHE_TTL_MS = 10 * 60 * 1000;
 const locationCache = new Map();
 let googleDirectionsAvailable = Boolean(env.googleMapsServerApiKey);
-const PRICE_TABLE_FILE_URL = new URL('../../gia.txt', import.meta.url);
 const MAX_RECENT_BOOKINGS = 200;
 const recentBookings = [];
 const PAYMENT_METHOD_LABELS = {
@@ -193,167 +191,9 @@ function clonePricingTable(pricingTable) {
   );
 }
 
-function normalizeIdentifier(value) {
-  return String(value ?? '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-}
-
-function resolveVehicleFromLine(line) {
-  const normalizedLine = normalizeIdentifier(line);
-
-  if (normalizedLine.includes('xe-may')) {
-    return 'motorbike';
-  }
-
-  if (normalizedLine.includes('xe-lien-tinh')) {
-    return 'intercity';
-  }
-
-  if (normalizedLine.includes('o-to')) {
-    return 'car';
-  }
-
-  return null;
-}
-
-function parseTierFromPriceLine(line) {
-  const cleanedLine = String(line).replace(/^\-\s*/, '');
-  const baseMatch = cleanedLine.match(/(\d+)\s*k(?:\s*\/\s*1\s*[^;]+)?/i);
-  const rateMatch = cleanedLine.match(/\+(\d+)\s*\/\s*(\d+)\s*km/i);
-
-  if (!baseMatch || !rateMatch) {
-    return null;
-  }
-
-  const labelChunk = cleanedLine
-    .slice(0, baseMatch.index)
-    .replace(/:\s*$/, '')
-    .trim();
-  const seatMatch = labelChunk.match(/\(([^)]+)\)/);
-  const label = labelChunk
-    .replace(/\(([^)]+)\)/g, '')
-    .replace(/:\s*$/, '')
-    .trim();
-  const basePrice = Number(baseMatch[1]) * 1000;
-  const extraRate = Number(rateMatch[1]);
-  const extraUnitKm = Number(rateMatch[2]);
-
-  if (!Number.isFinite(basePrice) || !Number.isFinite(extraRate) || !Number.isFinite(extraUnitKm) || extraUnitKm <= 0) {
-    return null;
-  }
-
-  return {
-    id: normalizeIdentifier(label) || `tier-${basePrice}`,
-    label: label || 'tuy chon',
-    seatLabel: seatMatch ? seatMatch[1].trim() : null,
-    basePrice,
-    extraRate,
-    extraUnitKm,
-  };
-}
-
-function parsePricingTableFromText(content) {
-  const parsedPricing = clonePricingTable(DEFAULT_PRICING_TABLE);
-  let currentVehicle = null;
-  let pendingThresholdKm = null;
-
-  for (const rawLine of String(content ?? '').split(/\r?\n/)) {
-    const line = rawLine.trim();
-
-    if (!line) {
-      continue;
-    }
-
-    const thresholdMatch = line.match(/<\s*(\d+)\s*km/i);
-
-    if (thresholdMatch) {
-      const thresholdKm = Number(thresholdMatch[1]);
-
-      if (Number.isFinite(thresholdKm) && thresholdKm > 0) {
-        pendingThresholdKm = thresholdKm;
-      }
-
-      continue;
-    }
-
-    const vehicle = resolveVehicleFromLine(line);
-
-    if (vehicle) {
-      currentVehicle = vehicle;
-      parsedPricing[currentVehicle].tiers = [];
-
-      if (Number.isFinite(pendingThresholdKm) && pendingThresholdKm > 0) {
-        parsedPricing[currentVehicle].thresholdKm = pendingThresholdKm;
-      }
-
-      continue;
-    }
-
-    if (!currentVehicle || !line.startsWith('-')) {
-      continue;
-    }
-
-    const tier = parseTierFromPriceLine(line);
-
-    if (tier) {
-      parsedPricing[currentVehicle].tiers.push(tier);
-    }
-  }
-
-  return parsedPricing;
-}
-
-function hasCompletePricingTable(pricingTable) {
-  return ['motorbike', 'car', 'intercity'].every((vehicle) => Array.isArray(pricingTable?.[vehicle]?.tiers) && pricingTable[vehicle].tiers.length > 0);
-}
-
-function loadPricingTable() {
-  try {
-    const content = readFileSync(PRICE_TABLE_FILE_URL, 'utf8');
-    const parsedPricing = parsePricingTableFromText(content);
-
-    if (hasCompletePricingTable(parsedPricing)) {
-      return parsedPricing;
-    }
-
-    throw new Error('Pricing table is incomplete.');
-  } catch (error) {
-    console.warn('Cannot load pricing table from gia.txt, using built-in fallback.', error);
-    return clonePricingTable(DEFAULT_PRICING_TABLE);
-  }
-}
-
 let pricingTableCache = clonePricingTable(DEFAULT_PRICING_TABLE);
-let pricingTableVersion = null;
-
-function reloadPricingTableIfNeeded() {
-  try {
-    const fileStats = statSync(PRICE_TABLE_FILE_URL);
-    const currentVersion = Number(fileStats.mtimeMs);
-
-    if (Number.isFinite(currentVersion) && pricingTableVersion === currentVersion) {
-      return;
-    }
-
-    const loadedPricingTable = loadPricingTable();
-    pricingTableCache = loadedPricingTable;
-    pricingTableVersion = Number.isFinite(currentVersion) ? currentVersion : Date.now();
-  } catch (error) {
-    console.warn('Cannot refresh pricing table from gia.txt, using previous version.', error);
-
-    if (pricingTableVersion === null) {
-      pricingTableCache = clonePricingTable(DEFAULT_PRICING_TABLE);
-      pricingTableVersion = Date.now();
-    }
-  }
-}
 
 function getPricingTable() {
-  reloadPricingTableIfNeeded();
   return pricingTableCache;
 }
 
@@ -1311,6 +1151,7 @@ export async function bookRide(payload) {
     pickup: quoteResult.pickup,
     destination: quoteResult.destination,
     routeDistanceKm: quoteResult.routeDistanceKm,
+    routeGeometry: cloneRouteGeometry(quoteResult.routeGeometry),
     routeProvider: quoteResult.routeProvider,
     selectedRideId: selectedRide.id,
     rideTitle: selectedRide.title,
