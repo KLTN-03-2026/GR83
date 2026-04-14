@@ -1,6 +1,7 @@
 import { closeIcon, helpIcon, logoIcon, menuIcon, notificationIcon, userIcon } from '../../assets/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import AdminPaymentManagementModal from '../admin/AdminPaymentManagementModal';
 import AdminNotificationManagementModal from '../admin/AdminNotificationManagementModal';
 import AdminUserManagementModal from '../admin/AdminUserManagementModal';
 import AdminDriverManagementModal from '../admin/AdminDriverManagementModal';
@@ -253,6 +254,7 @@ export default function Header({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [adminUserModalOpen, setAdminUserModalOpen] = useState(false);
   const [adminDriverModalOpen, setAdminDriverModalOpen] = useState(false);
+  const [adminPaymentModalOpen, setAdminPaymentModalOpen] = useState(false);
   const [adminNotificationModalOpen, setAdminNotificationModalOpen] = useState(false);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationItems, setNotificationItems] = useState([]);
@@ -305,6 +307,10 @@ export default function Header({
       setAdminDriverModalOpen(false);
     }
 
+    if (normalizedRoleCode !== 'Q1' && adminPaymentModalOpen) {
+      setAdminPaymentModalOpen(false);
+    }
+
     if (normalizedRoleCode !== 'Q1' && adminNotificationModalOpen) {
       setAdminNotificationModalOpen(false);
     }
@@ -316,6 +322,7 @@ export default function Header({
     activeRoleMenu,
     activeRolePopupItem,
     adminDriverModalOpen,
+    adminPaymentModalOpen,
     adminNotificationModalOpen,
     adminUserModalOpen,
     canViewNotifications,
@@ -331,6 +338,7 @@ export default function Header({
       !notificationMenuOpen &&
       !activeRolePopupItem &&
       !adminDriverModalOpen &&
+      !adminPaymentModalOpen &&
       !adminNotificationModalOpen &&
       !adminUserModalOpen
     ) {
@@ -359,6 +367,7 @@ export default function Header({
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       setRoleMenuOpen(false);
       setAccountMenuOpen(false);
@@ -372,7 +381,7 @@ export default function Header({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [accountMenuOpen, roleMenuOpen, notificationMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminUserModalOpen]);
+  }, [accountMenuOpen, roleMenuOpen, notificationMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminPaymentModalOpen, adminUserModalOpen]);
 
   useEffect(() => {
     if (!canViewNotifications) {
@@ -546,6 +555,7 @@ export default function Header({
     if (normalizedRoleCode === 'Q1' && item.id === 'admin-users') {
       setActiveRolePopupItem(null);
       setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       setAdminUserModalOpen(true);
       return;
@@ -554,8 +564,18 @@ export default function Header({
     if (normalizedRoleCode === 'Q1' && item.id === 'admin-drivers') {
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
+      setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       setAdminDriverModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q1' && item.id === 'admin-payments') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPaymentModalOpen(true);
       return;
     }
 
@@ -563,6 +583,7 @@ export default function Header({
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(true);
       return;
     }
@@ -571,6 +592,7 @@ export default function Header({
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       onBooking?.();
       return;
@@ -580,6 +602,7 @@ export default function Header({
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       onDriverSignup?.();
       return;
@@ -587,6 +610,7 @@ export default function Header({
 
     setAdminUserModalOpen(false);
     setAdminDriverModalOpen(false);
+    setAdminPaymentModalOpen(false);
     setAdminNotificationModalOpen(false);
     setActiveRolePopupItem(buildRoleFeaturePopup(item, normalizedRoleCode, activeRoleLabel));
   };
@@ -887,6 +911,8 @@ export default function Header({
       <AdminUserManagementModal open={adminUserModalOpen} onClose={() => setAdminUserModalOpen(false)} />
 
       <AdminDriverManagementModal open={adminDriverModalOpen} onClose={() => setAdminDriverModalOpen(false)} />
+
+      <AdminPaymentManagementModal open={adminPaymentModalOpen} onClose={() => setAdminPaymentModalOpen(false)} />
 
       <AdminNotificationManagementModal
         open={adminNotificationModalOpen}
