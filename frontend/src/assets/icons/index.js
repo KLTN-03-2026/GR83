@@ -1,6 +1,7 @@
 export { default as logoIcon } from './layout/header/logo.svg';
 export { default as menuIcon } from './layout/header/menu.svg';
 export { default as globeIcon } from './layout/header/globe.svg';
+export { default as notificationIcon } from './layout/header/notification.png';
 export { default as userIcon } from './layout/header/user.svg';
 export { default as helpIcon } from './layout/header/help.svg';
 

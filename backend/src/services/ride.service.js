@@ -5,19 +5,19 @@ import { getSqlServerPool, isSqlServerConfigured } from './database.service.js';
 
 const VEHICLE_CONFIG = {
   motorbike: {
-    label: 'Xe may',
+    label: 'Xe máy',
     speedKmh: 24,
     defaultDistanceKm: 5.5,
     defaultEtaMinutes: 8,
   },
   car: {
-    label: 'O to',
+    label: 'Ô tô',
     speedKmh: 32,
     defaultDistanceKm: 9.2,
     defaultEtaMinutes: 12,
   },
   intercity: {
-    label: 'Xe lien tinh',
+    label: 'Xe liên tỉnh',
     speedKmh: 45,
     defaultDistanceKm: 18.5,
     defaultEtaMinutes: 22,
@@ -59,7 +59,7 @@ const DEFAULT_PRICING_TABLE = {
     tiers: [
       {
         id: 'tiet-kiem',
-        label: 'tiet kiem',
+        label: 'tiết kiệm',
         seatLabel: null,
         basePrice: 13_000,
         extraRate: 5_000,
@@ -67,7 +67,7 @@ const DEFAULT_PRICING_TABLE = {
       },
       {
         id: 'pho-thong',
-        label: 'pho thong',
+        label: 'phổ thông',
         seatLabel: null,
         basePrice: 15_000,
         extraRate: 5_200,
@@ -75,7 +75,7 @@ const DEFAULT_PRICING_TABLE = {
       },
       {
         id: 'plus',
-        label: 'plus',
+        label: 'Plus',
         seatLabel: null,
         basePrice: 17_000,
         extraRate: 5_400,
@@ -90,40 +90,40 @@ const DEFAULT_PRICING_TABLE = {
     tiers: [
       {
         id: 'tiet-kiem',
-        label: 'tiet kiem',
-        seatLabel: '4 cho',
+        label: 'tiết kiệm',
+        seatLabel: '4 chỗ',
         basePrice: 25_000,
         extraRate: 10_000,
         extraUnitKm: 1,
       },
       {
         id: 'vip',
-        label: 'vip',
-        seatLabel: '4 cho',
+        label: 'Vip',
+        seatLabel: '4 chỗ',
         basePrice: 27_000,
         extraRate: 11_000,
         extraUnitKm: 1,
       },
       {
         id: 'plus',
-        label: 'plus',
-        seatLabel: '7 cho',
+        label: 'Plus',
+        seatLabel: '7 chỗ',
         basePrice: 28_000,
         extraRate: 12_000,
         extraUnitKm: 1,
       },
       {
         id: 'minibus',
-        label: 'minibus',
-        seatLabel: '16 cho',
+        label: 'MiniBus',
+        seatLabel: '16 chỗ',
         basePrice: 30_000,
         extraRate: 14_000,
         extraUnitKm: 1,
       },
       {
         id: 'bus',
-        label: 'bus',
-        seatLabel: '30 cho',
+        label: 'Bus',
+        seatLabel: '30 chỗ',
         basePrice: 32_000,
         extraRate: 15_000,
         extraUnitKm: 1,
@@ -137,40 +137,40 @@ const DEFAULT_PRICING_TABLE = {
     tiers: [
       {
         id: 'tiet-kiem',
-        label: 'tiet kiem',
-        seatLabel: '4 cho',
+        label: 'tiết kiệm',
+        seatLabel: '4 chỗ',
         basePrice: 100_000,
         extraRate: 10_000,
         extraUnitKm: 10,
       },
       {
         id: 'vip',
-        label: 'vip',
-        seatLabel: '4 cho',
+        label: 'Vip',
+        seatLabel: '4 chỗ',
         basePrice: 120_000,
         extraRate: 12_000,
         extraUnitKm: 10,
       },
       {
         id: 'plus',
-        label: 'plus',
-        seatLabel: '7 cho',
+        label: 'Plus',
+        seatLabel: '7 chỗ',
         basePrice: 125_000,
         extraRate: 12_500,
         extraUnitKm: 10,
       },
       {
         id: 'minibus',
-        label: 'minibus',
-        seatLabel: '16 cho',
+        label: 'MiniBus',
+        seatLabel: '16 chỗ',
         basePrice: 120_000,
         extraRate: 12_000,
         extraUnitKm: 10,
       },
       {
         id: 'bus',
-        label: 'bus',
-        seatLabel: '30 cho',
+        label: 'Bus',
+        seatLabel: '30 chỗ',
         basePrice: 110_000,
         extraRate: 11_000,
         extraUnitKm: 10,
@@ -850,10 +850,10 @@ function buildRideResults(vehicle, distanceKm, baseDurationMinutes) {
     return {
       id: `${vehicle}-${tier.id}`,
       title,
-      driver: tier.seatLabel ?? 'Tai xe gan ban',
+      driver: tier.seatLabel ?? 'Tài xế gần bạn',
       seatLabel: tier.seatLabel,
       etaMinutes: estimateMinutes,
-      eta: `${estimateMinutes} phut`,
+      eta: `${estimateMinutes} phút`,
       price,
       priceFormatted: formatCurrency(price),
       note: commonNote,
@@ -863,7 +863,7 @@ function buildRideResults(vehicle, distanceKm, baseDurationMinutes) {
 }
 
 function normalizeContactName(value) {
-  return normalizeText(value || 'Khach hang SmartRide');
+  return normalizeText(value || 'Khách hàng SmartRide');
 }
 
 function normalizeContactPhone(value) {

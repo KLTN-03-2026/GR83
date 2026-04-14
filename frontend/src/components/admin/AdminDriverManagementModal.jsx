@@ -1444,7 +1444,7 @@ export default function AdminDriverManagementModal({ open = false, onClose }) {
                       value={driverForm.emergencyAddress}
                       onChange={(event) => handleDriverFormChange('emergencyAddress', event.target.value)}
                       disabled={editorMode === 'view'}
-                      placeholder="Thanh Khe, Da Nang"
+                      placeholder="Thạnh Khê, Đà Nẵng"
                     />
                   </label>
                 </div>

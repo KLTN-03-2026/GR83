@@ -1,9 +1,10 @@
-import { closeIcon, globeIcon, helpIcon, logoIcon, menuIcon, userIcon } from '../../assets/icons';
+import { closeIcon, helpIcon, logoIcon, menuIcon, notificationIcon, userIcon } from '../../assets/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import AdminNotificationManagementModal from '../admin/AdminNotificationManagementModal';
 import AdminUserManagementModal from '../admin/AdminUserManagementModal';
 import AdminDriverManagementModal from '../admin/AdminDriverManagementModal';
+import { notificationService } from '../../services/notificationService';
 
 const ROLE_LABELS = {
   Q1: 'Quản trị viên',
@@ -127,9 +128,119 @@ function normalizeRoleCode(rawRoleCode) {
   return 'Q2';
 }
 
+function extractNotificationList(response) {
+  if (Array.isArray(response?.notifications)) {
+    return response.notifications;
+  }
+
+  if (Array.isArray(response?.data?.notifications)) {
+    return response.data.notifications;
+  }
+
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+
+  return [];
+}
+
+function normalizeNotification(notification, fallbackId = 0) {
+  return {
+    id: Number(notification?.id ?? fallbackId) || fallbackId,
+    title: String(notification?.title ?? '').trim(),
+    content: String(notification?.content ?? '').trim(),
+    recipient: String(notification?.recipient ?? '').trim().toLowerCase(),
+    status: String(notification?.status ?? '').trim().toLowerCase(),
+    sendAt: String(notification?.sendAt ?? '').trim(),
+  };
+}
+
+function formatNotificationDate(value) {
+  const date = new Date(value);
+
+  if (!value || Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function isNotificationVisible(notification) {
+  if (notification.status === 'sent') {
+    return true;
+  }
+
+  if (notification.status !== 'scheduled' || !notification.sendAt) {
+    return false;
+  }
+
+  const sendAtDate = new Date(notification.sendAt);
+  return !Number.isNaN(sendAtDate.getTime()) && sendAtDate.getTime() <= Date.now();
+}
+
+const NOTIFICATION_READ_STORAGE_PREFIX = 'smartride.notification.readIds';
+
+function normalizeStorageKeyPart(value) {
+  const normalizedValue = String(value ?? '').trim().toLowerCase();
+  return normalizedValue ? encodeURIComponent(normalizedValue) : 'guest';
+}
+
+function getNotificationReadStorageKey(roleCode, accountIdentifier) {
+  return [
+    NOTIFICATION_READ_STORAGE_PREFIX,
+    normalizeStorageKeyPart(roleCode ?? 'Q2'),
+    normalizeStorageKeyPart(accountIdentifier ?? 'guest'),
+  ].join('.');
+}
+
+function readNotificationReadIds(storageKey) {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(storageKey);
+
+    if (!storedValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(storedValue);
+    const nextValues = Array.isArray(parsedValue)
+      ? parsedValue
+      : Array.isArray(parsedValue?.ids)
+        ? parsedValue.ids
+        : [];
+
+    return Array.from(new Set(nextValues.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)));
+  } catch {
+    return [];
+  }
+}
+
+function saveNotificationReadIds(storageKey, readIds) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const normalizedReadIds = Array.from(new Set((Array.isArray(readIds) ? readIds : []).map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)));
+
+    window.localStorage.setItem(storageKey, JSON.stringify({ ids: normalizedReadIds }));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export default function Header({
   isAuthenticated = false,
   accountDisplayName = '',
+  accountIdentifier = '',
   accountRoleCode = '',
   onProfile,
   onBooking,
@@ -143,14 +254,34 @@ export default function Header({
   const [adminUserModalOpen, setAdminUserModalOpen] = useState(false);
   const [adminDriverModalOpen, setAdminDriverModalOpen] = useState(false);
   const [adminNotificationModalOpen, setAdminNotificationModalOpen] = useState(false);
+  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
+  const [notificationItems, setNotificationItems] = useState([]);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [notificationError, setNotificationError] = useState('');
+  const [notificationReadIds, setNotificationReadIds] = useState([]);
   const [selectedRoleItemId, setSelectedRoleItemId] = useState('');
   const [activeRolePopupItem, setActiveRolePopupItem] = useState(null);
   const roleMenuRef = useRef(null);
   const accountMenuRef = useRef(null);
+  const notificationMenuRef = useRef(null);
 
   const normalizedRoleCode = normalizeRoleCode(isAuthenticated ? accountRoleCode : 'Q2');
   const activeRoleMenu = useMemo(() => ROLE_MENUS[normalizedRoleCode] ?? ROLE_MENUS.Q2, [normalizedRoleCode]);
   const activeRoleLabel = ROLE_LABELS[normalizedRoleCode] ?? ROLE_LABELS.Q2;
+  const hasNotificationAccess = normalizedRoleCode === 'Q1' || normalizedRoleCode === 'Q2' || normalizedRoleCode === 'Q3';
+  const canViewNotifications = isAuthenticated && hasNotificationAccess;
+  const showNotificationButton = !isAuthenticated || hasNotificationAccess;
+  const notificationRecipient = normalizedRoleCode === 'Q3' ? 'driver' : normalizedRoleCode === 'Q2' ? 'customer' : 'all';
+  const notificationPanelTitle = normalizedRoleCode === 'Q1' ? 'Thông báo hệ thống' : 'Thông báo của bạn';
+  const notificationStorageKey = useMemo(
+    () => getNotificationReadStorageKey(normalizedRoleCode, accountIdentifier || accountDisplayName || 'guest'),
+    [accountDisplayName, accountIdentifier, normalizedRoleCode],
+  );
+  const notificationReadIdSet = useMemo(() => new Set(notificationReadIds), [notificationReadIds]);
+  const notificationUnreadCount = useMemo(
+    () => notificationItems.filter((item) => !notificationReadIdSet.has(item.id)).length,
+    [notificationItems, notificationReadIdSet],
+  );
 
   useEffect(() => {
     const availableItemIds = activeRoleMenu.rows
@@ -177,12 +308,27 @@ export default function Header({
     if (normalizedRoleCode !== 'Q1' && adminNotificationModalOpen) {
       setAdminNotificationModalOpen(false);
     }
-  }, [activeRoleMenu, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminUserModalOpen, normalizedRoleCode, selectedRoleItemId]);
+
+    if (!canViewNotifications && notificationMenuOpen) {
+      setNotificationMenuOpen(false);
+    }
+  }, [
+    activeRoleMenu,
+    activeRolePopupItem,
+    adminDriverModalOpen,
+    adminNotificationModalOpen,
+    adminUserModalOpen,
+    canViewNotifications,
+    notificationMenuOpen,
+    normalizedRoleCode,
+    selectedRoleItemId,
+  ]);
 
   useEffect(() => {
     if (
       !accountMenuOpen &&
       !roleMenuOpen &&
+      !notificationMenuOpen &&
       !activeRolePopupItem &&
       !adminDriverModalOpen &&
       !adminNotificationModalOpen &&
@@ -199,6 +345,10 @@ export default function Header({
       if (accountMenuOpen && !accountMenuRef.current?.contains(event.target)) {
         setAccountMenuOpen(false);
       }
+
+      if (notificationMenuOpen && !notificationMenuRef.current?.contains(event.target)) {
+        setNotificationMenuOpen(false);
+      }
     };
 
     const handleKeyDown = (event) => {
@@ -212,6 +362,7 @@ export default function Header({
       setAdminNotificationModalOpen(false);
       setRoleMenuOpen(false);
       setAccountMenuOpen(false);
+      setNotificationMenuOpen(false);
     };
 
     document.addEventListener('mousedown', handlePointerDown);
@@ -221,7 +372,124 @@ export default function Header({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [accountMenuOpen, roleMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminUserModalOpen]);
+  }, [accountMenuOpen, roleMenuOpen, notificationMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminUserModalOpen]);
+
+  useEffect(() => {
+    if (!canViewNotifications) {
+      setNotificationMenuOpen(false);
+      setNotificationItems([]);
+      setNotificationError('');
+      setNotificationLoading(false);
+      setNotificationReadIds([]);
+      return undefined;
+    }
+
+    setNotificationReadIds(readNotificationReadIds(notificationStorageKey));
+
+    return undefined;
+  }, [canViewNotifications, notificationStorageKey]);
+
+  useEffect(() => {
+    if (!canViewNotifications) {
+      setNotificationMenuOpen(false);
+      setNotificationItems([]);
+      setNotificationError('');
+      setNotificationLoading(false);
+      return undefined;
+    }
+
+    const abortController = new AbortController();
+    let isActive = true;
+    const shouldShowLoading = notificationMenuOpen;
+
+    if (shouldShowLoading) {
+      setNotificationLoading(true);
+    }
+
+    setNotificationError('');
+
+    notificationService
+      .listNotifications({ recipient: notificationRecipient }, { signal: abortController.signal })
+      .then((response) => {
+        if (!isActive) {
+          return;
+        }
+
+        const nextNotifications = extractNotificationList(response)
+          .map((item, index) => normalizeNotification(item, index + 1))
+          .filter((item) => {
+            if (!isNotificationVisible(item)) {
+              return false;
+            }
+
+            if (normalizedRoleCode === 'Q1') {
+              return item.recipient === 'all';
+            }
+
+            return item.recipient === 'all' || item.recipient === notificationRecipient;
+          });
+
+        setNotificationItems(nextNotifications);
+      })
+      .catch((error) => {
+        if (!isActive || error?.name === 'AbortError') {
+          return;
+        }
+
+        setNotificationItems([]);
+        setNotificationError(error?.message || 'Không thể tải thông báo lúc này.');
+      })
+      .finally(() => {
+        if (isActive && shouldShowLoading) {
+          setNotificationLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+      abortController.abort();
+    };
+  }, [canViewNotifications, notificationMenuOpen, notificationRecipient, notificationStorageKey]);
+
+  const markNotificationAsRead = (notificationId) => {
+    const normalizedNotificationId = Number(notificationId);
+
+    if (!Number.isInteger(normalizedNotificationId) || normalizedNotificationId <= 0) {
+      return;
+    }
+
+    setNotificationReadIds((currentReadIds) => {
+      if (currentReadIds.includes(normalizedNotificationId)) {
+        return currentReadIds;
+      }
+
+      const nextReadIds = [...currentReadIds, normalizedNotificationId];
+      saveNotificationReadIds(notificationStorageKey, nextReadIds);
+      return nextReadIds;
+    });
+  };
+
+  const markAllNotificationsAsRead = () => {
+    if (notificationItems.length === 0) {
+      return;
+    }
+
+    setNotificationReadIds((currentReadIds) => {
+      const nextReadIds = Array.from(
+        new Set([
+          ...currentReadIds,
+          ...notificationItems.map((item) => item.id).filter((notificationId) => !currentReadIds.includes(notificationId)),
+        ]),
+      );
+
+      if (nextReadIds.length === currentReadIds.length) {
+        return currentReadIds;
+      }
+
+      saveNotificationReadIds(notificationStorageKey, nextReadIds);
+      return nextReadIds;
+    });
+  };
 
   const scrollToAnchor = (anchor) => {
     if (!anchor) {
@@ -340,7 +608,31 @@ export default function Header({
 
   const runAccountAction = (callback) => {
     setAccountMenuOpen(false);
+    setNotificationMenuOpen(false);
     callback?.();
+  };
+
+  const toggleNotificationMenu = () => {
+    if (!canViewNotifications) {
+      return;
+    }
+
+    setNotificationMenuOpen((current) => !current);
+    setRoleMenuOpen(false);
+    setAccountMenuOpen(false);
+  };
+
+  const handleNotificationButtonClick = () => {
+    setRoleMenuOpen(false);
+    setAccountMenuOpen(false);
+
+    if (!isAuthenticated) {
+      setNotificationMenuOpen(false);
+      onLogin?.();
+      return;
+    }
+
+    toggleNotificationMenu();
   };
 
   return (
@@ -399,9 +691,89 @@ export default function Header({
             ) : null}
           </div>
 
-          <button className="icon-button" type="button" aria-label="Ngôn ngữ">
-            <img className="icon-button__img" src={globeIcon} alt="" aria-hidden="true" />
-          </button>
+          {showNotificationButton ? (
+            <div className="notification-menu" ref={notificationMenuRef}>
+              <button
+                className={`icon-button notification-menu__trigger${notificationMenuOpen ? ' is-active' : ''}`}
+                type="button"
+                aria-label={isAuthenticated ? notificationPanelTitle : 'Đăng nhập để xem thông báo'}
+                aria-haspopup="menu"
+                aria-expanded={notificationMenuOpen}
+                onClick={handleNotificationButtonClick}
+              >
+                <img className="icon-button__img" src={notificationIcon} alt="" aria-hidden="true" />
+                {canViewNotifications && notificationUnreadCount > 0 ? (
+                  <span className="notification-menu__indicator" aria-hidden="true" />
+                ) : null}
+
+                {canViewNotifications && notificationUnreadCount > 0 ? (
+                  <span className="notification-menu__badge">{notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}</span>
+                ) : null}
+              </button>
+
+              {notificationMenuOpen ? (
+                <div className="notification-menu__panel" role="menu" aria-label={notificationPanelTitle}>
+                  <div className="notification-menu__header">
+                    <strong>THÔNG BÁO</strong>
+                    <div className="notification-menu__header-meta">
+                      <span>{notificationPanelTitle}</span>
+                      {canViewNotifications && notificationUnreadCount > 0 ? (
+                        <button className="notification-menu__mark-all" type="button" onClick={markAllNotificationsAsRead}>
+                          Đánh dấu tất cả đã đọc
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="notification-menu__body">
+                    {notificationLoading ? <p className="notification-menu__state">Đang tải thông báo...</p> : null}
+
+                    {!notificationLoading && notificationError ? (
+                      <p className="notification-menu__state notification-menu__state--error">{notificationError}</p>
+                    ) : null}
+
+                    {!notificationLoading && !notificationError && notificationItems.length === 0 ? (
+                      <p className="notification-menu__state">Bạn chưa có thông báo nào.</p>
+                    ) : null}
+
+                    {!notificationLoading && !notificationError && notificationItems.length > 0 ? (
+                      <div className="notification-menu__list">
+                        {notificationItems.map((item) => (
+                          <article
+                            className={`notification-menu__item${notificationReadIdSet.has(item.id) ? ' is-read' : ' is-unread'}`}
+                            key={item.id}
+                          >
+                            <div className="notification-menu__item-head">
+                              <div className="notification-menu__item-title">
+                                <strong>{item.title || 'Thông báo'}</strong>
+                                <span className={notificationReadIdSet.has(item.id) ? 'is-read' : 'is-unread'}>
+                                  {notificationReadIdSet.has(item.id) ? 'Đã đọc' : 'Chưa đọc'}
+                                </span>
+                              </div>
+
+                              {!notificationReadIdSet.has(item.id) ? (
+                                <button
+                                  className="notification-menu__mark-read"
+                                  type="button"
+                                  onClick={() => markNotificationAsRead(item.id)}
+                                >
+                                  Đánh dấu đã đọc
+                                </button>
+                              ) : null}
+                            </div>
+
+                            <p className="notification-menu__item-content">{item.content}</p>
+
+                            {item.sendAt ? <time className="notification-menu__item-time">{formatNotificationDate(item.sendAt)}</time> : null}
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="account-menu" ref={accountMenuRef}>
             <button

@@ -361,6 +361,227 @@ svg {
   line-height: 1.4;
 }
 
+.booking-promo-panel {
+  border: 2px solid rgba(123, 197, 77, 0.28);
+  border-radius: 0.95rem;
+  background: linear-gradient(180deg, #f5f5f5 0%, #eef0f2 100%);
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.85rem;
+  box-shadow: 0 14px 28px rgba(24, 34, 44, 0.08);
+}
+
+.booking-promo-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(130, 140, 150, 0.18);
+}
+
+.booking-promo-panel__header strong {
+  display: block;
+  color: #18222c;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.booking-promo-panel__header span {
+  display: block;
+  margin-top: 0.16rem;
+  color: #5b6672;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.booking-promo-panel__close {
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.6rem;
+  background: #e9eef3;
+  color: #24303b;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.booking-promo-panel__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: end;
+}
+
+.booking-promo-panel__search {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.booking-promo-panel__search-label {
+  color: #18222c;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.booking-promo-panel__search input {
+  min-height: 3rem;
+  border-radius: 0.8rem;
+  border: 2px solid #d3d8de;
+  background: #fff;
+  padding: 0.65rem 0.85rem;
+  color: #18222c;
+  font-size: 0.98rem;
+  outline: none;
+}
+
+.booking-promo-panel__search input:focus {
+  border-color: #7bc54d;
+  box-shadow: 0 0 0 3px rgba(123, 197, 77, 0.14);
+}
+
+.booking-promo-panel__apply {
+  min-width: 7.5rem;
+  min-height: 3rem;
+  border-radius: 0.8rem;
+  border: 2px solid #7bc54d;
+  background: linear-gradient(180deg, #a6e04f 0%, #94d844 100%);
+  color: #111;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.booking-promo-panel__list {
+  display: grid;
+  gap: 0.85rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding-right: 0.1rem;
+}
+
+.booking-promo-panel__item {
+  display: grid;
+  grid-template-columns: minmax(8rem, 10rem) minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  border: 1px solid rgba(130, 140, 150, 0.16);
+  border-radius: 0.8rem;
+  background: #fff;
+  padding: 0.75rem 0.8rem;
+}
+
+.booking-promo-panel__item.is-active {
+  border-color: rgba(123, 197, 77, 0.58);
+  box-shadow: inset 0 0 0 1px rgba(123, 197, 77, 0.14);
+}
+
+.booking-promo-panel__coupon {
+  min-height: 5.6rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, #c7f86b 0%, #b6f260 100%);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 0.55rem;
+  color: #2d4e10;
+}
+
+.booking-promo-panel__coupon strong {
+  display: block;
+  font-size: clamp(1.2rem, 2vw, 1.7rem);
+  line-height: 1;
+  font-weight: 900;
+}
+
+.booking-promo-panel__coupon span {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.booking-promo-panel__body {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.booking-promo-panel__body strong {
+  color: #18222c;
+  font-size: 0.98rem;
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.booking-promo-panel__body p {
+  margin: 0;
+  color: #34404d;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.booking-promo-panel__body span {
+  color: #8b8f95;
+  font-size: 0.8rem;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.booking-promo-panel__use {
+  min-height: 2.9rem;
+  padding: 0.55rem 1rem;
+  border-radius: 0.8rem;
+  border: 2px solid #7bc54d;
+  background: linear-gradient(180deg, #a6e04f 0%, #94d844 100%);
+  color: #111;
+  font-size: 0.98rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.booking-promo-panel__empty {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.8rem;
+  background: rgba(16, 24, 32, 0.06);
+  color: #41505f;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .booking-promo-panel__header,
+  .booking-promo-panel__controls,
+  .booking-promo-panel__item {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-promo-panel__header {
+    display: grid;
+  }
+
+  .booking-promo-panel__controls {
+    align-items: stretch;
+  }
+
+  .booking-promo-panel__apply,
+  .booking-promo-panel__use {
+    width: 100%;
+  }
+
+  .booking-promo-panel__item {
+    align-items: stretch;
+  }
+
+  .booking-promo-panel__coupon {
+    min-height: 4.8rem;
+  }
+
+  .booking-promo-panel__use {
+    min-height: 2.7rem;
+  }
+}
+
 .booking-primary-button {
   min-height: 3.5rem;
   border-radius: 0.8rem;
@@ -3516,6 +3737,219 @@ svg {
   background: rgba(159, 32, 32, 0.12);
 }
 
+.notification-menu {
+  position: relative;
+}
+
+.notification-menu__trigger {
+  position: relative;
+}
+
+.notification-menu__trigger.is-active {
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.notification-menu__indicator {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.28rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #e53935;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.96);
+}
+
+.notification-menu__badge {
+  position: absolute;
+  top: -0.12rem;
+  right: -0.06rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  padding: 0 0.25rem;
+  background: #e53935;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.96);
+}
+
+.notification-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100vh - 6rem));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(16, 24, 32, 0.18);
+  border-radius: 0.9rem;
+  background: rgba(247, 250, 252, 0.98);
+  overflow: hidden;
+  box-shadow: 0 18px 38px rgba(12, 20, 28, 0.24);
+  z-index: 35;
+}
+
+.notification-menu__header {
+  padding: 0.75rem 0.9rem;
+  display: grid;
+  gap: 0.12rem;
+  background: linear-gradient(90deg, #13a5bc 0%, #72d956 100%);
+  border-bottom: 1px solid rgba(16, 24, 32, 0.12);
+}
+
+.notification-menu__header strong {
+  color: #0e1720;
+  font-size: 1.08rem;
+  letter-spacing: 0.06em;
+}
+
+.notification-menu__header-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.notification-menu__header-meta span {
+  color: rgba(14, 23, 32, 0.78);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.notification-menu__mark-all {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #0f6c7e;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+.notification-menu__body {
+  padding: 0.6rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  gap: 0.55rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notification-menu__state {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.65rem;
+  background: rgba(16, 24, 32, 0.06);
+  color: #41505f;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.notification-menu__state--error {
+  background: rgba(228, 74, 74, 0.08);
+  color: #9f2020;
+}
+
+.notification-menu__list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.notification-menu__item {
+  padding: 0.7rem 0.72rem;
+  border-radius: 0.75rem;
+  background: #fff;
+  border: 1px solid rgba(16, 24, 32, 0.1);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.notification-menu__item.is-unread {
+  border-color: rgba(19, 165, 188, 0.38);
+  background: linear-gradient(180deg, rgba(19, 165, 188, 0.06), rgba(255, 255, 255, 1));
+}
+
+.notification-menu__item.is-read {
+  opacity: 0.96;
+}
+
+.notification-menu__item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.notification-menu__item-title {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.notification-menu__item-head strong {
+  color: #13202c;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.notification-menu__item-title span {
+  flex: 0 0 auto;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  width: fit-content;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.notification-menu__item-title span.is-unread {
+  background: rgba(229, 57, 53, 0.12);
+  color: #b52320;
+}
+
+.notification-menu__item-title span.is-read {
+  background: rgba(19, 165, 188, 0.12);
+  color: #0f6c7e;
+}
+
+.notification-menu__mark-read {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0.28rem 0.48rem;
+  border-radius: 999px;
+  background: rgba(19, 165, 188, 0.14);
+  color: #0f6c7e;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.notification-menu__mark-read:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.notification-menu__item-content {
+  margin: 0;
+  color: #3d4b59;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.notification-menu__item-time {
+  color: #7a8793;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .icon-button {
   width: 2.95rem;
   height: 2.95rem;
@@ -3798,6 +4232,36 @@ svg {
   width: 1.35rem;
   height: 1.35rem;
   object-fit: contain;
+}
+
+.login-popup-modal__remember-row {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: -0.1rem;
+}
+
+.login-popup-modal__remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #1d2731;
+  font-size: 0.96rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.login-popup-modal__remember-checkbox {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: #13a5bc;
+}
+
+.login-popup-modal__remember-note {
+  color: #6d7883;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .login-popup-modal__continue {

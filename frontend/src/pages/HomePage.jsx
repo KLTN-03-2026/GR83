@@ -11,7 +11,6 @@ import {
   carIcon,
   chatbotIcon,
   closeIcon,
-  clockIcon,
   helpIcon,
   loginGoogleIcon,
   loginHidePassIcon,
@@ -77,6 +76,85 @@ const MOCKUP_ROUTE_PRESETS = {
   },
 };
 
+const REMEMBER_LOGIN_STORAGE_KEY = 'smartride.rememberedLoginCredentials';
+
+function normalizeLoginEmail(email) {
+  return String(email ?? '').trim().toLowerCase();
+}
+
+function readRememberedLoginMap() {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(REMEMBER_LOGIN_STORAGE_KEY);
+
+    if (!storedValue) {
+      return {};
+    }
+
+    const parsedValue = JSON.parse(storedValue);
+    if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
+      return {};
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(parsedValue, 'email') &&
+      Object.prototype.hasOwnProperty.call(parsedValue, 'password') &&
+      Object.keys(parsedValue).length <= 3
+    ) {
+      const legacyEmail = normalizeLoginEmail(parsedValue.email);
+      const legacyPassword = String(parsedValue.password ?? '');
+
+      return legacyEmail && legacyPassword ? { [legacyEmail]: legacyPassword } : {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsedValue)
+        .map(([email, password]) => [normalizeLoginEmail(email), String(password ?? '')])
+        .filter(([email, password]) => Boolean(email) && Boolean(password)),
+    );
+  } catch {
+    try {
+      window.localStorage.removeItem(REMEMBER_LOGIN_STORAGE_KEY);
+    } catch {
+      // Ignore storage cleanup failures.
+    }
+
+    return {};
+  }
+}
+
+function getRememberedLoginPassword(email) {
+  const rememberedLoginMap = readRememberedLoginMap();
+  const normalizedEmail = normalizeLoginEmail(email);
+
+  return normalizedEmail ? String(rememberedLoginMap[normalizedEmail] ?? '') : '';
+}
+
+function saveRememberedLoginCredentials(email, password) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const normalizedEmail = normalizeLoginEmail(email);
+    const normalizedPassword = String(password ?? '');
+
+    if (!normalizedEmail || !normalizedPassword) {
+      return;
+    }
+
+    const rememberedLoginMap = readRememberedLoginMap();
+    rememberedLoginMap[normalizedEmail] = normalizedPassword;
+
+    window.localStorage.setItem(REMEMBER_LOGIN_STORAGE_KEY, JSON.stringify(rememberedLoginMap));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 const BOOKING_PAYMENT_METHODS = {
   cash: {
     id: 'cash',
@@ -105,6 +183,16 @@ const BOOKING_WALLET_PROVIDERS = [
 ];
 
 const BOOKING_OTHER_PAYMENT_METHODS = [BOOKING_PAYMENT_METHODS.qr, BOOKING_PAYMENT_METHODS.wallet];
+
+function normalizePromoSearchValue(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
 
 const DRIVER_SIGNUP_ITEMS = {
   left: [
@@ -841,6 +929,10 @@ export default function HomePage() {
   const [bookingPaymentMethod, setBookingPaymentMethod] = useState('cash');
   const [bookingPaymentProvider, setBookingPaymentProvider] = useState('zalopay');
   const [bookingPaymentPanelOpen, setBookingPaymentPanelOpen] = useState(false);
+  const [bookingPromoPanelOpen, setBookingPromoPanelOpen] = useState(false);
+  const [bookingPromoSearchValue, setBookingPromoSearchValue] = useState('');
+  const [bookingPromoFilterValue, setBookingPromoFilterValue] = useState('');
+  const [bookingSelectedPromoId, setBookingSelectedPromoId] = useState('');
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [driverSignupModalOpen, setDriverSignupModalOpen] = useState(false);
@@ -850,6 +942,7 @@ export default function HomePage() {
   const [forgotPasswordModalOpen, setForgotPasswordModalOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [rememberLogin, setRememberLogin] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [registerFullName, setRegisterFullName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
@@ -1200,6 +1293,29 @@ export default function HomePage() {
     };
   }, [miniToast]);
 
+  useEffect(() => {
+    if (!loginModalOpen) {
+      return;
+    }
+
+    const normalizedEmail = normalizeLoginEmail(loginEmail);
+
+    if (!normalizedEmail) {
+      return;
+    }
+
+    const rememberedPassword = getRememberedLoginPassword(normalizedEmail);
+
+    if (rememberedPassword) {
+      setLoginPassword(rememberedPassword);
+      setRememberLogin(true);
+      return;
+    }
+
+    setLoginPassword('');
+    setRememberLogin(false);
+  }, [loginModalOpen, loginEmail]);
+
   const showMiniToast = (message, type = 'success', durationMs = 1600) => {
     setMiniToast({
       id: Date.now(),
@@ -1295,7 +1411,7 @@ export default function HomePage() {
           normalizeBookingPaymentMethod(bookingPaymentMethod) === 'wallet'
             ? normalizeBookingPaymentProvider(bookingPaymentProvider)
             : '',
-        customerName: authenticatedUser?.name ?? authenticatedUser?.fullName ?? authenticatedUser?.email ?? 'Khach hang SmartRide',
+        customerName: authenticatedUser?.name ?? authenticatedUser?.fullName ?? authenticatedUser?.email ?? 'Khách hàng SmartRide',
         customerPhone: authenticatedUser?.phone ?? '',
       });
 
@@ -1326,6 +1442,7 @@ export default function HomePage() {
 
     setBookingPaymentMethod(normalizedMethod);
     setBookingPaymentPanelOpen(normalizedMethod !== 'cash');
+    setBookingPromoPanelOpen(false);
 
     if (normalizedMethod !== 'wallet') {
       setBookingPaymentProvider('zalopay');
@@ -1333,7 +1450,30 @@ export default function HomePage() {
   };
 
   const handleBookingPaymentPanelToggle = () => {
+    setBookingPromoPanelOpen(false);
     setBookingPaymentPanelOpen((current) => !current);
+  };
+
+  const handleBookingPromoPanelToggle = () => {
+    setBookingPaymentPanelOpen(false);
+    setBookingPromoPanelOpen((current) => !current);
+  };
+
+  const handleBookingPromoApply = () => {
+    setBookingPromoFilterValue(bookingPromoSearchValue.trim());
+  };
+
+  const handleUsePromoCard = (card) => {
+    const promoLabel = String(card?.badge ?? card?.title ?? '').trim();
+
+    if (!promoLabel) {
+      return;
+    }
+
+    setBookingPromoSearchValue(promoLabel);
+    setBookingPromoFilterValue(promoLabel);
+    setBookingSelectedPromoId(String(card?.id ?? ''));
+    showMiniToast(`Đã chọn ưu đãi ${promoLabel}.`, 'success', 1800);
   };
 
   const handleVehicleTabChange = (vehicleId) => {
@@ -1398,6 +1538,18 @@ export default function HomePage() {
     bookingPanelPaymentMethod.id === 'wallet'
       ? `${bookingPanelPaymentMethod.label} - ${selectedBookingPaymentProvider.label}`
       : bookingPanelPaymentMethod.label;
+  const visiblePromoCards = useMemo(() => {
+    const normalizedSearch = normalizePromoSearchValue(bookingPromoFilterValue);
+
+    if (!normalizedSearch) {
+      return promoCards;
+    }
+
+    return promoCards.filter((card) => {
+      const searchableText = normalizePromoSearchValue([card.title, card.description, card.badge, card.validUntil].filter(Boolean).join(' '));
+      return searchableText.includes(normalizedSearch);
+    });
+  }, [bookingPromoFilterValue]);
 
   const activeRoutePreset = MOCKUP_ROUTE_PRESETS[activeVehicle] ?? MOCKUP_ROUTE_PRESETS.motorbike;
   const mockupPickupLabel =
@@ -1865,6 +2017,10 @@ export default function HomePage() {
     setBookingPaymentMethod('cash');
     setBookingPaymentProvider('zalopay');
     setBookingPaymentPanelOpen(false);
+    setBookingPromoPanelOpen(false);
+    setBookingPromoSearchValue('');
+    setBookingPromoFilterValue('');
+    setBookingSelectedPromoId('');
     setPreviewModalOpen(false);
   };
 
@@ -1883,8 +2039,12 @@ export default function HomePage() {
     setBookingLoading(false);
     setSearchLoading(false);
     setBookingPaymentPanelOpen(false);
+    setBookingPromoPanelOpen(false);
     setBookingPaymentMethod('cash');
     setBookingPaymentProvider('zalopay');
+    setBookingPromoSearchValue('');
+    setBookingPromoFilterValue('');
+    setBookingSelectedPromoId('');
     setPreviewModalOpen(false);
     showMiniToast('Đã hủy chuyến.', 'success');
   };
@@ -1910,6 +2070,7 @@ export default function HomePage() {
   const clearLoginFormState = () => {
     setLoginEmail('');
     setLoginPassword('');
+    setRememberLogin(false);
     setShowLoginPassword(false);
     setCredentialLoginError('');
     setGoogleLoginError('');
@@ -4192,6 +4353,10 @@ export default function HomePage() {
 
       const nextUser = result?.user ?? null;
 
+      if (rememberLogin) {
+        saveRememberedLoginCredentials(loginEmail, loginPassword);
+      }
+
       setAuthenticatedUser(nextUser);
       setCredentialLockRemainingSeconds(0);
       showMiniToast(result?.message ?? 'Đăng nhập thành công.');
@@ -4516,6 +4681,7 @@ export default function HomePage() {
       <Header
         isAuthenticated={Boolean(authenticatedUser)}
         accountDisplayName={authenticatedUser?.name ?? authenticatedUser?.email ?? ''}
+        accountIdentifier={authenticatedUser?.email ?? authenticatedUser?.accountId ?? authenticatedUser?.name ?? ''}
         accountRoleCode={authenticatedUser?.roleCode ?? ''}
         onProfile={openProfileModal}
         onBooking={handleOpenBookingForm}
@@ -4557,15 +4723,6 @@ export default function HomePage() {
                 <button className="destination-button" type="button" onClick={() => openLocationPicker('destination')}>
                   <img className="destination-button__icon" src={locationIcon} alt="" aria-hidden="true" />
                   <span>{route.destination.label || 'Đi đâu hôm nay ?'}</span>
-                </button>
-
-                <button
-                  className={classNames('schedule-pill', scheduleEnabled && 'is-active')}
-                  type="button"
-                  onClick={() => setScheduleEnabled((current) => !current)}
-                >
-                  <img className="schedule-pill__icon" src={clockIcon} alt="" aria-hidden="true" />
-                  Hẹn giờ
                 </button>
               </div>
 
@@ -4654,7 +4811,6 @@ export default function HomePage() {
                     <div className="booking-results__meta">
                       <span>{Number.isFinite(searchResult.routeDistanceKm) ? `${searchResult.routeDistanceKm.toFixed(1)} km` : 'Khoảng cách ước tính'}</span>
                       <span>{Number.isFinite(searchResult.estimatedDurationMinutes) ? `${searchResult.estimatedDurationMinutes} phút` : 'Ước tính thời gian'}</span>
-                      <span>{searchResult.scheduleEnabled ? 'Hẹn giờ' : 'Đi ngay'}</span>
                     </div>
                   </div>
 
@@ -4839,6 +4995,18 @@ export default function HomePage() {
                           />
                         </button>
                       </div>
+                    </label>
+
+                    <label className="login-popup-modal__remember-row">
+                      <span className="login-popup-modal__remember">
+                        <input
+                          className="login-popup-modal__remember-checkbox"
+                          type="checkbox"
+                          checked={rememberLogin}
+                          onChange={(event) => setRememberLogin(event.target.checked)}
+                        />
+                        <span>Nhớ mật khẩu</span>
+                      </span>
                     </label>
 
                     <button
@@ -6888,15 +7056,6 @@ export default function HomePage() {
                           <img className="booking-mode-button__icon" src={locationIcon} alt="" aria-hidden="true" />
                           Đường đi
                         </button>
-
-                        <button
-                          className={classNames('booking-mode-button', scheduleEnabled && 'is-active')}
-                          type="button"
-                          onClick={() => setScheduleEnabled((current) => !current)}
-                        >
-                          <img className="booking-mode-button__icon" src={clockIcon} alt="" aria-hidden="true" />
-                          Hẹn giờ
-                        </button>
                       </div>
 
                       <div className="booking-route-box" aria-label="Điểm đón và điểm đến">
@@ -6930,10 +7089,75 @@ export default function HomePage() {
                         >
                           {bookingPaymentMethod === 'cash' ? 'Khác' : selectedBookingPaymentMethod.shortLabel}
                         </button>
-                        <button className="booking-payment-chip" type="button">
+                        <button
+                          className={classNames('booking-payment-chip', bookingPromoPanelOpen && 'is-active')}
+                          type="button"
+                          onClick={handleBookingPromoPanelToggle}
+                          aria-expanded={bookingPromoPanelOpen}
+                          aria-controls="booking-promo-panel"
+                        >
                           Mã giảm giá
                         </button>
                       </div>
+
+                      {bookingPromoPanelOpen ? (
+                        <section className="booking-promo-panel" id="booking-promo-panel" aria-label="Ưu đãi dành cho khách hàng">
+                          <div className="booking-promo-panel__header">
+                            <div>
+                              <strong>Ưu đãi dành cho khách hàng</strong>
+                              <span>Nhập mã giảm giá hoặc chọn một ưu đãi phù hợp cho chuyến đi.</span>
+                            </div>
+
+                            <button className="booking-promo-panel__close" type="button" onClick={() => setBookingPromoPanelOpen(false)}>
+                              Đóng
+                            </button>
+                          </div>
+
+                          <div className="booking-promo-panel__controls">
+                            <label className="booking-promo-panel__search">
+                              <span className="booking-promo-panel__search-label">Mã giảm giá</span>
+                              <input
+                                type="text"
+                                value={bookingPromoSearchValue}
+                                onChange={(event) => setBookingPromoSearchValue(event.target.value)}
+                                placeholder="Nhập mã giảm giá"
+                              />
+                            </label>
+
+                            <button className="booking-promo-panel__apply" type="button" onClick={handleBookingPromoApply}>
+                              Áp dụng
+                            </button>
+                          </div>
+
+                          <div className="booking-promo-panel__list">
+                            {visiblePromoCards.length > 0 ? (
+                              visiblePromoCards.map((card) => (
+                                <article
+                                  className={`booking-promo-panel__item${bookingSelectedPromoId === card.id ? ' is-active' : ''}`}
+                                  key={card.id}
+                                >
+                                  <div className="booking-promo-panel__coupon">
+                                    <strong>{card.badge}</strong>
+                                    <span>tối đa cho chuyến đi</span>
+                                  </div>
+
+                                  <div className="booking-promo-panel__body">
+                                    <strong>{card.title}</strong>
+                                    <p>{card.description}</p>
+                                    <span>HSD: {card.validUntil ?? '--'}</span>
+                                  </div>
+
+                                  <button className="booking-promo-panel__use" type="button" onClick={() => handleUsePromoCard(card)}>
+                                    Dùng ngay
+                                  </button>
+                                </article>
+                              ))
+                            ) : (
+                              <p className="booking-promo-panel__empty">Không tìm thấy ưu đãi phù hợp.</p>
+                            )}
+                          </div>
+                        </section>
+                      ) : null}
 
                       {bookingPaymentPanelOpen ? (
                         <section className="booking-payment-panel" id="booking-payment-panel" aria-label="Chọn phương thức thanh toán">

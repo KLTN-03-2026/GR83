@@ -45,6 +45,7 @@ export const promoCards = [
     title: 'Ưu đãi 1 (giảm giá / flash sale)',
     description: 'Flash sale theo tuần giúp tiết kiệm chi phí cho mọi chuyến đi.',
     badge: 'Giảm đến 50%',
+    validUntil: '30/04/2026',
     image: promoFlashIcon,
   },
   {
@@ -52,6 +53,7 @@ export const promoCards = [
     title: 'Ưu đãi 2 (voucher / giảm tiền)',
     description: 'Voucher giảm giá áp dụng ngay khi đặt xe, dễ dùng và nhanh chóng.',
     badge: 'Giảm 25.000đ',
+    validUntil: '30/06/2026',
     image: promoVoucherIcon,
   },
   {
@@ -59,6 +61,7 @@ export const promoCards = [
     title: 'Ưu đãi 3 (deal theo mùa)',
     description: 'Các deal theo mùa luôn sẵn sàng để người dùng săn ưu đãi tốt nhất.',
     badge: 'Deal theo mùa',
+    validUntil: '31/12/2026',
     image: promoSaleIcon,
   },
 ];

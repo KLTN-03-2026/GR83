@@ -47,10 +47,10 @@ function getProviderLabel(routeProvider) {
   }
 
   if (routeProvider === 'haversine') {
-    return 'Duong thang (fallback)';
+    return 'Đường thẳng (dự phòng)';
   }
 
-  return 'Fallback';
+  return 'Dự phòng';
 }
 
 function renderRouteMap(container, pathPoints, pickup, destination, interactive) {
@@ -185,51 +185,51 @@ export default function RoutePreviewMap({
   if (pathPoints.length < 2) {
     return (
       <div className="route-preview-map route-preview-map--empty">
-        <p>Chua co du lieu tuyen duong de hien thi ban do.</p>
+        <p>Chưa có dữ liệu tuyến đường để hiển thị bản đồ.</p>
       </div>
     );
   }
 
   return (
     <>
-      <div className={["route-preview-map", className, pathPoints.length < 2 ? 'route-preview-map--empty' : ''].filter(Boolean).join(' ')} aria-label="Ban do tuyen duong">
+      <div className={["route-preview-map", className, pathPoints.length < 2 ? 'route-preview-map--empty' : ''].filter(Boolean).join(' ')} aria-label="Bản đồ tuyến đường">
         <div className="route-preview-map__canvas" ref={previewMapContainerRef} />
-        {showProviderLabel ? <span className="route-preview-map__provider">Tuyen duong: {getProviderLabel(routeProvider)}</span> : null}
+        {showProviderLabel ? <span className="route-preview-map__provider">Tuyến đường: {getProviderLabel(routeProvider)}</span> : null}
         {showExpandButton ? (
           <button
             className="route-preview-map__expand"
             type="button"
             onClick={() => setIsExpanded(true)}
-            aria-label="Phong to ban do"
+            aria-label="Phóng to bản đồ"
           >
-            Phong to
+            Phóng to
           </button>
         ) : null}
       </div>
 
       {isExpanded
         ? createPortal(
-            <div className="route-preview-modal" role="dialog" aria-modal="true" aria-label="Ban do tuyen duong mo rong">
+            <div className="route-preview-modal" role="dialog" aria-modal="true" aria-label="Bản đồ tuyến đường mở rộng">
               <div className="route-preview-modal__backdrop" onClick={() => setIsExpanded(false)} aria-hidden="true" />
 
               <div className="route-preview-modal__panel">
                 <div className="route-preview-modal__header">
-                  <strong>Ban do tuyen duong</strong>
+                  <strong>Bản đồ tuyến đường</strong>
 
                   <button
                     className="route-preview-modal__close"
                     type="button"
                     onClick={() => setIsExpanded(false)}
-                    aria-label="Dong ban do"
+                    aria-label="Đóng bản đồ"
                   >
-                    Dong
+                    Đóng
                   </button>
                 </div>
 
                 <div className="route-preview-modal__canvas" ref={expandedMapContainerRef} />
 
                 <p className="route-preview-modal__note">
-                  Su dung cuon chuot de zoom va keo de di chuyen ban do.
+                  Sử dụng cuộn chuột để zoom và kéo để di chuyển bản đồ.
                 </p>
               </div>
             </div>,
