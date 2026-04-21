@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" fill="none">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#28A8FF"/>
+      <stop offset="55%" stop-color="#1C6FF3"/>
+      <stop offset="100%" stop-color="#11CE7A"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="420" rx="28" fill="url(#g1)"/>
+  <circle cx="678" cy="96" r="58" fill="#fff" opacity="0.16"/>
+  <circle cx="104" cy="324" r="68" fill="#fff" opacity="0.1"/>
+  <rect x="82" y="96" width="188" height="72" rx="16" fill="#fff" opacity="0.22"/>
+  <rect x="286" y="96" width="266" height="72" rx="16" fill="#11C96F" opacity="0.9"/>
+  <text x="122" y="143" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#fff">GIAM DEN 50%</text>
+  <text x="338" y="141" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#fff">Flash Sale Tung Bung</text>
+  <text x="82" y="272" font-family="Arial, sans-serif" font-size="44" font-weight="700" fill="#fff">Thu 3 Hang Tuan</text>
+  <text x="82" y="330" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#E9FF4D">Tiem kiem chi phi moi chuyen di</text>
+</svg>
