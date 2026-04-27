@@ -5,7 +5,9 @@ import AdminPaymentManagementModal from '../admin/AdminPaymentManagementModal';
 import AdminNotificationManagementModal from '../admin/AdminNotificationManagementModal';
 import AdminUserManagementModal from '../admin/AdminUserManagementModal';
 import AdminDriverManagementModal from '../admin/AdminDriverManagementModal';
+import AdminPromotionManagementModal from '../admin/AdminPromotionManagementModal';
 import TripHistoryModal from '../ui/TripHistoryModal';
+import DriverReviewModal from '../ui/DriverReviewModal';
 import { notificationService } from '../../services/notificationService';
 
 const ROLE_LABELS = {
@@ -15,84 +17,83 @@ const ROLE_LABELS = {
 };
 
 const ROLE_MENUS = {
-  Q1: {
-    columns: 3,
-    rows: [
-      [
-        { id: 'admin-users', label: 'Quản lý người dùng' },
-        { id: 'admin-payments', label: 'Quản lý thanh toán' },
-        { id: 'admin-notifications', label: 'Quản lý thông báo' },
+    Q1: {
+      columns: 3,
+      rows: [
+        [
+          { id: 'admin-users', label: 'Quản lý người dùng' },
+          { id: 'admin-payments', label: 'Quản lý thanh toán' },
+          { id: 'admin-promotions', label: 'Quản lý ưu đãi' },
+        ],
+        [
+          { id: 'admin-notifications', label: 'Quản lý thông báo' },
+          { id: 'admin-drivers', label: 'Quản lý tài xế' },
+          { id: 'admin-complaints', label: 'Xử lý khiếu nại' },
+        ],
+        [
+          { id: 'admin-revenue', label: 'Xuất báo cáo doanh thu' },
+          { id: 'admin-trips', label: 'Quản lý chuyến đi' },
+          { id: 'admin-driver-violations', label: 'Xử lý vi phạm tài xế' },
+        ],
       ],
-      [
-        { id: 'admin-drivers', label: 'Quản lý tài xế' },
-        { id: 'admin-complaints', label: 'Xử lý khiếu nại' },
-        { id: 'admin-revenue', label: 'Xuất báo cáo doanh thu' },
+    },
+    Q2: {
+      columns: 2,
+      rows: [
+        [{ id: 'customer-booking', label: 'Đặt xe', action: 'booking-form' }, null],
+        [{ id: 'customer-history', label: 'Lịch sử chuyến', requiresAuth: true }, null],
+        [{ id: 'customer-profile', label: 'Quản lý tài khoản cá nhân', action: 'profile', requiresAuth: true }, null],
+        [{ id: 'customer-driver-signup', label: 'Đăng ký Tài xế', action: 'driver-signup' }, null],
       ],
-      [
-        { id: 'admin-trips', label: 'Quản lý chuyến đi' },
-        { id: 'admin-driver-violations', label: 'Xử lý vi phạm tài xế' },
-        null,
+    },
+    Q3: {
+      columns: 2,
+      rows: [
+        [
+          { id: 'driver-income', label: 'Quản lý thu nhập' },
+          { id: 'driver-support', label: 'Hỗ trợ và an toàn' },
+        ],
+        [
+          { id: 'driver-reviews', label: 'Xem đánh giá' },
+          { id: 'driver-settings', label: 'Cài đặt nhận chuyến' },
+        ],
+        [{ id: 'driver-trips', label: 'Quản lý chuyến đi' }, null],
       ],
-    ],
-  },
-  Q2: {
-    columns: 2,
-    rows: [
-      [{ id: 'customer-booking', label: 'Đặt xe', action: 'booking-form' }, null],
-      [{ id: 'customer-history', label: 'Lịch sử chuyến', requiresAuth: true }, null],
-      [{ id: 'customer-profile', label: 'Quản lý tài khoản cá nhân', action: 'profile', requiresAuth: true }, null],
-      [{ id: 'customer-driver-signup', label: 'Đăng ký Tài xế', action: 'driver-signup' }, null],
-    ],
-  },
-  Q3: {
-    columns: 2,
-    rows: [
-      [
-        { id: 'driver-income', label: 'Quản lý thu nhập' },
-        { id: 'driver-support', label: 'Hỗ trợ và an toàn' },
-      ],
-      [
-        { id: 'driver-reviews', label: 'Xem đánh giá' },
-        { id: 'driver-settings', label: 'Cài đặt nhận chuyến' },
-      ],
-      [{ id: 'driver-trips', label: 'Quản lý chuyến đi' }, null],
-    ],
-  },
-};
+    },
+  };
 
-const ROLE_POPUP_PRESETS = {
-  Q1: {
-    contextTitle: 'Bảng điều phối quản trị',
-    summaryPrefix: 'Theo dõi và xử lý tác vụ hệ thống cho',
-    stats: [
-      { label: 'Đang chờ xử lý', value: '18' },
-      { label: 'Hoàn tất hôm nay', value: '46' },
-      { label: 'Mức ưu tiên cao', value: '7' },
-    ],
-    checklist: ['Kiểm tra dữ liệu mới cập nhật', 'Ưu tiên tác vụ khẩn cấp', 'Đối soát trạng thái trước khi xác nhận'],
-  },
-  Q2: {
-    contextTitle: 'Trung tâm dịch vụ khách hàng',
-    summaryPrefix: 'Giao diện thao tác nhanh dành cho',
-    stats: [
-      { label: 'Yêu cầu hôm nay', value: '5' },
-      { label: 'Đang hoạt động', value: '2' },
-      { label: 'Thông báo mới', value: '3' },
-    ],
-    checklist: ['Xác nhận thông tin trước khi gửi', 'Theo dõi trạng thái theo thời gian thực', 'Liên hệ hỗ trợ khi có bất thường'],
-  },
-  Q3: {
-    contextTitle: 'Bảng vận hành tài xế',
-    summaryPrefix: 'Quản lý hiệu suất và vận hành cho',
-    stats: [
-      { label: 'Chuyến hôm nay', value: '12' },
-      { label: 'Tỉ lệ nhận chuyến', value: '96%' },
-      { label: 'Yêu cầu hỗ trợ', value: '1' },
-    ],
-    checklist: ['Giữ trạng thái trực tuyến ổn định', 'Xác nhận thông tin cuốc xe trước khi nhận', 'Ưu tiên phản hồi đánh giá quan trọng'],
-  },
-};
-
+  const ROLE_POPUP_PRESETS = {
+    Q1: {
+      contextTitle: 'Bảng điều phối quản trị',
+      summaryPrefix: 'Theo dõi và xử lý tác vụ hệ thống cho',
+      stats: [
+        { label: 'Đang chờ xử lý', value: '18' },
+        { label: 'Hoàn tất hôm nay', value: '46' },
+        { label: 'Mức ưu tiên cao', value: '7' },
+      ],
+      checklist: ['Kiểm tra dữ liệu mới cập nhật', 'Ưu tiên tác vụ khẩn cấp', 'Đối soát trạng thái trước khi xác nhận'],
+    },
+    Q2: {
+      contextTitle: 'Trung tâm dịch vụ khách hàng',
+      summaryPrefix: 'Giao diện thao tác nhanh dành cho',
+      stats: [
+        { label: 'Yêu cầu hôm nay', value: '5' },
+        { label: 'Đang hoạt động', value: '2' },
+        { label: 'Thông báo mới', value: '3' },
+      ],
+      checklist: ['Xác nhận thông tin trước khi gửi', 'Theo dõi trạng thái theo thời gian thực', 'Liên hệ hỗ trợ khi có bất thường'],
+    },
+    Q3: {
+      contextTitle: 'Bảng vận hành tài xế',
+      summaryPrefix: 'Quản lý hiệu suất và vận hành cho',
+      stats: [
+        { label: 'Chuyến hôm nay', value: '12' },
+        { label: 'Tỉ lệ nhận chuyến', value: '96%' },
+        { label: 'Yêu cầu hỗ trợ', value: '1' },
+      ],
+      checklist: ['Giữ trạng thái trực tuyến ổn định', 'Xác nhận thông tin cuốc xe trước khi nhận', 'Ưu tiên phản hồi đánh giá quan trọng'],
+    },
+  };
 function buildRoleFeaturePopup(item, roleCode, roleLabel) {
   const preset = ROLE_POPUP_PRESETS[roleCode] ?? ROLE_POPUP_PRESETS.Q2;
 
@@ -291,6 +292,7 @@ export default function Header({
   const [adminDriverModalOpen, setAdminDriverModalOpen] = useState(false);
   const [adminPaymentModalOpen, setAdminPaymentModalOpen] = useState(false);
   const [adminNotificationModalOpen, setAdminNotificationModalOpen] = useState(false);
+  const [adminPromotionModalOpen, setAdminPromotionModalOpen] = useState(false);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationItems, setNotificationItems] = useState([]);
   const [notificationLoading, setNotificationLoading] = useState(false);
@@ -355,6 +357,10 @@ export default function Header({
       setAdminNotificationModalOpen(false);
     }
 
+    if (normalizedRoleCode !== 'Q1' && adminPromotionModalOpen) {
+      setAdminPromotionModalOpen(false);
+    }
+
     if (!canViewNotifications && notificationMenuOpen) {
       setNotificationMenuOpen(false);
     }
@@ -381,6 +387,7 @@ export default function Header({
       !adminDriverModalOpen &&
       !adminPaymentModalOpen &&
       !adminNotificationModalOpen &&
+      !adminPromotionModalOpen &&
       !adminUserModalOpen
     ) {
       return undefined;
@@ -410,6 +417,7 @@ export default function Header({
       setAdminDriverModalOpen(false);
       setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
       setActiveTripHistoryItemId('');
       setRoleMenuOpen(false);
       setAccountMenuOpen(false);
@@ -423,7 +431,7 @@ export default function Header({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [accountMenuOpen, roleMenuOpen, notificationMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminPaymentModalOpen, adminUserModalOpen]);
+  }, [accountMenuOpen, roleMenuOpen, notificationMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminPaymentModalOpen, adminPromotionModalOpen, adminUserModalOpen]);
 
   useEffect(() => {
     if (!canViewNotifications) {
@@ -621,7 +629,18 @@ export default function Header({
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
       setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
       setAdminPaymentModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q1' && item.id === 'admin-promotions') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(true);
       return;
     }
 
@@ -630,6 +649,7 @@ export default function Header({
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
       setAdminPaymentModalOpen(false);
+      setAdminPromotionModalOpen(false);
       setAdminNotificationModalOpen(true);
       return;
     }
@@ -640,6 +660,7 @@ export default function Header({
       setAdminDriverModalOpen(false);
       setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
       onBooking?.();
       return;
     }
@@ -650,16 +671,18 @@ export default function Header({
       setAdminDriverModalOpen(false);
       setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
       onDriverSignup?.();
       return;
     }
 
-    if (item.id === 'customer-history' || item.id === 'driver-trips') {
+    if (item.id === 'customer-history' || item.id === 'driver-trips' || item.id === 'driver-reviews') {
       setActiveRolePopupItem(null);
       setAdminUserModalOpen(false);
       setAdminDriverModalOpen(false);
       setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
       setActiveTripHistoryItemId(item.id);
       return;
     }
@@ -668,6 +691,7 @@ export default function Header({
     setAdminDriverModalOpen(false);
     setAdminPaymentModalOpen(false);
     setAdminNotificationModalOpen(false);
+    setAdminPromotionModalOpen(false);
     setActiveTripHistoryItemId('');
     setActiveRolePopupItem(buildRoleFeaturePopup(item, normalizedRoleCode, activeRoleLabel));
   };
@@ -970,9 +994,18 @@ export default function Header({
         : null}
 
       <TripHistoryModal
-        open={Boolean(activeTripHistoryItemId)}
+        open={activeTripHistoryItemId === 'customer-history' || activeTripHistoryItemId === 'driver-trips'}
         mode={activeTripHistoryItemId === 'driver-trips' ? 'driver' : 'customer'}
         roleLabel={activeTripHistoryItemId === 'driver-trips' ? 'Tài xế' : 'Khách hàng'}
+        accountId={accountId}
+        accountDisplayName={accountDisplayName}
+        accountIdentifier={accountIdentifier}
+        accountPhone={accountPhone}
+        onClose={closeTripHistoryPopup}
+      />
+
+      <DriverReviewModal
+        open={activeTripHistoryItemId === 'driver-reviews'}
         accountId={accountId}
         accountDisplayName={accountDisplayName}
         accountIdentifier={accountIdentifier}
@@ -989,6 +1022,11 @@ export default function Header({
       <AdminNotificationManagementModal
         open={adminNotificationModalOpen}
         onClose={() => setAdminNotificationModalOpen(false)}
+      />
+
+      <AdminPromotionManagementModal
+        open={adminPromotionModalOpen}
+        onClose={() => setAdminPromotionModalOpen(false)}
       />
     </header>
   );

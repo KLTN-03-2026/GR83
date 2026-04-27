@@ -85,4 +85,10 @@ export const rideService = {
       }),
     });
   },
+  submitTripRating(bookingCode, payload = {}) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/rating`, {
+      method: 'POST',
+      body: JSON.stringify(payload && typeof payload === 'object' ? payload : {}),
+    });
+  },
 };

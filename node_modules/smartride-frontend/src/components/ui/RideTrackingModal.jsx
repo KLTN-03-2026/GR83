@@ -2,45 +2,39 @@ import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import CancelRideReasonDialog from './CancelRideReasonDialog';
+import DriverLocationDialog from './DriverLocationDialog';
 import TripChatDialog from './TripChatDialog';
 import RoutePreviewMap from './RoutePreviewMap';
 import { rideService } from '../../services/rideService';
 import { clockIcon, closeIcon, motorbikeIcon, originIcon, phoneIcon, pinIcon, starIcon, userIcon } from '../../assets/icons';
 import { classNames } from '../../utils/classNames';
+import { acquireBodyScrollLock } from '../../utils/bodyScrollLock';
 
-const SEARCH_TRACKING_STEPS = [
+const CUSTOMER_TRACKING_STEPS = [
   {
-    id: 'created',
-    title: 'Đã tạo cuốc xe',
-    description: 'Yêu cầu vừa được tiếp nhận và chuyển sang bước ghép tài xế.',
+    id: 'waiting',
+    title: 'Đang chờ',
+    description: 'Hệ thống đang tìm tài xế phù hợp quanh điểm đón.',
   },
   {
-    id: 'matching',
-    title: 'Đang tìm tài xế gần đó',
-    description: 'Hệ thống ưu tiên các tài xế quanh điểm đón để tạo cuốc nhanh nhất.',
-  },
-  {
-    id: 'confirming',
-    title: 'Chờ tài xế xác nhận',
-    description: 'Khi có tài xế phù hợp nhận chuyến, cuốc xe sẽ được kích hoạt.',
-  },
-];
-
-const ASSIGNED_TRACKING_STEPS = [
-  {
-    id: 'accepted',
-    title: 'Tài xế đã nhận đơn',
-    description: 'Đơn đã có tài xế xác nhận và hệ thống đang theo dõi lộ trình đến điểm đón.',
+    id: 'assigned',
+    title: 'Đã có tài xế',
+    description: 'Tài xế đã nhận đơn và chuẩn bị di chuyển.',
   },
   {
     id: 'heading-pickup',
-    title: 'Đang đến điểm đón',
-    description: 'Tài xế đang di chuyển đến vị trí của bạn trước khi bắt đầu chuyến.',
+    title: 'Đang đến',
+    description: 'Tài xế đang di chuyển đến vị trí đón của bạn.',
   },
   {
     id: 'picked-up',
-    title: 'Đã đón khách',
-    description: 'Khách đã lên xe và chuyến đang được thực hiện.',
+    title: 'Đang di chuyển',
+    description: 'Bạn đã lên xe và chuyến đang được thực hiện.',
+  },
+  {
+    id: 'completed',
+    title: 'Hoàn thành',
+    description: 'Chuyến xe đã hoàn thành.',
   },
 ];
 
@@ -114,6 +108,26 @@ function normalizeTripStatusToken(value) {
   return normalizeText(value)
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
+}
+
+function getCustomerTrackingStepIndex(tripStatusToken) {
+  if (tripStatusToken === 'dadon' || tripStatusToken === 'pickedup' || tripStatusToken === 'dangthuchien' || tripStatusToken === 'inprogress') {
+    return 3;
+  }
+
+  if (tripStatusToken === 'dangden' || tripStatusToken === 'headingpickup') {
+    return 2;
+  }
+
+  if (tripStatusToken === 'danhanchuyen' || tripStatusToken === 'accepted' || tripStatusToken === 'chotaixe' || tripStatusToken === 'choxacnhan') {
+    return 1;
+  }
+
+  if (tripStatusToken === 'hoanthanh' || tripStatusToken === 'completed') {
+    return 4;
+  }
+
+  return 0;
 }
 
 function getDriverInitials(name) {
@@ -263,35 +277,32 @@ function getTripStatusCopy(tripStatusToken, driverName = '') {
 }
 
 export default function RideTrackingModal({ open = false, booking = null, onClose, onMinimize, onCancel, onNotify }) {
-  const [trackingStepIndex, setTrackingStepIndex] = useState(0);
   const [liveBooking, setLiveBooking] = useState(booking);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [chatDialogOpen, setChatDialogOpen] = useState(false);
+  const [driverInfoDialogOpen, setDriverInfoDialogOpen] = useState(false);
+  const [driverLocationDialogOpen, setDriverLocationDialogOpen] = useState(false);
   const cancelRequestInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
       setCancelDialogOpen(false);
       setChatDialogOpen(false);
+      setDriverInfoDialogOpen(false);
+      setDriverLocationDialogOpen(false);
       setLiveBooking(booking);
       return undefined;
     }
 
     setLiveBooking(booking);
-    setTrackingStepIndex(0);
     setChatDialogOpen(false);
+    setDriverInfoDialogOpen(false);
+    setDriverLocationDialogOpen(false);
 
-    const firstTimerId = window.setTimeout(() => {
-      setTrackingStepIndex(1);
-    }, 2200);
-
-    const secondTimerId = window.setTimeout(() => {
-      setTrackingStepIndex(2);
-    }, 4400);
+    const releaseBodyScrollLock = acquireBodyScrollLock();
 
     return () => {
-      window.clearTimeout(firstTimerId);
-      window.clearTimeout(secondTimerId);
+      releaseBodyScrollLock();
     };
   }, [booking?.bookingCode, open]);
 
@@ -352,6 +363,16 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
+        if (driverInfoDialogOpen) {
+          setDriverInfoDialogOpen(false);
+          return;
+        }
+
+        if (driverLocationDialogOpen) {
+          setDriverLocationDialogOpen(false);
+          return;
+        }
+
         if (chatDialogOpen) {
           setChatDialogOpen(false);
           return;
@@ -366,7 +387,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [chatDialogOpen, onClose, open]);
+  }, [chatDialogOpen, driverInfoDialogOpen, driverLocationDialogOpen, onClose, open]);
 
   const bookingTimeLabel = formatBookingTime(booking?.createdAt);
   const currentBooking = liveBooking ?? booking;
@@ -391,10 +412,11 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
   const isPrePickupAssignedState = isDriverPrePickupTripStatus(tripStatusToken);
   const isOnTripState = isDriverOnTripTripStatus(tripStatusToken);
   const isAssignedState = isPrePickupAssignedState || isOnTripState;
-  const timelineSteps = isAssignedState ? ASSIGNED_TRACKING_STEPS : SEARCH_TRACKING_STEPS;
-  const timelineStepIndex = isAssignedState ? getAssignedStepIndex(tripStatusToken) : trackingStepIndex;
+  const canCancelTrip = !isOnTripState;
+  const trackingStepIndex = getCustomerTrackingStepIndex(tripStatusToken);
+  const trackingSteps = CUSTOMER_TRACKING_STEPS;
+  const activeStep = trackingSteps[trackingStepIndex] ?? trackingSteps[0];
   const progressValue = liveStatus.progress;
-  const activeStep = timelineSteps[timelineStepIndex] ?? timelineSteps[timelineSteps.length - 1];
   const canCallDriver = Boolean(normalizeText(driverPhone));
   const driverVehicleDisplayLabel = driverVehicleLabel || 'RiBike';
 
@@ -436,15 +458,56 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
     }
 
     setCancelDialogOpen(false);
+    setDriverInfoDialogOpen(false);
     setChatDialogOpen(true);
   };
 
+  const handleOpenDriverInfoDialog = () => {
+    if (!driverName) {
+      return;
+    }
+
+    setCancelDialogOpen(false);
+    setChatDialogOpen(false);
+    setDriverInfoDialogOpen(true);
+  };
+
+  const handleCloseDriverInfoDialog = () => {
+    setDriverInfoDialogOpen(false);
+  };
+
+  const handleOpenDriverLocationDialog = () => {
+    if (!bookingCode || !isAssignedState) {
+      onNotify?.('Vị trí tài xế sẽ hiển thị sau khi đơn được tài xế nhận.', 'error', 2200);
+      return;
+    }
+
+    setCancelDialogOpen(false);
+    setChatDialogOpen(false);
+    setDriverInfoDialogOpen(false);
+    setDriverLocationDialogOpen(true);
+  };
+
+  const handleCloseDriverLocationDialog = () => {
+    setDriverLocationDialogOpen(false);
+  };
+
+  const handleDriverCardKeyDown = (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+
+    event.preventDefault();
+    handleOpenDriverInfoDialog();
+  };
+
   const handleCancel = () => {
-    if (!booking || cancelRequestInFlightRef.current) {
+    if (!booking || cancelRequestInFlightRef.current || !canCancelTrip) {
       return;
     }
 
     setChatDialogOpen(false);
+    setDriverInfoDialogOpen(false);
     setCancelDialogOpen(true);
   };
 
@@ -480,6 +543,8 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
   const handleBackdropClick = () => {
     setCancelDialogOpen(false);
     setChatDialogOpen(false);
+    setDriverInfoDialogOpen(false);
+    setDriverLocationDialogOpen(false);
 
     if (onMinimize) {
       onMinimize();
@@ -507,6 +572,120 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
 
     window.location.href = `tel:${normalizeText(driverPhone).replace(/\s+/g, '')}`;
   };
+
+  const cancelRideDialogNode = (
+    <CancelRideReasonDialog
+      open={cancelDialogOpen}
+      onCancel={handleCancelDialogClose}
+      onConfirm={handleCancelDialogConfirm}
+    />
+  );
+
+  const tripChatDialogNode = (
+    <TripChatDialog
+      open={chatDialogOpen}
+      bookingCode={bookingCode}
+      accountId={String(currentBooking?.customerAccountId ?? currentBooking?.accountId ?? '').trim()}
+      roleCode="Q2"
+      dialogTitle="Liên hệ tài xế"
+      dialogSubtitle={`${driverVehicleDisplayLabel}${driverLicensePlateLabel ? ` · ${driverLicensePlateLabel}` : ''}`}
+      statusLabel="Đang tới điểm đón"
+      statusValue={driverPhone || 'Đang cập nhật'}
+      contactName={driverName || 'Tài xế'}
+      contactPhone={driverPhone}
+      quickReplies={[
+        'Dạ anh tới gần chưa ạ?',
+        'Em đang đứng ở cổng chính ạ.',
+        'Anh tới nơi gọi em giúp nhé.',
+      ]}
+      onClose={handleCloseChatDialog}
+      onNotify={onNotify}
+    />
+  );
+
+  const driverInfoDialogNode = driverInfoDialogOpen && driverName ? createPortal(
+    <div className="booking-tracking-modal__driver-layer" role="dialog" aria-modal="true" aria-label={`Thông tin tài xế ${driverName}`}>
+      <div className="booking-tracking-modal__driver-backdrop" onClick={handleCloseDriverInfoDialog} aria-hidden="true" />
+
+      <section className="booking-tracking-modal__driver-sheet">
+        <button className="booking-tracking-modal__driver-close" type="button" onClick={handleCloseDriverInfoDialog} aria-label="Đóng thông tin tài xế">
+          <img className="booking-tracking-modal__driver-close-icon" src={closeIcon} alt="" aria-hidden="true" />
+        </button>
+
+        <section className="booking-tracking-modal__driver-card booking-tracking-modal__driver-card--profile">
+          <div className="booking-tracking-modal__driver-head booking-tracking-modal__driver-head--profile">
+            <div className="booking-tracking-modal__driver-avatar booking-tracking-modal__driver-avatar--profile" aria-hidden="true">
+              {driverInitials || <img className="booking-tracking-modal__driver-avatar-icon" src={userIcon} alt="" aria-hidden="true" />}
+            </div>
+
+            <div className="booking-tracking-modal__driver-copy booking-tracking-modal__driver-copy--profile">
+              <p className="booking-tracking-modal__section-kicker">Thông tin tài xế</p>
+              <div className="booking-tracking-modal__driver-copy-title">
+                <h4>{driverName || 'Tài xế'}</h4>
+              </div>
+              <p>{driverVehicleDisplayLabel || 'Đang cập nhật loại xe'}</p>
+            </div>
+
+            <div className="booking-tracking-modal__driver-profile-code">
+              <span>Mã chuyến</span>
+              <strong>{bookingCode || '--'}</strong>
+            </div>
+          </div>
+
+          <div className="booking-tracking-modal__driver-profile-list">
+            <div className="booking-tracking-modal__driver-profile-row">
+              <span className="booking-tracking-modal__driver-profile-label">
+                <img className="booking-tracking-modal__driver-profile-icon" src={phoneIcon} alt="" aria-hidden="true" />
+                Số điện thoại
+              </span>
+
+              <strong>{driverPhone || 'Đang cập nhật'}</strong>
+            </div>
+
+            <div className="booking-tracking-modal__driver-profile-row">
+              <span className="booking-tracking-modal__driver-profile-label">
+                <img className="booking-tracking-modal__driver-profile-icon booking-tracking-modal__driver-profile-icon--vehicle" src={motorbikeIcon} alt="" aria-hidden="true" />
+                Phương tiện
+              </span>
+
+              <strong>{driverVehicleDisplayLabel || 'Đang cập nhật'}</strong>
+            </div>
+
+            <div className="booking-tracking-modal__driver-profile-row">
+              <span className="booking-tracking-modal__driver-profile-label">
+                <span className="booking-tracking-modal__driver-profile-symbol" aria-hidden="true">#</span>
+                Biển số
+              </span>
+
+              <strong>{driverLicensePlateLabel || 'Đang cập nhật'}</strong>
+            </div>
+
+            <div className="booking-tracking-modal__driver-profile-row">
+              <span className="booking-tracking-modal__driver-profile-label">
+                <img className="booking-tracking-modal__driver-profile-icon" src={clockIcon} alt="" aria-hidden="true" />
+                Trạng thái
+              </span>
+
+              <strong>{liveStatus.title}</strong>
+            </div>
+          </div>
+
+          <div className="booking-tracking-modal__driver-profile-actions">
+            <button className="booking-tracking-modal__chat-button booking-tracking-modal__chat-button--dialog" type="button" onClick={handleChatDriver} disabled={!driverPhone}>
+              <ChatGlyph />
+              <span>Chat</span>
+            </button>
+
+            <button className="booking-tracking-modal__call-driver booking-tracking-modal__call-driver--dialog" type="button" onClick={() => { handleCloseDriverInfoDialog(); handleCallDriver(); }} disabled={!canCallDriver}>
+              <img className="booking-tracking-modal__call-driver-icon" src={phoneIcon} alt="" aria-hidden="true" />
+              Gọi tài xế
+            </button>
+          </div>
+        </section>
+      </section>
+    </div>,
+    document.body,
+  ) : null;
 
   if (!open || !booking) {
     return null;
@@ -578,12 +757,23 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
               </div>
 
               <div className="booking-tracking-modal__assigned-preview-right">
-                <div className="booking-tracking-modal__driver-card">
+                <div
+                  className={classNames('booking-tracking-modal__driver-card', driverName && 'booking-tracking-modal__driver-card--interactive')}
+                  role={driverName ? 'button' : undefined}
+                  tabIndex={driverName ? 0 : undefined}
+                  aria-haspopup={driverName ? 'dialog' : undefined}
+                  aria-label={driverName ? `Xem thêm thông tin tài xế ${driverName}` : 'Thông tin tài xế đang được cập nhật'}
+                  onClick={driverName ? handleOpenDriverInfoDialog : undefined}
+                  onKeyDown={driverName ? handleDriverCardKeyDown : undefined}
+                >
                   <div className="booking-tracking-modal__driver-avatar booking-tracking-modal__driver-avatar--preview" aria-hidden="true">
                     <img className="booking-tracking-modal__driver-avatar-icon" src={userIcon} alt="" aria-hidden="true" />
                   </div>
 
-                  <strong className="booking-tracking-modal__driver-name">{driverName || 'Nguyễn Văn A'}</strong>
+                  <div className="booking-tracking-modal__driver-name-row">
+                    <strong className="booking-tracking-modal__driver-name">{driverName || 'Nguyễn Văn A'}</strong>
+                    <span className="booking-tracking-modal__driver-more booking-tracking-modal__driver-more--inline">Thêm</span>
+                  </div>
 
                   <div className="booking-tracking-modal__driver-rating" aria-label={`Đánh giá ${driverRatingStars} trên 5 sao`}>
                     {Array.from({ length: 5 }).map((_, index) => (
@@ -606,7 +796,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
                       </button>
                     </div>
 
-                    <button className="booking-tracking-modal__chat-button" type="button" onClick={handleChatDriver} disabled={!driverPhone}>
+                    <button className="booking-tracking-modal__chat-button" type="button" onClick={(event) => { event.stopPropagation(); handleChatDriver(); }} disabled={!driverPhone}>
                       <ChatGlyph />
                       <span>Chat</span>
                     </button>
@@ -624,11 +814,17 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
                 </div>
 
                 <footer className="booking-tracking-modal__preview-actions">
-                  <button className="booking-tracking-modal__cancel booking-tracking-modal__cancel--preview" type="button" onClick={handleCancel}>
+                  <button
+                    className="booking-tracking-modal__cancel booking-tracking-modal__cancel--preview"
+                    type="button"
+                    onClick={handleCancel}
+                    disabled={!canCancelTrip}
+                    title={canCancelTrip ? 'Hủy chuyến' : 'Sau khi tài xế đã đón khách, chuyến không thể hủy.'}
+                  >
                     Hủy chuyến
                   </button>
 
-                  <button className="booking-tracking-modal__location-button" type="button">
+                  <button className="booking-tracking-modal__location-button" type="button" onClick={handleOpenDriverLocationDialog} disabled={!isAssignedState}>
                     Vị trí tài xế
                   </button>
                 </footer>
@@ -639,29 +835,12 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
           </div>
         </section>
 
-        <CancelRideReasonDialog
-          open={cancelDialogOpen}
-          onCancel={handleCancelDialogClose}
-          onConfirm={handleCancelDialogConfirm}
-        />
-
-        <TripChatDialog
-          open={chatDialogOpen}
-          bookingCode={bookingCode}
-          accountId={String(currentBooking?.customerAccountId ?? currentBooking?.accountId ?? '').trim()}
-          roleCode="Q2"
-          dialogTitle="Liên hệ tài xế"
-          dialogSubtitle={`${driverVehicleDisplayLabel}${driverLicensePlateLabel ? ` · ${driverLicensePlateLabel}` : ''}`}
-          statusLabel="Đang tới điểm đón"
-          statusValue={driverPhone || 'Đang cập nhật'}
-          contactName={driverName || 'Tài xế'}
-          contactPhone={driverPhone}
-          quickReplies={[
-            'Dạ anh tới gần chưa ạ?',
-            'Em đang đứng ở cổng chính ạ.',
-            'Anh tới nơi gọi em giúp nhé.',
-          ]}
-          onClose={handleCloseChatDialog}
+        {cancelRideDialogNode}
+        {tripChatDialogNode}
+        <DriverLocationDialog
+          open={driverLocationDialogOpen}
+          booking={currentBooking}
+          onClose={handleCloseDriverLocationDialog}
           onNotify={onNotify}
         />
       </div>,
@@ -670,223 +849,185 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
   }
 
   return createPortal(
-    <div className={classNames('booking-tracking-modal', isAssignedState && 'booking-tracking-modal--assigned')} role="dialog" aria-modal="true" aria-label={isOnTripState ? 'Tài xế đã đón khách' : isAssignedState ? 'Tài xế đã nhận chuyến' : 'Trạng thái tìm tài xế'}>
+    <div className={classNames('booking-tracking-modal', 'booking-tracking-modal--tracking', isOnTripState && 'booking-tracking-modal--tracking-live', !driverName && 'booking-tracking-modal--tracking-search')} role="dialog" aria-modal="true" aria-label={isOnTripState ? 'Chuyến đi đang diễn ra' : 'Đang tìm tài xế'}>
       <div className="booking-tracking-modal__backdrop" onClick={handleBackdropClick} aria-hidden="true" />
 
-      <section className="booking-tracking-modal__window">
+      <section className="booking-tracking-modal__window booking-tracking-modal__window--tracking">
         <button className="booking-tracking-modal__close" type="button" onClick={() => onClose?.()} aria-label="Đóng">
           <img className="booking-tracking-modal__close-icon" src={closeIcon} alt="" aria-hidden="true" />
         </button>
 
-        <header className="booking-tracking-modal__header">
-          <p className="booking-tracking-modal__eyebrow">{isAssignedState ? 'Tài xế đã nhận chuyến' : 'Đặt xe thành công'}</p>
+        <header className="booking-tracking-modal__header booking-tracking-modal__header--tracking">
+          <p className="booking-tracking-modal__eyebrow">{isOnTripState ? 'Chuyến đang di chuyển' : 'Đặt xe thành công'}</p>
           <h3>{liveStatus.title}</h3>
           <p className="booking-tracking-modal__description">{liveStatus.description}</p>
-          {isAssignedState ? (
-            <div className="booking-tracking-modal__status-chip-row" aria-label="Trạng thái chuyến xe">
-              <span className="booking-tracking-modal__status-chip booking-tracking-modal__status-chip--active">Đã có tài xế</span>
-              <span className="booking-tracking-modal__status-chip">Chưa đón khách</span>
-              <span className="booking-tracking-modal__status-chip booking-tracking-modal__status-chip--tone">Theo dõi lộ trình</span>
-            </div>
-          ) : null}
+          <div className="booking-tracking-modal__status-chip-row booking-tracking-modal__status-chip-row--tracking" aria-label="Trạng thái chuyến xe">
+            <span className="booking-tracking-modal__status-chip booking-tracking-modal__status-chip--active">{liveStatus.badge}</span>
+            <span className="booking-tracking-modal__status-chip">Theo dõi lộ trình</span>
+            <span className="booking-tracking-modal__status-chip booking-tracking-modal__status-chip--tone">{activeStep.title}</span>
+          </div>
         </header>
 
-        <div className="booking-tracking-modal__body">
-          <div className="booking-tracking-modal__left">
-            <div className="booking-tracking-modal__route-card">
-              <div className="booking-tracking-modal__route-row">
-                <span className="booking-tracking-modal__route-icon booking-tracking-modal__route-icon--pickup">
-                  <img className="booking-tracking-modal__route-icon-img" src={originIcon} alt="" aria-hidden="true" />
-                </span>
+        <div className="booking-tracking-modal__tracking-stage">
+          <div className="booking-tracking-modal__tracking-map-shell">
+            <RoutePreviewMap
+              className="booking-tracking-modal__map"
+              pickupPosition={currentBooking?.pickup?.position}
+              destinationPosition={currentBooking?.destination?.position}
+              routeGeometry={currentBooking?.routeGeometry}
+              routeProvider={currentBooking?.routeProvider}
+              showExpandButton={false}
+              showProviderLabel={false}
+            />
 
-                <div className="booking-tracking-modal__route-copy">
-                  <span>Điểm đón</span>
-                  <strong>{pickupLabel}</strong>
-                </div>
-              </div>
-
-              <div className="booking-tracking-modal__route-divider" />
-
-              <div className="booking-tracking-modal__route-row">
-                <span className="booking-tracking-modal__route-icon booking-tracking-modal__route-icon--destination">
-                  <img className="booking-tracking-modal__route-icon-img" src={pinIcon} alt="" aria-hidden="true" />
-                </span>
-
-                <div className="booking-tracking-modal__route-copy">
-                  <span>Điểm đến</span>
-                  <strong>{destinationLabel}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="booking-tracking-modal__trip-card">
-              <div className="booking-tracking-modal__trip-head">
-                <div>
-                  <span className="booking-tracking-modal__trip-kicker">{booking?.vehicleLabel?.trim() || 'Cuốc xe'}</span>
-                  <h4>{rideTitle}</h4>
-                </div>
-
-                <div className="booking-tracking-modal__booking-code">
-                  <span>Mã chuyến</span>
-                  <strong>{bookingCode || '--'}</strong>
-                </div>
-              </div>
-
-              <div className="booking-tracking-modal__details">
-                <div className="booking-tracking-modal__detail-item">
-                  <span className="booking-tracking-modal__detail-label">
-                    <img className="booking-tracking-modal__detail-icon" src={clockIcon} alt="" aria-hidden="true" />
-                    Thời gian
-                  </span>
-                  <strong>{bookingTimeLabel || '--'}</strong>
-                </div>
-
-                <div className="booking-tracking-modal__detail-item">
-                  <span className="booking-tracking-modal__detail-label">Thanh toán</span>
-                  <strong>{paymentSummary || '--'}</strong>
-                </div>
-
-                <div className="booking-tracking-modal__detail-item">
-                  <span className="booking-tracking-modal__detail-label">Trạng thái</span>
-                  <strong>{paymentStatus || '--'}</strong>
-                </div>
-
-                <div className="booking-tracking-modal__detail-item">
-                  <span className="booking-tracking-modal__detail-label">Giá cước</span>
-                  <strong>{priceLabel || '--'}</strong>
-                </div>
-
-                <div className="booking-tracking-modal__detail-item">
-                  <span className="booking-tracking-modal__detail-label">Quãng đường</span>
-                  <strong>{routeDistanceLabel || '--'}</strong>
-                </div>
-
-                <div className="booking-tracking-modal__detail-item">
-                  <span className="booking-tracking-modal__detail-label">Dự kiến</span>
-                  <strong>{etaLabel || '--'}</strong>
-                </div>
-              </div>
-            </div>
+            <div className="booking-tracking-modal__map-badge">{liveStatus.badge}</div>
           </div>
 
-          <div className="booking-tracking-modal__right">
-            {isAssignedState ? (
-              <div className="booking-tracking-modal__driver-spotlight">
-                <div className="booking-tracking-modal__driver-avatar" aria-hidden="true">
-                  {driverInitials}
+          <aside className="booking-tracking-modal__tracking-panel">
+            <section className="booking-tracking-modal__tracking-status-card">
+              <div className="booking-tracking-modal__tracking-status-head">
+                <div>
+                  <p className="booking-tracking-modal__section-kicker">TRẠNG THÁI CHUYẾN ĐI</p>
+                  <strong>{activeStep.title}</strong>
                 </div>
 
-                <div className="booking-tracking-modal__driver-copy">
-                  <span>Đã nhận chuyến</span>
-                  <strong>{driverName || 'Tài xế đang trên đường'}</strong>
-                  <p>{driverVehicleLabel || 'Đang cập nhật loại xe'}{driverPhone ? ` · ${driverPhone}` : ''}</p>
+                <span className={classNames('booking-tracking-modal__tracking-status-pill', isOnTripState && 'is-live')}>
+                  {liveStatus.badge}
+                </span>
+              </div>
+
+              <div className="booking-tracking-modal__tracking-step-list" aria-label="Danh sách trạng thái chuyến xe">
+                {trackingSteps.map((step, index) => {
+                  const isComplete = index < trackingStepIndex;
+                  const isActive = index === trackingStepIndex;
+
+                  return (
+                    <div
+                      key={step.id}
+                      className={classNames(
+                        'booking-tracking-modal__tracking-step',
+                        isComplete && 'is-complete',
+                        isActive && 'is-active',
+                      )}
+                    >
+                      <span className="booking-tracking-modal__tracking-step-marker" aria-hidden="true">
+                        {isComplete ? '✓' : isActive ? '•' : '○'}
+                      </span>
+
+                      <div className="booking-tracking-modal__tracking-step-copy">
+                        <strong>{step.title}</strong>
+                        <p>{step.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section
+              className={classNames('booking-tracking-modal__tracking-driver-card', driverName && 'booking-tracking-modal__tracking-driver-card--interactive')}
+              role={driverName ? 'button' : undefined}
+              tabIndex={driverName ? 0 : undefined}
+              aria-haspopup={driverName ? 'dialog' : undefined}
+              aria-label={driverName ? `Xem thêm thông tin tài xế ${driverName}` : 'Thông tin tài xế đang được cập nhật'}
+              onClick={driverName ? handleOpenDriverInfoDialog : undefined}
+              onKeyDown={driverName ? handleDriverCardKeyDown : undefined}
+            >
+              <div className="booking-tracking-modal__tracking-driver-head">
+                <p className="booking-tracking-modal__section-kicker">THÔNG TIN TÀI XẾ</p>
+                <div className="booking-tracking-modal__tracking-driver-head-actions">
+                  <span className={classNames('booking-tracking-modal__tracking-driver-badge', driverName ? 'is-live' : 'is-waiting')}>
+                    {driverName ? (isOnTripState ? 'Đang di chuyển' : 'Đã có tài xế') : 'Đang chờ'}
+                  </span>
                 </div>
-
-                <button
-                  className="booking-tracking-modal__call-driver"
-                  type="button"
-                  onClick={handleCallDriver}
-                  disabled={!canCallDriver}
-                >
-                  <img className="booking-tracking-modal__call-driver-icon" src={phoneIcon} alt="" aria-hidden="true" />
-                  {canCallDriver ? 'Gọi tài xế' : 'Đang cập nhật'}
-                </button>
-              </div>
-            ) : null}
-
-            <div className="booking-tracking-modal__map-shell">
-              <RoutePreviewMap
-                className="booking-tracking-modal__map"
-                pickupPosition={currentBooking?.pickup?.position}
-                destinationPosition={currentBooking?.destination?.position}
-                routeGeometry={currentBooking?.routeGeometry}
-                routeProvider={currentBooking?.routeProvider}
-                showExpandButton={false}
-                showProviderLabel={false}
-              />
-
-              <div className="booking-tracking-modal__map-badge">{liveStatus.badge}</div>
-            </div>
-
-            <div className={classNames('booking-tracking-modal__status-card', isAssignedState && 'booking-tracking-modal__status-card--assigned')}>
-              <div className="booking-tracking-modal__status-head">
-                <span className="booking-tracking-modal__status-dot" aria-hidden="true" />
-                <strong>{liveStatus.title}</strong>
-              </div>
-
-              <p>{liveStatus.description}</p>
-
-              <div className="booking-tracking-modal__status-highlight" aria-label="Tiến trình hiện tại">
-                <span>Bước hiện tại</span>
-                <strong>{activeStep.title}</strong>
-                <p>{activeStep.description}</p>
               </div>
 
               {driverName ? (
-                <div className="booking-tracking-modal__details">
-                  <div className="booking-tracking-modal__detail-item">
-                    <span className="booking-tracking-modal__detail-label">Tài xế</span>
-                    <strong>{driverName}</strong>
-                  </div>
+                <div className="booking-tracking-modal__tracking-driver-content">
+                  <div className="booking-tracking-modal__tracking-driver-main">
+                    <div className="booking-tracking-modal__driver-avatar booking-tracking-modal__driver-avatar--tracking" aria-hidden="true">
+                      {driverInitials}
+                    </div>
 
-                  <div className="booking-tracking-modal__detail-item">
-                    <span className="booking-tracking-modal__detail-label">Liên hệ</span>
-                    <strong>{driverPhone || 'Đang cập nhật'}</strong>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="booking-tracking-modal__progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressValue}>
-                <span style={{ width: `${progressValue}%` }} />
-              </div>
-
-              <div className="booking-tracking-modal__timeline" aria-label={isAssignedState ? 'Tiến trình đón khách' : 'Tiến trình tìm tài xế'}>
-                {timelineSteps.map((step, index) => (
-                  <div
-                    key={step.id}
-                    className={classNames(
-                      'booking-tracking-modal__timeline-item',
-                      index < timelineStepIndex && 'is-complete',
-                      index === timelineStepIndex && 'is-active',
-                    )}
-                  >
-                    <span className="booking-tracking-modal__timeline-index">{index + 1}</span>
-                    <div>
-                      <strong>{step.title}</strong>
-                      <p>{step.description}</p>
+                    <div className="booking-tracking-modal__tracking-driver-copy">
+                              <div className="booking-tracking-modal__tracking-driver-copy-title">
+                                <strong>{driverName}</strong>
+                                <span className="booking-tracking-modal__driver-more booking-tracking-modal__driver-more--inline">Thêm</span>
+                              </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <footer className={classNames('booking-tracking-modal__footer', isAssignedState && 'booking-tracking-modal__footer--assigned')}>
-          {isAssignedState ? (
-            <>
-              <button className="booking-tracking-modal__call-driver booking-tracking-modal__call-driver--footer" type="button" onClick={handleCallDriver} disabled={!canCallDriver}>
+                  <div className="booking-tracking-modal__tracking-driver-lines">
+                            <div className="booking-tracking-modal__tracking-driver-line">
+                      <img className="booking-tracking-modal__tracking-driver-icon" src={phoneIcon} alt="" aria-hidden="true" />
+                      <span>{driverPhone || 'Đang cập nhật'}</span>
+                    </div>
+
+                            <div className="booking-tracking-modal__tracking-driver-line booking-tracking-modal__tracking-driver-line--vehicle">
+                      <img className="booking-tracking-modal__tracking-driver-icon booking-tracking-modal__tracking-driver-icon--vehicle" src={motorbikeIcon} alt="" aria-hidden="true" />
+                              <span>{driverVehicleDisplayLabel}</span>
+                              {driverPhone ? (
+                                <button className="booking-tracking-modal__chat-button booking-tracking-modal__chat-button--tracking-inline" type="button" onClick={(event) => { event.stopPropagation(); handleChatDriver(); }} disabled={!driverPhone}>
+                                  <ChatGlyph />
+                                  <span>Chat</span>
+                                </button>
+                              ) : null}
+                    </div>
+
+                    <div className="booking-tracking-modal__tracking-driver-line">
+                      <DriverPlateGlyph />
+                      <span>{driverLicensePlateLabel || 'Đang cập nhật'}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="booking-tracking-modal__tracking-driver-empty">
+                  <div className="booking-tracking-modal__driver-avatar booking-tracking-modal__driver-avatar--tracking" aria-hidden="true">
+                    <img className="booking-tracking-modal__tracking-driver-avatar-icon" src={userIcon} alt="" aria-hidden="true" />
+                  </div>
+
+                  <div className="booking-tracking-modal__tracking-driver-empty-copy">
+                    <strong>Đang tìm tài xế phù hợp</strong>
+                    <p>Thông tin tài xế sẽ hiện ngay khi có người nhận đơn.</p>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <div className="booking-tracking-modal__tracking-actions">
+              <button
+                className="booking-tracking-modal__call-driver booking-tracking-modal__call-driver--tracking"
+                type="button"
+                onClick={handleCallDriver}
+                disabled={!canCallDriver}
+              >
                 <img className="booking-tracking-modal__call-driver-icon" src={phoneIcon} alt="" aria-hidden="true" />
                 {canCallDriver ? 'Gọi tài xế' : 'Đang cập nhật'}
               </button>
 
-              <button className="booking-tracking-modal__cancel" type="button" onClick={handleCancel}>
+              <button
+                className="booking-tracking-modal__cancel booking-tracking-modal__cancel--tracking"
+                type="button"
+                onClick={handleCancel}
+                disabled={!canCancelTrip}
+                title={canCancelTrip ? 'Hủy chuyến' : 'Sau khi tài xế đã đón khách, chuyến không thể hủy.'}
+              >
                 Hủy chuyến
               </button>
-            </>
-          ) : (
-            <button className="booking-tracking-modal__cancel" type="button" onClick={handleCancel}>
-              Hủy chuyến
-            </button>
-          )}
-        </footer>
-      </section>
+            </div>
 
-      <CancelRideReasonDialog
-        open={cancelDialogOpen}
-        onCancel={handleCancelDialogClose}
-        onConfirm={handleCancelDialogConfirm}
-      />
+            <p className="booking-tracking-modal__tracking-note">
+              {isOnTripState
+                ? 'Chuyến đã bắt đầu, bạn có thể theo dõi lộ trình và liên hệ tài xế ngay bên dưới.'
+                : 'Màn hình sẽ tự cập nhật khi có tài xế nhận đơn.'}
+            </p>
+          </aside>
+        </div>
+
+        {driverInfoDialogNode}
+        {cancelRideDialogNode}
+        {tripChatDialogNode}
+      </section>
     </div>,
     document.body,
   );

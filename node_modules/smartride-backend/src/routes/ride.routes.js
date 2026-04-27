@@ -6,6 +6,7 @@ import {
 	searchRideController,
 	streamRideEventsController,
 	sendTripMessageController,
+	submitRideRatingController,
 	updateTripStatusController,
 } from '../controllers/ride.controller.js';
 
@@ -15,6 +16,7 @@ router.get('/stream', streamRideEventsController);
 router.get('/:bookingCode/messages', getTripMessagesController);
 router.post('/:bookingCode/messages', sendTripMessageController);
 router.patch('/:bookingCode/status', updateTripStatusController);
+router.post('/:bookingCode/rating', submitRideRatingController);
 router.get('/history', getTripHistoryController);
 router.post('/search', searchRideController);
 router.post('/book', bookRideController);

@@ -1,13 +1,18 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { carIcon, clockIcon, closeIcon, originIcon, pinIcon, starIcon, userIcon } from '../../assets/icons';
+import DatePicker, { registerLocale } from 'react-datepicker';
+import { format as formatDate, isValid, parse } from 'date-fns';
+import { vi } from 'date-fns/locale';
+import { closeIcon } from '../../assets/icons';
 import { rideService } from '../../services/rideService';
-import RoutePreviewMap from './RoutePreviewMap';
 import { classNames } from '../../utils/classNames';
+import TripHistoryDetailModal from './TripHistoryDetailModal';
+
+registerLocale('vi-VN', vi);
 
 const TRIP_HISTORY_STATUS_OPTIONS = [
-  { value: 'all', label: 'Tất cả' },
+  { value: 'all', label: 'Tất cả trạng thái' },
   { value: 'completed', label: 'Hoàn thành' },
   { value: 'scheduled', label: 'Đặt trước' },
   { value: 'in-progress', label: 'Đang chờ' },
@@ -16,18 +21,18 @@ const TRIP_HISTORY_STATUS_OPTIONS = [
 
 const TRIP_HISTORY_PRESETS = {
   customer: {
-    eyebrow: 'Lịch sử chuyến của khách hàng',
-    title: 'Xem lại các chuyến đã đặt',
-    summary: 'Dữ liệu booking, thanh toán và tuyến đường được lấy trực tiếp từ server.',
-    searchPlaceholder: 'Tìm theo mã chuyến, điểm đón, điểm đến...',
+    eyebrow: 'Lịch sử chuyến đi',
+    title: 'LỊCH SỬ CHUYẾN ĐI',
+    summary: 'Tra cứu các chuyến đã hoàn thành, đặt trước hoặc đã hủy trong cùng một bảng.',
+    searchPlaceholder: 'Mã chuyến đi',
     accentLabel: 'Khách hàng',
     heroNote: 'Dữ liệu thật từ server.',
   },
   driver: {
-    eyebrow: 'Lịch sử chuyến của tài xế',
-    title: 'Bảng quản lý chuyến đi',
-    summary: 'Theo dõi các booking mới nhất, trạng thái thanh toán và tuyến đường thực tế.',
-    searchPlaceholder: 'Tìm theo mã chuyến, khách hàng, điểm đến...',
+    eyebrow: 'Lịch sử chuyến đi',
+    title: 'LỊCH SỬ CHUYẾN ĐI',
+    summary: 'Theo dõi danh sách booking theo trạng thái, thời gian và số tiền thanh toán.',
+    searchPlaceholder: 'Mã chuyến / khách hàng',
     accentLabel: 'Tài xế',
     heroNote: 'Dữ liệu thật từ server.',
   },
@@ -81,6 +86,46 @@ function formatTripDate(value) {
   return format(parsedDate, 'HH:mm · dd/MM/yyyy');
 }
 
+function formatDateKey(value) {
+  const parsedDate = value ? new Date(value) : null;
+
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    return '';
+  }
+
+  const year = parsedDate.getFullYear();
+  const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+  const day = String(parsedDate.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateForPicker(dateString) {
+  const normalizedValue = String(dateString ?? '').trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedDate = parse(normalizedValue, 'yyyy-MM-dd', new Date());
+
+  if (isValid(parsedDate)) {
+    return parsedDate;
+  }
+
+  const fallbackDate = new Date(normalizedValue);
+
+  return isValid(fallbackDate) ? fallbackDate : null;
+}
+
+function formatDateForFilterValue(dateValue) {
+  if (!(dateValue instanceof Date) || !isValid(dateValue)) {
+    return '';
+  }
+
+  return formatDate(dateValue, 'yyyy-MM-dd');
+}
+
 function formatDistance(distanceKm) {
   const normalizedDistance = Number(distanceKm);
 
@@ -89,6 +134,86 @@ function formatDistance(distanceKm) {
   }
 
   return `${normalizedDistance.toFixed(1)} km`;
+}
+
+function trimWithEllipsis(value, maxLength) {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue || normalizedValue.length <= maxLength) {
+    return normalizedValue;
+  }
+
+  return `${normalizedValue.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+}
+
+function compressLocationSegment(value) {
+  return normalizeText(value)
+    .replace(/^Thành phố\s+/i, 'TP. ')
+    .replace(/^Tp\.?\s+/i, 'TP. ')
+    .replace(/^Phường\s+/i, 'P. ')
+    .replace(/^Xã\s+/i, 'X. ')
+    .replace(/^Quận\s+/i, 'Q. ')
+    .replace(/^Huyện\s+/i, 'H. ')
+    .replace(/^Ward\s+/i, 'Ward ')
+    .replace(/^District\s+/i, 'District ')
+    .replace(/^Province\s+/i, 'Province ');
+}
+
+function formatCompactLocationLabel(value) {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) {
+    return '--';
+  }
+
+  const parts = normalizedValue
+    .split(',')
+    .map((part) => compressLocationSegment(part))
+    .map((part) => trimWithEllipsis(part, 28))
+    .filter(Boolean)
+    .filter((part) => !/^\d{4,}$/.test(part))
+    .filter((part) => !/^(việt nam|vietnam)$/i.test(part));
+
+  if (parts.length === 0) {
+    return trimWithEllipsis(normalizedValue, 42);
+  }
+
+  if (parts.length === 1) {
+    return parts[0];
+  }
+
+  const cityPart = parts.find((part, index) => index > 0 && /(tp\.|đà nẵng|da nang|hà nội|ha noi|hồ chí minh|ho chi minh)/i.test(normalizeSearchText(part)));
+  const secondaryPart = cityPart && cityPart !== parts[0] ? cityPart : parts[1];
+
+  if (!secondaryPart || secondaryPart === parts[0]) {
+    return parts[0];
+  }
+
+  return `${parts[0]} · ${secondaryPart}`;
+}
+
+function formatCompactBookingCode(value) {
+  const normalizedValue = normalizeText(value).toUpperCase().replace(/\s+/g, '');
+
+  if (!normalizedValue) {
+    return '--';
+  }
+
+  const segments = normalizedValue.split('-').filter(Boolean);
+
+  if (segments.length >= 4) {
+    return `${segments.slice(0, 3).join('-')}…${segments[segments.length - 1]}`;
+  }
+
+  if (segments.length === 3) {
+    return `${segments[0]}-${segments[1]}…${segments[2]}`;
+  }
+
+  if (normalizedValue.length > 14) {
+    return `${normalizedValue.slice(0, 10)}…${normalizedValue.slice(-4)}`;
+  }
+
+  return normalizedValue;
 }
 
 function formatCompactNumber(value) {
@@ -218,11 +343,23 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
   const routeGeometry = normalizeRouteGeometry(rawItem.routeGeometry);
   const pickupPosition = normalizePosition(rawItem.pickupPosition);
   const destinationPosition = normalizePosition(rawItem.destinationPosition);
+  const price = Number(rawItem.price ?? rawItem.basePrice ?? rawItem.paymentAmount ?? 0);
+  const originalPrice = Number(rawItem.originalPrice ?? rawItem.paymentOriginalAmount ?? price);
+  const discountAmount = Number(rawItem.discountAmount ?? rawItem.paymentDiscountAmount ?? Math.max(0, originalPrice - price));
+  const promotionCode = normalizeText(rawItem.promotionCode ?? rawItem.paymentPromotionCode);
+  const promotionTitle = normalizeText(rawItem.promotionTitle ?? rawItem.paymentPromotionTitle);
+  const promotionSummary = normalizeText(rawItem.promotionSummary) || [
+    promotionCode ? `Mã ${promotionCode}` : '',
+    promotionTitle && promotionTitle !== promotionCode ? promotionTitle : '',
+    discountAmount > 0 ? `Giảm ${formatCurrency(discountAmount)}` : '',
+  ].filter(Boolean).join(' · ');
 
   return {
     id: normalizeText(rawItem.id ?? bookingCode ?? fallbackId),
     bookingCode,
+    bookingCodeShortLabel: formatCompactBookingCode(bookingCode),
     tripCode: paymentCode,
+    tripCodeShortLabel: formatCompactBookingCode(paymentCode),
     paymentCode,
     status,
     statusLabel,
@@ -239,8 +376,22 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
     paymentProvider: normalizeText(rawItem.paymentProvider),
     paymentStatus: normalizeText(rawItem.paymentStatus),
     paymentStatusLabel: normalizeText(rawItem.paymentStatusLabel) || getPaymentStatusLabel(rawItem.paymentStatus),
-    price: Number(rawItem.price ?? 0),
-    priceFormatted: normalizeText(rawItem.priceFormatted) || formatCurrency(rawItem.price),
+    ratingScore: Number(rawItem.ratingScore ?? 0),
+    ratingComment: normalizeText(rawItem.ratingComment),
+    driverDisplayName: normalizeText(rawItem.driverDisplayName ?? rawItem.driverName),
+    driverPhone: normalizeText(rawItem.driverPhone),
+    driverVehicleName: normalizeText(rawItem.driverVehicleName),
+    driverVehicleLicensePlate: normalizeText(rawItem.driverVehicleLicensePlate),
+    driverLicensePlate: normalizeText(rawItem.driverLicensePlate ?? rawItem.driverVehicleLicensePlate),
+    price,
+    priceFormatted: normalizeText(rawItem.priceFormatted) || formatCurrency(price),
+    originalPrice,
+    originalPriceFormatted: normalizeText(rawItem.originalPriceFormatted) || formatCurrency(originalPrice),
+    discountAmount,
+    discountAmountFormatted: normalizeText(rawItem.discountAmountFormatted) || formatCurrency(discountAmount),
+    promotionCode,
+    promotionTitle,
+    promotionSummary,
     routeDistanceKm: Number(rawItem.routeDistanceKm ?? 0),
     etaMinutes: Number(rawItem.etaMinutes ?? 0),
     pickupLabel,
@@ -254,6 +405,8 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
     accountDisplayName: normalizeText(rawItem.accountDisplayName),
     accountIdentifier: normalizeText(rawItem.accountIdentifier),
     accountPhone: normalizeText(rawItem.accountPhone),
+    pickupShortLabel: formatCompactLocationLabel(pickupLabel),
+    destinationShortLabel: formatCompactLocationLabel(destinationLabel),
   };
 }
 
@@ -400,6 +553,8 @@ export default function TripHistoryServerModal({
   const normalizedMode = mode === 'driver' ? 'driver' : 'customer';
   const preset = TRIP_HISTORY_PRESETS[normalizedMode];
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
+  const [dateFilterPickerOpen, setDateFilterPickerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTripId, setSelectedTripId] = useState('');
   const [historyItems, setHistoryItems] = useState([]);
@@ -412,10 +567,19 @@ export default function TripHistoryServerModal({
 
   const visibleTrips = useMemo(() => {
     const normalizedQuery = normalizeSearchText(searchQuery);
+    const normalizedDateFilter = normalizeText(dateFilter);
 
     return historyItems.filter((trip) => {
       if (statusFilter !== 'all' && trip.status !== statusFilter) {
         return false;
+      }
+
+      if (normalizedDateFilter) {
+        const tripDateKey = formatDateKey(trip.completedAt || trip.bookedAt);
+
+        if (tripDateKey !== normalizedDateFilter) {
+          return false;
+        }
       }
 
       if (!normalizedQuery) {
@@ -430,9 +594,11 @@ export default function TripHistoryServerModal({
           trip.destinationLabel,
           trip.customerName,
           trip.rideTitle,
+          trip.vehicleLabel,
           trip.paymentLabel,
           trip.paymentStatusLabel,
           trip.statusLabel,
+          trip.priceFormatted,
         ]
           .filter(Boolean)
           .join(' '),
@@ -440,14 +606,14 @@ export default function TripHistoryServerModal({
 
       return searchableText.includes(normalizedQuery);
     });
-  }, [historyItems, searchQuery, statusFilter]);
+  }, [dateFilter, historyItems, searchQuery, statusFilter]);
 
   const selectedTrip = useMemo(() => {
     if (!visibleTrips.length) {
       return null;
     }
 
-    return visibleTrips.find((trip) => trip.id === selectedTripId) ?? visibleTrips[0];
+    return visibleTrips.find((trip) => trip.id === selectedTripId) ?? null;
   }, [selectedTripId, visibleTrips]);
 
   const stats = useMemo(
@@ -461,6 +627,8 @@ export default function TripHistoryServerModal({
     }
 
     setSearchQuery('');
+    setDateFilter('');
+    setDateFilterPickerOpen(false);
     setStatusFilter('all');
     setSelectedTripId('');
     setHistoryItems([]);
@@ -489,7 +657,6 @@ export default function TripHistoryServerModal({
 
         setHistoryItems(normalizedItems);
         setHistorySummary(normalizedSummary);
-        setSelectedTripId(normalizedItems[0]?.id ?? '');
       } catch (error) {
         if (error?.name === 'AbortError') {
           return;
@@ -507,33 +674,55 @@ export default function TripHistoryServerModal({
 
     loadHistory();
 
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        onClose?.();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
     return () => {
       controller.abort();
       document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [normalizedMode, onClose, open, resolvedAccountId, resolvedIdentifier]);
+
+  useEffect(() => {
+    if (!open) {
+      setDateFilterPickerOpen(false);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
-    if (!visibleTrips.length) {
-      setSelectedTripId('');
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      if (dateFilterPickerOpen) {
+        setDateFilterPickerOpen(false);
+        return;
+      }
+
+      if (selectedTripId) {
+        setSelectedTripId('');
+        return;
+      }
+
+      onClose?.();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [dateFilterPickerOpen, open, onClose, selectedTripId]);
+
+  useEffect(() => {
+    if (!open) {
       return undefined;
     }
 
-    if (!selectedTripId || !visibleTrips.some((trip) => trip.id === selectedTripId)) {
-      setSelectedTripId(visibleTrips[0].id);
+    if (selectedTripId && !visibleTrips.some((trip) => trip.id === selectedTripId)) {
+      setSelectedTripId('');
     }
 
     return undefined;
@@ -543,20 +732,13 @@ export default function TripHistoryServerModal({
     return null;
   }
 
-  const counterpartLabel = normalizedMode === 'driver' ? 'Khách hàng' : 'Tài khoản';
-  const counterpartName = normalizedMode === 'driver'
-    ? selectedTrip?.customerName || '--'
-    : accountDisplayName || resolvedIdentifier || 'Người dùng SmartRide';
-  const counterpartContact = normalizedMode === 'driver'
-    ? selectedTrip?.customerPhone || 'Chưa có số liên hệ'
-    : accountPhone || resolvedIdentifier || 'Chưa có số liên hệ';
-  const selectedStatusLabel = selectedTrip?.statusLabel || '';
-  const selectedStatusTone = selectedTrip?.statusTone || 'neutral';
-  const selectedTimeLabel = formatTripDate(selectedTrip?.completedAt || selectedTrip?.bookedAt);
-  const detailHighlights = selectedTrip ? buildTripHighlights(normalizedMode, selectedTrip, accountDisplayName, resolvedIdentifier, accountPhone) : [];
+  const selectedTripStatusLabel = selectedTrip?.statusLabel || '';
+  const selectedTripStatusTone = selectedTrip?.statusTone || 'neutral';
+  const selectedTripDateLabel = formatTripDate(selectedTrip?.completedAt || selectedTrip?.bookedAt);
+  const selectedTripPriceLabel = selectedTrip?.priceFormatted || '--';
 
   return createPortal(
-    <div className="trip-history-modal" role="dialog" aria-modal="true" aria-label={preset.title}>
+    <div className={classNames('trip-history-modal', `trip-history-modal--${normalizedMode}`)} role="dialog" aria-modal="true" aria-label={preset.title}>
       <div className="trip-history-modal__backdrop" onClick={() => onClose?.()} aria-hidden="true" />
 
       <section className="trip-history-modal__window">
@@ -589,236 +771,192 @@ export default function TripHistoryServerModal({
           ))}
         </section>
 
-        <div className="trip-history-modal__content">
-          <aside className="trip-history-modal__sidebar">
-            <div className="trip-history-modal__search-bar">
-              <input
-                className="trip-history-modal__search-input"
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder={preset.searchPlaceholder}
-              />
-            </div>
+        <section className="trip-history-modal__toolbar" aria-label="Bộ lọc lịch sử chuyến">
+          <label className="trip-history-modal__field trip-history-modal__field--search">
+            <span className="trip-history-modal__field-label">Mã chuyến đi</span>
+            <input
+              className="trip-history-modal__input"
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={preset.searchPlaceholder}
+            />
+          </label>
 
-            <div className="trip-history-modal__filters" aria-label="Lọc theo trạng thái">
+          <label className="trip-history-modal__field">
+            <span className="trip-history-modal__field-label">Ngày giờ</span>
+            <DatePicker
+              selected={parseDateForPicker(dateFilter)}
+              onChange={(selectedDate) => {
+                setDateFilter(formatDateForFilterValue(selectedDate));
+                setDateFilterPickerOpen(false);
+              }}
+              onCalendarOpen={() => setDateFilterPickerOpen(true)}
+              onCalendarClose={() => setDateFilterPickerOpen(false)}
+              onClickOutside={() => setDateFilterPickerOpen(false)}
+              onInputClick={() => setDateFilterPickerOpen(true)}
+              locale="vi-VN"
+              dateFormat="dd/MM/yyyy"
+              placeholderText="dd/mm/yyyy"
+              showMonthDropdown
+              showYearDropdown
+              dropdownMode="select"
+              className="admin-user-modal__date-input"
+              calendarClassName="admin-user-modal__date-calendar"
+              popperClassName="admin-user-modal__date-popper"
+              open={dateFilterPickerOpen}
+              autoComplete="off"
+              showPopperArrow={false}
+            />
+          </label>
+
+          <label className="trip-history-modal__field">
+            <span className="trip-history-modal__field-label">Trạng thái</span>
+            <select
+              className="trip-history-modal__input trip-history-modal__select"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
               {TRIP_HISTORY_STATUS_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={classNames('trip-history-modal__filter-chip', statusFilter === option.value && 'is-active')}
-                  type="button"
-                  onClick={() => setStatusFilter(option.value)}
-                >
+                <option key={option.value} value={option.value}>
                   {option.label}
-                </button>
+                </option>
               ))}
+            </select>
+          </label>
+        </section>
+
+        {selectedTrip ? (
+          <section className="trip-history-modal__selection-strip" aria-label="Chuyến đang được xem">
+            <div className="trip-history-modal__selection-copy">
+              <span className="trip-history-modal__selection-kicker">Đang xem</span>
+              <strong title={selectedTrip.bookingCode}>{selectedTrip.bookingCodeShortLabel}</strong>
+              <p title={`${selectedTrip.pickupLabel || '--'} → ${selectedTrip.destinationLabel || '--'}`}>
+                {selectedTrip.pickupShortLabel || '--'} → {selectedTrip.destinationShortLabel || '--'}
+              </p>
             </div>
 
-            <div className="trip-history-modal__list">
-              {historyLoading ? (
-                <div className="trip-history-modal__empty-state">
-                  <strong>Đang tải lịch sử chuyến</strong>
-                  <p>Hệ thống đang đồng bộ dữ liệu thật từ server.</p>
-                </div>
-              ) : historyError ? (
-                <div className="trip-history-modal__empty-state">
-                  <strong>Không thể tải dữ liệu</strong>
-                  <p>{historyError}</p>
-                </div>
-              ) : visibleTrips.length > 0 ? (
-                visibleTrips.map((trip) => {
-                  const isSelected = trip.id === selectedTrip?.id;
-                  const subtitle = buildTripSubtitle(normalizedMode, trip);
-                  const timeLabel = formatTripDate(trip.completedAt || trip.bookedAt);
-
-                  return (
-                    <button
-                      key={trip.id}
-                      className={classNames('trip-history-modal__item', isSelected && 'is-selected')}
-                      type="button"
-                      onClick={() => setSelectedTripId(trip.id)}
-                    >
-                      <div className="trip-history-modal__item-head">
-                        <div className="trip-history-modal__item-title">
-                          <span className={classNames('trip-history-modal__status', `is-${trip.statusTone}`)}>{trip.statusLabel}</span>
-                          <strong>{trip.bookingCode}</strong>
-                          <span className="trip-history-modal__item-subtitle">{subtitle || trip.rideTitle}</span>
-                        </div>
-
-                        <span className="trip-history-modal__item-time">{timeLabel}</span>
-                      </div>
-
-                      <div className="trip-history-modal__item-route">
-                        <span>{trip.pickupLabel || '--'}</span>
-                        <span>{trip.destinationLabel || '--'}</span>
-                      </div>
-
-                      <div className="trip-history-modal__item-meta">
-                        <span className="trip-history-modal__item-pill">
-                          <img className="trip-history-modal__item-pill-icon" src={clockIcon} alt="" aria-hidden="true" />
-                          {formatDistance(trip.routeDistanceKm)}
-                        </span>
-                        <span className="trip-history-modal__item-pill">{trip.paymentLabel}</span>
-                        <span className="trip-history-modal__item-pill">{trip.priceFormatted}</span>
-                      </div>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="trip-history-modal__empty-state">
-                  <strong>Không tìm thấy chuyến phù hợp</strong>
-                  <p>Hãy đổi từ khóa hoặc bộ lọc để xem lại các chuyến khác.</p>
-                </div>
-              )}
+            <div className="trip-history-modal__selection-meta">
+              <span className="trip-history-modal__selection-pill">{selectedTrip.vehicleLabel || '--'}</span>
+              <span className="trip-history-modal__selection-pill">{selectedTripPriceLabel}</span>
+              <span className="trip-history-modal__selection-pill">{selectedTripDateLabel}</span>
+              <span className={classNames('trip-history-modal__status', `is-${selectedTripStatusTone}`)}>{selectedTripStatusLabel}</span>
+              {selectedTrip.promotionSummary ? (
+                <span className="trip-history-modal__selection-pill trip-history-modal__selection-pill--soft">{selectedTrip.promotionSummary}</span>
+              ) : null}
             </div>
-          </aside>
-
-          <section className="trip-history-modal__detail" aria-label="Chi tiết chuyến đi">
-            {historyLoading ? (
-              <div className="trip-history-modal__empty-detail">
-                <strong>Đang đồng bộ dữ liệu</strong>
-                <p>Chi tiết chuyến sẽ xuất hiện ngay sau khi server trả kết quả.</p>
-              </div>
-            ) : historyError ? (
-              <div className="trip-history-modal__empty-detail">
-                <strong>Không thể hiển thị chi tiết</strong>
-                <p>{historyError}</p>
-              </div>
-            ) : selectedTrip ? (
-              <>
-                <div className="trip-history-modal__detail-header">
-                  <div className="trip-history-modal__detail-copy">
-                    <p className="trip-history-modal__detail-kicker">{selectedTrip.tripCode}</p>
-                    <h4>{selectedTrip.rideTitle || selectedTrip.vehicleLabel}</h4>
-                    <p className="trip-history-modal__detail-summary">
-                      {selectedTrip.pickupLabel || '--'} → {selectedTrip.destinationLabel || '--'}
-                    </p>
-                  </div>
-
-                  <div className="trip-history-modal__detail-badges">
-                    <span className={classNames('trip-history-modal__status', `is-${selectedStatusTone}`)}>{selectedStatusLabel}</span>
-                    <span className="trip-history-modal__detail-time">
-                      <img className="trip-history-modal__detail-time-icon" src={clockIcon} alt="" aria-hidden="true" />
-                      {selectedTimeLabel}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="trip-history-modal__detail-grid">
-                  <div className="trip-history-modal__stack">
-                    <article className="trip-history-modal__route-card">
-                      <div className="trip-history-modal__route-row">
-                        <span className="trip-history-modal__route-icon trip-history-modal__route-icon--pickup">
-                          <img className="trip-history-modal__route-icon-img" src={originIcon} alt="" aria-hidden="true" />
-                        </span>
-
-                        <div className="trip-history-modal__route-copy">
-                          <span>Điểm đón</span>
-                          <strong>{selectedTrip.pickupLabel || '--'}</strong>
-                        </div>
-                      </div>
-
-                      <div className="trip-history-modal__route-divider" />
-
-                      <div className="trip-history-modal__route-row">
-                        <span className="trip-history-modal__route-icon trip-history-modal__route-icon--destination">
-                          <img className="trip-history-modal__route-icon-img" src={pinIcon} alt="" aria-hidden="true" />
-                        </span>
-
-                        <div className="trip-history-modal__route-copy">
-                          <span>Điểm đến</span>
-                          <strong>{selectedTrip.destinationLabel || '--'}</strong>
-                        </div>
-                      </div>
-                    </article>
-
-                    <article className="trip-history-modal__person-card">
-                      <div className="trip-history-modal__person-head">
-                        <span className="trip-history-modal__person-icon">
-                          <img className="trip-history-modal__person-icon-img" src={userIcon} alt="" aria-hidden="true" />
-                        </span>
-
-                        <div>
-                          <span className="trip-history-modal__person-kicker">{counterpartLabel}</span>
-                          <strong>{counterpartName}</strong>
-                          <p>{counterpartContact}</p>
-                        </div>
-                      </div>
-
-                      <div className="trip-history-modal__person-meta">
-                        <span className="trip-history-modal__person-pill">{selectedTrip.vehicleLabel || '--'}</span>
-                        <span className="trip-history-modal__person-pill">{selectedTrip.paymentStatusLabel || '--'}</span>
-                        <span className="trip-history-modal__person-pill">{formatDistance(selectedTrip.routeDistanceKm)}</span>
-                      </div>
-                    </article>
-
-                    <article className="trip-history-modal__note-card">
-                      <span className="trip-history-modal__note-label">Ghi chú</span>
-                      <p>{selectedTrip.note || 'Dữ liệu booking được lấy trực tiếp từ server.'}</p>
-                    </article>
-                  </div>
-
-                  <div className="trip-history-modal__stack">
-                    <article className="trip-history-modal__highlight-grid">
-                      {detailHighlights.map((highlight) => (
-                        <div className="trip-history-modal__highlight-card" key={highlight.label}>
-                          <span className="trip-history-modal__highlight-icon">
-                            <img className="trip-history-modal__highlight-icon-img" src={highlight.icon} alt="" aria-hidden="true" />
-                          </span>
-                          <span className="trip-history-modal__highlight-label">{highlight.label}</span>
-                          <strong>{highlight.value}</strong>
-                        </div>
-                      ))}
-                    </article>
-
-                    <article className="trip-history-modal__map-shell">
-                      <RoutePreviewMap
-                        className="trip-history-modal__map"
-                        pickupPosition={selectedTrip.pickupPosition}
-                        destinationPosition={selectedTrip.destinationPosition}
-                        routeGeometry={selectedTrip.routeGeometry}
-                        routeProvider={selectedTrip.routeProvider}
-                        showExpandButton={false}
-                        showProviderLabel={false}
-                      />
-
-                      <div className="trip-history-modal__map-badge">
-                        {selectedTrip.rideTitle || selectedTrip.vehicleLabel} · {formatDistance(selectedTrip.routeDistanceKm)}
-                      </div>
-                    </article>
-
-                    <article className="trip-history-modal__summary-card">
-                      <div>
-                        <span className="trip-history-modal__summary-label">Giá chuyến</span>
-                        <strong>{selectedTrip.priceFormatted}</strong>
-                      </div>
-
-                      <div>
-                        <span className="trip-history-modal__summary-label">Thanh toán</span>
-                        <strong>{selectedTrip.paymentLabel}</strong>
-                      </div>
-
-                      <div>
-                        <span className="trip-history-modal__summary-label">Trạng thái thanh toán</span>
-                        <strong>{selectedTrip.paymentStatusLabel}</strong>
-                      </div>
-
-                      <div>
-                        <span className="trip-history-modal__summary-label">Mã chuyến</span>
-                        <strong>{selectedTrip.bookingCode}</strong>
-                      </div>
-                    </article>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="trip-history-modal__empty-detail">
-                <strong>Chưa có chuyến phù hợp</strong>
-                <p>Hãy thay đổi bộ lọc hoặc từ khóa để xem chi tiết chuyến khác.</p>
-              </div>
-            )}
           </section>
-        </div>
+        ) : null}
+
+        <section className="trip-history-modal__table-card" aria-label="Danh sách chuyến đi">
+          {historyLoading ? (
+            <div className="trip-history-modal__empty-state">
+              <strong>Đang tải lịch sử chuyến</strong>
+              <p>Hệ thống đang đồng bộ dữ liệu thật từ server.</p>
+            </div>
+          ) : historyError ? (
+            <div className="trip-history-modal__empty-state">
+              <strong>Không thể tải dữ liệu</strong>
+              <p>{historyError}</p>
+            </div>
+          ) : visibleTrips.length > 0 ? (
+            <div className="trip-history-modal__table-shell">
+              <table className="trip-history-modal__table">
+                <colgroup>
+                  <col className="trip-history-modal__col trip-history-modal__col--code" />
+                  <col className="trip-history-modal__col trip-history-modal__col--pickup" />
+                  <col className="trip-history-modal__col trip-history-modal__col--destination" />
+                  <col className="trip-history-modal__col trip-history-modal__col--vehicle" />
+                  <col className="trip-history-modal__col trip-history-modal__col--money" />
+                  <col className="trip-history-modal__col trip-history-modal__col--time" />
+                  <col className="trip-history-modal__col trip-history-modal__col--status" />
+                  <col className="trip-history-modal__col trip-history-modal__col--action" />
+                </colgroup>
+
+                <thead>
+                  <tr>
+                    <th>Mã chuyến</th>
+                    <th>Điểm đón</th>
+                    <th>Điểm đến</th>
+                    <th>Loại xe</th>
+                    <th>Số tiền</th>
+                    <th>Ngày giờ</th>
+                    <th>Trạng thái</th>
+                    <th>Chi tiết</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {visibleTrips.map((trip) => {
+                    const isSelected = trip.id === selectedTrip?.id;
+                    const tripTimeLabel = formatTripDate(trip.completedAt || trip.bookedAt);
+
+                    return (
+                      <tr key={trip.id} className={classNames('trip-history-modal__table-row', isSelected && 'is-selected')}>
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--code">
+                          <strong title={trip.bookingCode}>{trip.bookingCodeShortLabel}</strong>
+                          <span title={trip.tripCode}>{trip.tripCodeShortLabel}</span>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--route">
+                          <span title={trip.pickupLabel || '--'}>{trip.pickupShortLabel || '--'}</span>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--route">
+                          <span title={trip.destinationLabel || '--'}>{trip.destinationShortLabel || '--'}</span>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--vehicle">
+                          <strong>{trip.vehicleLabel || '--'}</strong>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--money">
+                          <strong>{trip.priceFormatted}</strong>
+                          <span>{trip.paymentLabel}</span>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--time">
+                          <strong>{tripTimeLabel}</strong>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--status">
+                          <span className={classNames('trip-history-modal__status', `is-${trip.statusTone}`)}>{trip.statusLabel}</span>
+                        </td>
+
+                        <td className="trip-history-modal__table-cell trip-history-modal__table-cell--action">
+                          <button
+                            className="trip-history-modal__detail-button"
+                            type="button"
+                            onClick={() => setSelectedTripId(trip.id)}
+                          >
+                            Xem
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="trip-history-modal__empty-state">
+              <strong>Không tìm thấy chuyến phù hợp</strong>
+              <p>Hãy đổi từ khóa, ngày giờ hoặc trạng thái để xem lại các chuyến khác.</p>
+            </div>
+          )}
+        </section>
+
+        {selectedTrip ? (
+          <TripHistoryDetailModal
+            open={Boolean(selectedTrip)}
+            trip={selectedTrip}
+            mode={normalizedMode}
+            accountDisplayName={accountDisplayName}
+            accountIdentifier={accountIdentifier}
+            accountPhone={accountPhone}
+            onClose={() => setSelectedTripId('')}
+          />
+        ) : null}
       </section>
     </div>,
     document.body,

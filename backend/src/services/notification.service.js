@@ -307,10 +307,6 @@ export async function ensureNotificationSchema() {
             NgayCapNhat           DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayCapNhat DEFAULT SYSDATETIME(),
 
             CONSTRAINT PK_ThongBao PRIMARY KEY (MaTB),
-            CONSTRAINT FK_ThongBao_TaiKhoan FOREIGN KEY (MaTK)
-                REFERENCES dbo.TaiKhoan(MaTK)
-                ON UPDATE CASCADE
-                ON DELETE SET NULL,
             CONSTRAINT CK_ThongBao_NguoiNhan CHECK (NguoiNhan IN ('all', 'customer', 'driver')),
             CONSTRAINT CK_ThongBao_TrangThai CHECK (TrangThai IN ('scheduled', 'sent'))
           );
@@ -326,7 +322,8 @@ export async function ensureNotificationSchema() {
       `);
 
       await pool.request().query(`
-        IF NOT EXISTS (
+        IF OBJECT_ID(N'dbo.TaiKhoan', N'U') IS NOT NULL
+          AND NOT EXISTS (
           SELECT 1
           FROM sys.foreign_keys
           WHERE name = N'FK_ThongBao_TaiKhoan'

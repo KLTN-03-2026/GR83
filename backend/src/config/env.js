@@ -27,6 +27,7 @@ export const env = {
   signupOtpMaxVerifyAttempts: Number(process.env.SIGNUP_OTP_MAX_VERIFY_ATTEMPTS ?? 5),
   googlePasswordTokenExpiresMinutes: Number(process.env.GOOGLE_PASSWORD_TOKEN_EXPIRES_MINUTES ?? 10),
   dbHost: process.env.DB_HOST ?? 'localhost',
+  dbInstanceName: process.env.DB_INSTANCE_NAME ?? '',
   dbPort: Number(process.env.DB_PORT ?? 1433),
   dbName: process.env.DB_NAME ?? '',
   dbUser: process.env.DB_USER ?? '',
@@ -36,4 +37,5 @@ export const env = {
   dbPoolMax: Number(process.env.DB_POOL_MAX ?? 10),
   dbConnectionTimeoutMs: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15000),
   dbRequestTimeoutMs: Number(process.env.DB_REQUEST_TIMEOUT_MS ?? 15000),
+  dbConnectionRetryCooldownMs: Number(process.env.DB_CONNECTION_RETRY_COOLDOWN_MS ?? 30000),
 };

@@ -14,6 +14,14 @@ function getSeenNotificationIdsStorageKey(scopeKey = '') {
   return `${DRIVER_RIDE_REQUEST_SEEN_NOTIFICATION_IDS_STORAGE_KEY}.${normalizeStorageScopeKey(scopeKey)}`;
 }
 
+function getDriverRideRequestQueueStorageKey(scopeKey = '') {
+  const normalizedScopeKey = normalizeStorageScopeKey(scopeKey);
+
+  return normalizedScopeKey === 'global'
+    ? DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY
+    : `${DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY}.${normalizedScopeKey}`;
+}
+
 function normalizeCoordinate(value) {
   const coordinate = Number(value);
 
@@ -150,6 +158,9 @@ function normalizeRideRequest(request) {
     requestId: bookingCode,
     bookingCode,
     notificationId,
+    accountId: String(sourceRequest.accountId ?? request.accountId ?? '').trim() || null,
+    customerAccountId: String(sourceRequest.customerAccountId ?? request.customerAccountId ?? request.accountId ?? '').trim() || null,
+    driverAccountId: String(sourceRequest.driverAccountId ?? request.driverAccountId ?? '').trim() || null,
     notificationTitle: String(request.title ?? sourceRequest.notificationTitle ?? '').trim(),
     notificationContent: String(request.content ?? sourceRequest.notificationContent ?? '').trim(),
     createdAt: String(sourceRequest.createdAt ?? request.createdAt ?? new Date().toISOString()),
@@ -174,6 +185,22 @@ function normalizeRideRequest(request) {
     source: String(sourceRequest.source ?? request.source ?? (notificationId ? 'notification' : 'manual')).trim() || 'manual',
     status: String(sourceRequest.status ?? request.status ?? 'pending').trim().toLowerCase() || 'pending',
   };
+}
+
+function normalizeAccountId(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function isOwnRideRequest(request, accountId) {
+  const normalizedAccountId = normalizeAccountId(accountId);
+
+  if (!normalizedAccountId) {
+    return false;
+  }
+
+  const ownerAccountId = normalizeAccountId(request?.customerAccountId ?? request?.accountId);
+
+  return Boolean(ownerAccountId && ownerAccountId === normalizedAccountId);
 }
 
 function readStoredNotificationIds(scopeKey = '') {
@@ -244,13 +271,13 @@ export function markDriverRideRequestNotificationSeen(notificationId, scopeKey =
   return true;
 }
 
-function readStoredQueue() {
+function readStoredQueue(scopeKey = '') {
   if (typeof window === 'undefined') {
     return [];
   }
 
   try {
-    const rawValue = window.localStorage.getItem(DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY);
+    const rawValue = window.localStorage.getItem(getDriverRideRequestQueueStorageKey(scopeKey));
 
     if (!rawValue) {
       return [];
@@ -265,7 +292,7 @@ function readStoredQueue() {
     return parsedValue.map(normalizeRideRequest).filter(Boolean);
   } catch {
     try {
-      window.localStorage.removeItem(DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY);
+      window.localStorage.removeItem(getDriverRideRequestQueueStorageKey(scopeKey));
     } catch {
       // Ignore cleanup failures.
     }
@@ -274,20 +301,20 @@ function readStoredQueue() {
   }
 }
 
-function saveQueue(queue) {
+function saveQueue(queue, scopeKey = '') {
   if (typeof window === 'undefined') {
     return;
   }
 
   try {
-    window.localStorage.setItem(DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY, JSON.stringify(queue));
+    window.localStorage.setItem(getDriverRideRequestQueueStorageKey(scopeKey), JSON.stringify(queue));
   } catch {
     // Ignore storage failures.
   }
 }
 
-export function readDriverRideRequestQueue() {
-  return readStoredQueue();
+export function readDriverRideRequestQueue(scopeKey = '') {
+  return readStoredQueue(scopeKey);
 }
 
 async function readDriverRideRequestQueueFromNotifications({ signal, accountId } = {}) {
@@ -295,37 +322,47 @@ async function readDriverRideRequestQueueFromNotifications({ signal, accountId }
     { recipient: 'driver', status: 'sent' },
     { signal },
   );
+  const normalizedAccountId = normalizeAccountId(accountId);
   const seenNotificationIds = new Set(readStoredNotificationIds(accountId));
   const notifications = Array.isArray(response?.notifications) ? response.notifications : [];
 
   return notifications
     .map(normalizeNotificationRideRequest)
     .filter(Boolean)
-    .filter((request) => !request.notificationId || !seenNotificationIds.has(request.notificationId));
+    .filter((request) => !request.notificationId || !seenNotificationIds.has(request.notificationId))
+    .filter((request) => !normalizedAccountId || !isOwnRideRequest(request, normalizedAccountId));
 }
 
 export async function loadDriverRideRequestQueue(options = {}) {
+  const accountId = String(options?.accountId ?? '').trim();
+
   try {
     const remoteQueue = await readDriverRideRequestQueueFromNotifications(options);
-    const localQueue = readStoredQueue();
+    const localQueue = readStoredQueue(accountId);
     const mergedQueue = [...remoteQueue];
 
-    localQueue.forEach((request) => {
+    localQueue
+      .filter((request) => !accountId || !isOwnRideRequest(request, accountId))
+      .forEach((request) => {
       if (!mergedQueue.some((item) => item.requestId === request.requestId)) {
         mergedQueue.push(request);
       }
-    });
+      });
 
     return mergedQueue;
   } catch {
-    return readStoredQueue();
+    const fallbackQueue = readStoredQueue(accountId);
+
+    return accountId
+      ? fallbackQueue.filter((request) => !isOwnRideRequest(request, accountId))
+      : fallbackQueue;
   }
 }
 
 export async function consumeDriverRideRequest(request, options = {}) {
   const normalizedRequestId = String(request?.requestId ?? '').trim();
   const normalizedNotificationId = normalizeIdentifier(request?.notificationId);
-  const accountId = options?.accountId ?? '';
+  const accountId = String(options?.accountId ?? '').trim();
   let remoteDeleteSucceeded = false;
 
   if (normalizedNotificationId) {
@@ -348,46 +385,51 @@ export async function consumeDriverRideRequest(request, options = {}) {
   }
 
   if (normalizedRequestId && remoteDeleteSucceeded) {
-    removeDriverRideRequest(normalizedRequestId);
+    removeDriverRideRequest(normalizedRequestId, accountId);
   }
 
   if (!normalizedNotificationId && normalizedRequestId) {
-    removeDriverRideRequest(normalizedRequestId);
+    removeDriverRideRequest(normalizedRequestId, accountId);
     return true;
   }
 
   return remoteDeleteSucceeded;
 }
 
-export function enqueueDriverRideRequest(request) {
+export function enqueueDriverRideRequest(request, options = {}) {
   const normalizedRequest = normalizeRideRequest(request);
+  const accountId = String(options?.accountId ?? '').trim();
 
   if (!normalizedRequest) {
     return null;
   }
 
-  const queue = readStoredQueue().filter((item) => item.requestId !== normalizedRequest.requestId);
+  if (accountId && isOwnRideRequest(normalizedRequest, accountId)) {
+    return null;
+  }
+
+  const queue = readStoredQueue(accountId).filter((item) => item.requestId !== normalizedRequest.requestId);
   queue.unshift(normalizedRequest);
-  saveQueue(queue);
+  saveQueue(queue, accountId);
 
   return normalizedRequest;
 }
 
-export function removeDriverRideRequest(requestId) {
+export function removeDriverRideRequest(requestId, scopeKey = '') {
   const normalizedRequestId = String(requestId ?? '').trim();
 
   if (!normalizedRequestId) {
     return false;
   }
 
-  const queue = readStoredQueue();
+  const queue = readStoredQueue(scopeKey);
   const nextQueue = queue.filter((item) => item.requestId !== normalizedRequestId);
 
   if (nextQueue.length === queue.length) {
     return false;
   }
 
-  saveQueue(nextQueue);
+  saveQueue(nextQueue, scopeKey);
   return true;
 }
 

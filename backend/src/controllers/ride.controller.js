@@ -1,4 +1,4 @@
-import { bookRide, getTripHistory, searchRides, updateTripStatus } from '../services/ride.service.js';
+import { bookRide, getTripHistory, searchRides, submitRideRating, updateTripStatus } from '../services/ride.service.js';
 import { getTripMessages, sendTripMessage } from '../services/tripChat.service.js';
 import { subscribeRideEvents } from '../services/ride.realtime.service.js';
 
@@ -56,18 +56,36 @@ function shouldDeliverRideEventToClient(event, accountId, roleCode) {
 
   if (normalizedRoleCode === 'Q3') {
     if (eventType === 'ride.booking.created') {
-      return true;
+      if (!normalizedAccountId || !eventCustomerAccountId) {
+        return true;
+      }
+
+      return eventCustomerAccountId !== normalizedAccountId;
     }
 
-    if (eventType === 'ride.trip.status.updated' && !eventDriverAccountId) {
-      return eventTripStatus === 'dahuy' || eventTripStatus === 'cancelled';
+    if (eventType === 'ride.trip.status.updated') {
+      if (eventTripStatus === 'danhanchuyen' || eventTripStatus === 'dahuy' || eventTripStatus === 'cancelled') {
+        if (!normalizedAccountId || !eventCustomerAccountId) {
+          return true;
+        }
+
+        return eventCustomerAccountId !== normalizedAccountId;
+      }
+
+      if (!normalizedAccountId || !eventDriverAccountId) {
+        return false;
+      }
+
+      return eventDriverAccountId === normalizedAccountId;
     }
 
-    if (!normalizedAccountId || !eventDriverAccountId) {
-      return false;
-    }
+    if (eventType === 'ride.trip.rating.updated') {
+      if (!normalizedAccountId || !eventDriverAccountId) {
+        return false;
+      }
 
-    return eventDriverAccountId === normalizedAccountId;
+      return eventDriverAccountId === normalizedAccountId;
+    }
   }
 
   if (normalizedRoleCode === 'Q2') {
@@ -183,6 +201,23 @@ export async function getTripHistoryController(request, response, next) {
 export async function updateTripStatusController(request, response, next) {
   try {
     const result = await updateTripStatus({
+      ...request.body,
+      bookingCode: request.params.bookingCode ?? request.body?.bookingCode,
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function submitRideRatingController(request, response, next) {
+  try {
+    const result = await submitRideRating({
       ...request.body,
       bookingCode: request.params.bookingCode ?? request.body?.bookingCode,
     });

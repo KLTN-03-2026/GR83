@@ -642,6 +642,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     try {
       const latitude = Number(prediction.lat);
       const longitude = Number(prediction.lng);
+      const fallbackLabel = String(prediction.description ?? prediction.main_text ?? '').trim();
 
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
         const latLng = { lat: latitude, lng: longitude };
@@ -655,30 +656,39 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
           kind: mode,
           source: 'search',
         });
-      } else {
+      } else if (fallbackLabel) {
         const placesService = googlePlacesServiceRef.current;
 
-          if (!placesService || !window.google?.maps?.places?.PlacesService) {
-          throw new Error('Địa điểm này chưa có tọa độ để hiển thị trên bản đồ. Hãy chọn địa điểm khác.');
-        }
-
+        if (placesService && window.google?.maps?.places?.PlacesService) {
           const place = await getPlaceDetails(placesService, prediction.place_id);
 
-          if (!place?.geometry?.location) {
-            throw new Error('Không lấy được vị trí của gợi ý này.');
+          if (place?.geometry?.location) {
+            const latLng = place.geometry.location.toJSON();
+            const label = place.formatted_address ?? fallbackLabel;
+
+            focusMapOnLocation(latLng);
+
+            commitSelection({
+              label,
+              position: latLng,
+              kind: mode,
+              source: 'search',
+            });
+
+            setPredictions([]);
+            return;
+          }
         }
 
-          const latLng = place.geometry.location.toJSON();
-          const label = place.formatted_address ?? prediction.description ?? prediction.main_text;
-
-          focusMapOnLocation(latLng);
-
-          commitSelection({
-            label,
-            position: latLng,
-            kind: mode,
-            source: 'search',
-          });
+        commitSelection({
+          label: fallbackLabel,
+          position: null,
+          kind: mode,
+          source: 'search',
+        });
+      } else {
+        setMapError('Không thể xác định địa điểm này trên bản đồ.');
+        return;
       }
 
       setPredictions([]);

@@ -51,9 +51,6 @@ export default function DriverRideRejectModal({
       return undefined;
     }
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
     const handleKeyDown = (event) => {
       if (event.key !== 'Escape' || isSubmitting) {
         return;
@@ -65,7 +62,6 @@ export default function DriverRideRejectModal({
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isSubmitting, onCancel, open]);

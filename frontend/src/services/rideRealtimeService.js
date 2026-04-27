@@ -1,61 +1,92 @@
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+import { io } from 'socket.io-client';
 
-function buildRideEventStreamUrl({ accountId = '', roleCode = '' } = {}) {
-  const searchParams = new URLSearchParams();
+const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api').trim();
 
-  if (String(accountId ?? '').trim()) {
-    searchParams.set('accountId', String(accountId).trim());
+function getSocketBaseUrl() {
+  const normalizedApiBaseUrl = apiBaseUrl.replace(/\/+$/, '');
+
+  if (normalizedApiBaseUrl.toLowerCase().endsWith('/api')) {
+    return normalizedApiBaseUrl.slice(0, -4);
   }
 
-  if (String(roleCode ?? '').trim()) {
-    searchParams.set('roleCode', String(roleCode).trim());
-  }
-
-  const queryString = searchParams.toString();
-  return queryString ? `${apiBaseUrl}/rides/stream?${queryString}` : `${apiBaseUrl}/rides/stream`;
+  return normalizedApiBaseUrl;
 }
 
-export function connectRideEventStream({ accountId = '', roleCode = '', onEvent, onError } = {}) {
-  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
-    return () => {};
+function normalizeRideEventPayload(eventName, payload) {
+  if (payload && typeof payload === 'object') {
+    return {
+      ...payload,
+      type: String(payload.type ?? eventName).trim() || eventName,
+    };
+  }
+
+  return {
+    type: eventName,
+    payload,
+  };
+}
+
+export function createRideSocketConnection({ accountId = '', roleCode = '', onEvent, onError, onConnect, onDisconnect } = {}) {
+  if (typeof window === 'undefined') {
+    return null;
   }
 
   if (!String(accountId ?? '').trim() || !String(roleCode ?? '').trim()) {
-    return () => {};
+    return null;
   }
 
-  let source;
+  let socket;
 
   try {
-    source = new EventSource(buildRideEventStreamUrl({ accountId, roleCode }));
+    socket = io(getSocketBaseUrl(), {
+      transports: ['websocket', 'polling'],
+      query: {
+        accountId: String(accountId).trim(),
+        roleCode: String(roleCode).trim(),
+      },
+    });
   } catch (error) {
     onError?.(error);
-    return () => {};
+    return null;
   }
 
-  const handleEvent = (event) => {
-    if (!event?.data) {
+  socket.on('connect', () => {
+    onConnect?.(socket);
+  });
+
+  socket.on('connect_error', (error) => {
+    onError?.(error);
+  });
+
+  socket.on('disconnect', (reason) => {
+    onDisconnect?.(reason);
+  });
+
+  socket.onAny((eventName, payload) => {
+    if (!String(eventName ?? '').startsWith('ride.')) {
       return;
     }
 
-    try {
-      const parsedValue = JSON.parse(event.data);
-      onEvent?.(parsedValue);
-    } catch (error) {
-      onError?.(error);
-    }
-  };
+    onEvent?.(normalizeRideEventPayload(eventName, payload));
+  });
 
-  source.addEventListener('ride.booking.created', handleEvent);
-  source.addEventListener('ride.trip.status.updated', handleEvent);
-  source.addEventListener('ride.trip.message.created', handleEvent);
-  source.addEventListener('ride.event', handleEvent);
-  source.onmessage = handleEvent;
-  source.onerror = (error) => {
-    onError?.(error);
-  };
+  return socket;
+}
+
+export function connectRideEventStream({ accountId = '', roleCode = '', onEvent, onError } = {}) {
+  const socket = createRideSocketConnection({
+    accountId,
+    roleCode,
+    onEvent,
+    onError,
+  });
+
+  if (!socket) {
+    return () => {};
+  }
 
   return () => {
-    source?.close();
+    socket.removeAllListeners();
+    socket.disconnect();
   };
 }

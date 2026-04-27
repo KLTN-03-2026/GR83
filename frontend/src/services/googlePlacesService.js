@@ -19,6 +19,10 @@ function cloneResults(results) {
   return results.map((result) => ({ ...result }));
 }
 
+function hasCoordinates(result) {
+  return Number.isFinite(Number(result?.lat)) && Number.isFinite(Number(result?.lng));
+}
+
 function getCachedResults(cacheKey) {
   const entry = searchCache.get(cacheKey);
 
@@ -118,8 +122,14 @@ function getAutocompletePredictions(autocompleteService, query, signal) {
   });
 }
 
-async function searchBackendPlaces(query, signal) {
-  const response = await request(`/places/search?query=${encodeURIComponent(query)}`, { signal });
+async function searchBackendPlaces(query, signal, source = null) {
+  const searchParams = new URLSearchParams({ query });
+
+  if (source) {
+    searchParams.set('source', source);
+  }
+
+  const response = await request(`/places/search?${searchParams.toString()}`, { signal });
   const results = Array.isArray(response?.results) ? response.results : [];
 
   return results.map(normalizeBackendPrediction);
@@ -169,18 +179,15 @@ export async function searchGooglePlaces(input, options = {}) {
     console.warn('Backend places search unavailable, falling back to browser Google Places.', error);
   }
 
-  if (backendResults.length > 0) {
+  if (backendResults.some(hasCoordinates)) {
     setCachedResults(cacheKey, backendResults);
     return backendResults;
   }
 
-  try {
-    const browserResults = await searchBrowserGooglePlaces(query, signal);
+  let browserResults = [];
 
-    if (browserResults.length > 0) {
-      setCachedResults(cacheKey, browserResults);
-      return browserResults;
-    }
+  try {
+    browserResults = await searchBrowserGooglePlaces(query, signal);
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw error;
@@ -189,5 +196,35 @@ export async function searchGooglePlaces(input, options = {}) {
     console.warn('Browser Google Places unavailable, falling back to backend search.', error);
   }
 
-  return backendResults;
+  if (browserResults.length > 0 && window.google?.maps?.places?.PlacesService) {
+    setCachedResults(cacheKey, browserResults);
+    return browserResults;
+  }
+
+  try {
+    const fallbackResults = await searchBackendPlaces(query, signal, 'fallback');
+
+    if (fallbackResults.some(hasCoordinates)) {
+      setCachedResults(cacheKey, fallbackResults);
+      return fallbackResults;
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw error;
+    }
+
+    console.warn('Fallback backend places search unavailable.', error);
+  }
+
+  if (browserResults.length > 0) {
+    setCachedResults(cacheKey, browserResults);
+    return browserResults;
+  }
+
+  if (backendResults.length > 0) {
+    setCachedResults(cacheKey, backendResults);
+    return backendResults;
+  }
+
+  return [];
 }

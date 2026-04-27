@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { acquireBodyScrollLock } from '../../utils/bodyScrollLock';
 
 function normalizePosition(position) {
   if (!position || typeof position !== 'object') {
@@ -27,13 +28,20 @@ function normalizeRouteGeometry(routeGeometry) {
 }
 
 function createPointIcon(type) {
-  const isPickup = type === 'pickup';
+  const labelByType = {
+    pickup: 'A',
+    destination: 'B',
+    driver: 'T',
+  };
+  const isDriver = type === 'driver';
+  const iconSize = isDriver ? [28, 28] : [24, 24];
+  const iconAnchor = isDriver ? [14, 14] : [12, 12];
 
   return L.divIcon({
     className: `route-preview-map__point route-preview-map__point--${type}`,
-    html: `<span>${isPickup ? 'A' : 'B'}</span>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
+    html: `<span>${labelByType[type] ?? '•'}</span>`,
+    iconSize,
+    iconAnchor,
   });
 }
 
@@ -53,7 +61,7 @@ function getProviderLabel(routeProvider) {
   return 'Dự phòng';
 }
 
-function renderRouteMap(container, pathPoints, pickup, destination, interactive) {
+function renderRouteMap(container, pathPoints, pickup, destination, liveMarker, interactive) {
   const map = L.map(container, {
     zoomControl: interactive,
     attributionControl: interactive,
@@ -86,11 +94,21 @@ function renderRouteMap(container, pathPoints, pickup, destination, interactive)
     L.marker(destination, { icon: createPointIcon('destination') }).addTo(map);
   }
 
-  const bounds = L.latLngBounds(pathPoints);
-  map.fitBounds(bounds, {
-    padding: interactive ? [32, 32] : [20, 20],
-    maxZoom: interactive ? 17 : 15,
-  });
+  if (liveMarker) {
+    L.marker(liveMarker, { icon: createPointIcon('driver') }).addTo(map);
+  }
+
+  const boundsPoints = [...pathPoints, pickup, destination, liveMarker].filter(Boolean);
+
+  if (boundsPoints.length >= 2) {
+    const bounds = L.latLngBounds(boundsPoints);
+    map.fitBounds(bounds, {
+      padding: interactive ? [32, 32] : [20, 20],
+      maxZoom: interactive ? 17 : 15,
+    });
+  } else if (boundsPoints.length === 1) {
+    map.setView(boundsPoints[0], interactive ? 16 : 15);
+  }
 
   return map;
 }
@@ -98,6 +116,7 @@ function renderRouteMap(container, pathPoints, pickup, destination, interactive)
 export default function RoutePreviewMap({
   pickupPosition,
   destinationPosition,
+  liveMarkerPosition = null,
   routeGeometry,
   routeProvider,
   className = '',
@@ -112,6 +131,7 @@ export default function RoutePreviewMap({
 
   const pickup = normalizePosition(pickupPosition);
   const destination = normalizePosition(destinationPosition);
+  const liveMarker = normalizePosition(liveMarkerPosition);
 
   const pathPoints = useMemo(() => {
     const points = normalizeRouteGeometry(routeGeometry);
@@ -124,29 +144,37 @@ export default function RoutePreviewMap({
       return [pickup, destination];
     }
 
+    if (liveMarker && pickup) {
+      return [liveMarker, pickup];
+    }
+
+    if (liveMarker && destination) {
+      return [liveMarker, destination];
+    }
+
     return [];
-  }, [destination, pickup, routeGeometry]);
+  }, [destination, liveMarker, pickup, routeGeometry]);
 
   useEffect(() => {
     if (!previewMapContainerRef.current || pathPoints.length < 2) {
       return undefined;
     }
 
-    const map = renderRouteMap(previewMapContainerRef.current, pathPoints, pickup, destination, false);
+    const map = renderRouteMap(previewMapContainerRef.current, pathPoints, pickup, destination, liveMarker, false);
     previewMapRef.current = map;
 
     return () => {
       map.remove();
       previewMapRef.current = null;
     };
-  }, [destination, pathPoints, pickup]);
+  }, [destination, liveMarker, pathPoints, pickup]);
 
   useEffect(() => {
     if (!isExpanded || !expandedMapContainerRef.current || pathPoints.length < 2) {
       return undefined;
     }
 
-    const map = renderRouteMap(expandedMapContainerRef.current, pathPoints, pickup, destination, true);
+    const map = renderRouteMap(expandedMapContainerRef.current, pathPoints, pickup, destination, liveMarker, true);
     expandedMapRef.current = map;
 
     const resizeId = window.setTimeout(() => {
@@ -158,15 +186,14 @@ export default function RoutePreviewMap({
       map.remove();
       expandedMapRef.current = null;
     };
-  }, [destination, isExpanded, pathPoints, pickup]);
+  }, [destination, isExpanded, liveMarker, pathPoints, pickup]);
 
   useEffect(() => {
     if (!isExpanded) {
       return undefined;
     }
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const releaseBodyScrollLock = acquireBodyScrollLock();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -177,7 +204,7 @@ export default function RoutePreviewMap({
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      releaseBodyScrollLock();
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isExpanded]);

@@ -23,7 +23,12 @@ async function runNotificationSweep() {
 
       return result;
     } catch (error) {
-      console.error('[notifications] Không thể đồng bộ thông báo đến hạn:', error);
+      const message = String(error?.message ?? error);
+      const logMessage = error?.code === 'ETIMEOUT' || /Failed to connect to/i.test(message)
+        ? `[notifications] Không thể đồng bộ thông báo đến hạn: ${message}`
+        : '[notifications] Không thể đồng bộ thông báo đến hạn.';
+
+      console.error(logMessage);
       return null;
     } finally {
       sweepPromise = null;

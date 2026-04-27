@@ -41,7 +41,7 @@ const TRIP_STAGES = [
   {
     id: 'completed',
     label: 'Hoàn thành',
-    description: 'Cuốc xe đã khép lại và có thể lưu vào lịch sử.',
+    description: 'Cảm ơn bạn đã hoàn thành chuyến và phục vụ khách hàng.',
   },
 ];
 
@@ -460,6 +460,7 @@ export default function DriverTripActionModal({
   const etaLabel = formatMinutes(request.etaMinutes);
   const hasLocationBusyState = actionLoading || locationLoading;
   const isPrePickupState = tripStage !== 'completed';
+  const canCancelTrip = ['accepted', 'heading-pickup'].includes(tripStage);
   const lastUpdatedTimeLabel = formatTimeOnly(updatedAt);
 
   const handleClose = () => {
@@ -503,6 +504,10 @@ export default function DriverTripActionModal({
       await onAdvanceStage?.(request, nextStage);
       setTripStage(nextStage);
       setUpdatedAt(new Date().toISOString());
+
+      if (nextStage === 'completed') {
+        onClose?.();
+      }
     } catch (error) {
       setActionError(error?.message || 'Không thể cập nhật trạng thái chuyến.');
     } finally {
@@ -532,6 +537,10 @@ export default function DriverTripActionModal({
   };
 
   const handleOpenCancelConfirmDialog = () => {
+    if (!canCancelTrip || hasLocationBusyState) {
+      return;
+    }
+
     setChatDialogOpen(false);
     setCustomerInfoDialogOpen(false);
     setCancelConfirmOpen(true);
@@ -728,8 +737,11 @@ export default function DriverTripActionModal({
                   </div>
 
                   <div className="driver-trip-action-modal__info-copy">
-                    <strong>Khách: {customerName}</strong>
-                    <span>{vehicleLabel}</span>
+                      <div className="driver-trip-action-modal__info-copy-title">
+                        <strong>Khách: {customerName}</strong>
+                        <span className="driver-trip-action-modal__customer-more driver-trip-action-modal__customer-more--inline">Thêm</span>
+                      </div>
+                      <span>{vehicleLabel}</span>
                   </div>
                 </div>
 
@@ -805,13 +817,21 @@ export default function DriverTripActionModal({
                 GỌI KHÁCH
               </button>
 
-              <button className="driver-trip-action-modal__danger" type="button" onClick={handleOpenCancelConfirmDialog} disabled={hasLocationBusyState}>
+              <button
+                className="driver-trip-action-modal__danger"
+                type="button"
+                onClick={handleOpenCancelConfirmDialog}
+                disabled={!canCancelTrip || hasLocationBusyState}
+                title={canCancelTrip ? 'Hủy chuyến' : 'Sau khi đã đón khách, chuyến không thể hủy.'}
+              >
                 HỦY CHUYẾN
               </button>
             </div>
 
             <p className="driver-trip-action-modal__footer-note">
-              Hủy chuyến sau khi tài xế nhận có thể phát sinh chi phí.
+              {canCancelTrip
+                ? 'Hủy chuyến sau khi tài xế nhận có thể phát sinh chi phí.'
+                : 'Sau khi đã đón khách, chuyến không thể hủy.'}
             </p>
           </footer>
         </section>
@@ -942,7 +962,7 @@ export default function DriverTripActionModal({
               role="button"
               tabIndex={0}
               aria-haspopup="dialog"
-              aria-label={`Xem thông tin khách hàng ${customerName}`}
+              aria-label={`Xem thêm thông tin khách hàng ${customerName}`}
               onClick={handleOpenCustomerInfoDialog}
               onKeyDown={handleCustomerCardKeyDown}
             >
@@ -956,6 +976,8 @@ export default function DriverTripActionModal({
                   <h4>{customerName}</h4>
                   <p>{rideTitle}</p>
                 </div>
+
+                <span className="driver-trip-action-modal__customer-more driver-trip-action-modal__customer-more--head">Thêm</span>
               </div>
 
               <div className="driver-trip-action-modal__customer-contact">
@@ -1015,7 +1037,9 @@ export default function DriverTripActionModal({
         <footer className="driver-trip-action-modal__footer">
           <div className="driver-trip-action-modal__footer-copy">
             <span>Thao tác nhanh</span>
-            <strong>{locationMessage || 'Kiểm tra vị trí tài xế, gọi khách hoặc hủy chuyến ngay từ màn hình này.'}</strong>
+            <strong>{locationMessage || (canCancelTrip
+              ? 'Kiểm tra vị trí tài xế, gọi khách hoặc hủy chuyến ngay từ màn hình này.'
+              : 'Kiểm tra vị trí tài xế, gọi khách hoặc theo dõi chuyến cho đến khi hoàn thành.')}</strong>
           </div>
 
           {actionError ? (
@@ -1025,7 +1049,13 @@ export default function DriverTripActionModal({
           ) : null}
 
           <div className="driver-trip-action-modal__actions">
-            <button className="driver-trip-action-modal__danger" type="button" onClick={handleOpenCancelConfirmDialog} disabled={hasLocationBusyState}>
+            <button
+              className="driver-trip-action-modal__danger"
+              type="button"
+              onClick={handleOpenCancelConfirmDialog}
+              disabled={!canCancelTrip || hasLocationBusyState}
+              title={canCancelTrip ? 'Hủy chuyến' : 'Sau khi đã đón khách, chuyến không thể hủy.'}
+            >
               HỦY CHUYẾN
             </button>
 

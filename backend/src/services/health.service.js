@@ -1,5 +1,15 @@
 import { env } from '../config/env.js';
-import { isSqlServerConfigured, testSqlServerConnection } from './database.service.js';
+import { getSqlServerConnectionTarget, isSqlServerConfigured, testSqlServerConnection } from './database.service.js';
+
+function formatSqlServerTarget() {
+  const connectionTarget = getSqlServerConnectionTarget();
+
+  if (connectionTarget.instanceName) {
+    return `${connectionTarget.server}\\${connectionTarget.instanceName}`;
+  }
+
+  return connectionTarget.server;
+}
 
 export function getHealthStatus() {
   return {
@@ -17,7 +27,7 @@ export async function getDatabaseHealthStatus() {
       success: false,
       message: 'Thiếu cấu hình SQL Server trong backend/.env.',
       configured: false,
-      expectedEnv: ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'],
+      expectedEnv: ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'],
       timestamp,
     };
   }
@@ -30,7 +40,7 @@ export async function getDatabaseHealthStatus() {
       message: 'SQL Server connected',
       configured: true,
       connection: {
-        server: env.dbHost,
+        server: formatSqlServerTarget(),
         database: connectionInfo.databaseName,
         serverTime: connectionInfo.serverTime,
       },
@@ -42,7 +52,7 @@ export async function getDatabaseHealthStatus() {
       message: 'SQL Server connection failed',
       configured: true,
       connection: {
-        server: env.dbHost,
+        server: formatSqlServerTarget(),
         database: env.dbName,
       },
       error: error.message,

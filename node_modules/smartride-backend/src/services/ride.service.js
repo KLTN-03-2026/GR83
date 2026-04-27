@@ -3,6 +3,7 @@ import { searchPlaces } from './places.service.js';
 import { env } from '../config/env.js';
 import { getSqlServerPool, isSqlServerConfigured } from './database.service.js';
 import { ensureNotificationSchema } from './notification.service.js';
+import { listPromotions } from './promotion.service.js';
 import { publishRideEvent } from './ride.realtime.service.js';
 
 const VEHICLE_CONFIG = {
@@ -86,8 +87,8 @@ const TRIP_STATUS_TRANSITIONS = {
   ChoTaiXe: new Set(['DaNhanChuyen', 'DaHuy']),
   DaNhanChuyen: new Set(['DangDen', 'DaHuy']),
   DangDen: new Set(['DaDon', 'DaHuy']),
-  DaDon: new Set(['DangThucHien', 'DaHuy']),
-  DangThucHien: new Set(['HoanThanh', 'DaHuy']),
+  DaDon: new Set(['DangThucHien']),
+  DangThucHien: new Set(['HoanThanh']),
   HoanThanh: new Set([]),
   DaHuy: new Set([]),
 };
@@ -552,6 +553,55 @@ function cloneRouteGeometry(routeGeometry) {
   }));
 }
 
+function serializeRouteGeometry(routeGeometry) {
+  const normalizedRouteGeometry = cloneRouteGeometry(routeGeometry)?.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)) ?? null;
+
+  if (!normalizedRouteGeometry || normalizedRouteGeometry.length < 2) {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(normalizedRouteGeometry);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStoredRouteGeometry(routeGeometryValue) {
+  if (Array.isArray(routeGeometryValue)) {
+    const normalizedRouteGeometry = routeGeometryValue
+      .map((point) => {
+        if (!point || typeof point !== 'object') {
+          return null;
+        }
+
+        const lat = Number(point.lat);
+        const lng = Number(point.lng);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return null;
+        }
+
+        return { lat, lng };
+      })
+      .filter(Boolean);
+
+    return normalizedRouteGeometry.length >= 2 ? normalizedRouteGeometry : null;
+  }
+
+  const normalizedValue = normalizeText(routeGeometryValue);
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  try {
+    return normalizeStoredRouteGeometry(JSON.parse(normalizedValue));
+  } catch {
+    return null;
+  }
+}
+
 function normalizeLocationCacheKey(label) {
   return normalizeText(label).toLowerCase();
 }
@@ -619,7 +669,7 @@ async function resolveLocationPosition(location) {
   }
 
   try {
-    const searchResult = await searchPlaces(label);
+    const searchResult = await searchPlaces(label, { preferFallback: true });
     const resolvedPosition = extractFirstPositionFromSearch(searchResult?.results);
 
     if (resolvedPosition) {
@@ -627,7 +677,7 @@ async function resolveLocationPosition(location) {
       return resolvedPosition;
     }
   } catch (error) {
-    console.warn(`Cannot geocode location "${label}".`, error);
+    void error;
   }
 
   return null;
@@ -723,6 +773,11 @@ async function getShortestRouteMetrics(startPosition, endPosition) {
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        setCachedRouteMetrics(cacheKey, fallbackMetrics);
+        return fallbackMetrics;
+      }
+
       throw new Error(`Routing service tra ve trang thai ${response.status}`);
     }
 
@@ -786,7 +841,7 @@ async function getShortestRouteMetrics(startPosition, endPosition) {
     setCachedRouteMetrics(cacheKey, metrics);
     return metrics;
   } catch (error) {
-    if (error?.name !== 'AbortError') {
+    if (error?.name !== 'AbortError' && !String(error?.message ?? '').includes('429')) {
       console.warn('Routing service unavailable, falling back to straight-line distance.', error);
     }
 
@@ -841,6 +896,12 @@ function createNotFoundError(message) {
   return error;
 }
 
+function createForbiddenError(message) {
+  const error = new Error(message);
+  error.statusCode = 403;
+  return error;
+}
+
 function parseTripStatus(value) {
   const normalizedToken = normalizeStatusToken(value);
 
@@ -878,9 +939,69 @@ function canTransitionTripStatus(currentStatus, nextStatus) {
   return TRIP_STATUS_TRANSITIONS[normalizedCurrentStatus]?.has(normalizedNextStatus) ?? false;
 }
 
-function buildTripStatusResult(bookingCode, tripStatus, updatedAt = new Date(), driverAccountId = null) {
+function normalizeCancellationMeta(cancelMeta = {}) {
+  return {
+    cancelledByAccountId: normalizeText(cancelMeta.cancelledByAccountId ?? cancelMeta.cancelledById ?? ''),
+    cancelledByRoleCode: normalizeText(cancelMeta.cancelledByRoleCode ?? cancelMeta.cancelledByRole ?? cancelMeta.roleCode ?? ''),
+    cancelReason: normalizeText(
+      cancelMeta.cancelReason
+      ?? cancelMeta.cancelReasonText
+      ?? cancelMeta.reasonText
+      ?? cancelMeta.reasonLabel
+      ?? cancelMeta.cancelReasonCustomReason
+      ?? '',
+    ),
+  };
+}
+
+function serializeCancellationMeta(cancelMeta = {}) {
+  const normalizedCancellationMeta = normalizeCancellationMeta(cancelMeta);
+
+  if (!normalizedCancellationMeta.cancelledByAccountId && !normalizedCancellationMeta.cancelledByRoleCode && !normalizedCancellationMeta.cancelReason) {
+    return '';
+  }
+
+  return [
+    normalizedCancellationMeta.cancelledByRoleCode || '',
+    normalizedCancellationMeta.cancelledByAccountId || '',
+    normalizedCancellationMeta.cancelReason || '',
+  ].join('|||');
+}
+
+function parseCancellationMeta(rawValue = '') {
+  const normalizedValue = normalizeText(rawValue);
+
+  if (!normalizedValue) {
+    return normalizeCancellationMeta();
+  }
+
+  if (normalizedValue.startsWith('{')) {
+    try {
+      const parsedValue = JSON.parse(normalizedValue);
+
+      return normalizeCancellationMeta(parsedValue);
+    } catch {
+      // Fall through to the delimiter-based format.
+    }
+  }
+
+  const parts = normalizedValue.split('|||');
+
+  if (parts.length >= 3) {
+    return normalizeCancellationMeta({
+      cancelledByRoleCode: parts[0],
+      cancelledByAccountId: parts[1],
+      cancelReason: parts.slice(2).join('|||'),
+    });
+  }
+
+  return normalizeCancellationMeta({ cancelReason: normalizedValue });
+}
+
+function buildTripStatusResult(bookingCode, tripStatus, updatedAt = new Date(), driverAccountId = null, cancelMeta = {}) {
   const normalizedTripStatus = normalizeTripStatus(tripStatus);
   const updatedAtDate = updatedAt instanceof Date ? updatedAt : new Date(updatedAt);
+  const normalizedCancellationMeta = normalizeCancellationMeta(cancelMeta);
 
   return {
     success: true,
@@ -890,6 +1011,9 @@ function buildTripStatusResult(bookingCode, tripStatus, updatedAt = new Date(), 
     tripStatusTone: getTripStatusTone(normalizedTripStatus),
     updatedAt: Number.isNaN(updatedAtDate.getTime()) ? new Date().toISOString() : updatedAtDate.toISOString(),
     driverAccountId: normalizeText(driverAccountId) || '',
+    cancelledByAccountId: normalizedCancellationMeta.cancelledByAccountId,
+    cancelledByRoleCode: normalizedCancellationMeta.cancelledByRoleCode,
+    cancelReason: normalizedCancellationMeta.cancelReason,
   };
 }
 
@@ -915,6 +1039,56 @@ export async function ensureRideSchema() {
         BEGIN
           ALTER TABLE dbo.DatXe
           ADD MaTBThongBaoTaiXe INT NULL;
+        END
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXe', N'LyDoHuy') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe
+          ADD LyDoHuy NVARCHAR(500) NULL;
+        END
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXe', N'TuyenDuongJson') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe
+          ADD TuyenDuongJson NVARCHAR(MAX) NULL;
+        END
+      `);
+
+      await pool.request().query(`
+        IF OBJECT_ID(N'dbo.DanhGiaChuyenXe', N'U') IS NULL
+        BEGIN
+          CREATE TABLE dbo.DanhGiaChuyenXe
+          (
+            MaDanhGia INT IDENTITY(1,1) NOT NULL,
+            MaChuyen VARCHAR(30) NOT NULL,
+            MaTK VARCHAR(20) NULL,
+            MaTX VARCHAR(20) NULL,
+            SoSaoDanhGia INT NOT NULL,
+            NhanXetDanhGia NVARCHAR(1000) NULL,
+            ThoiDiemDanhGia DATETIME2(0) NOT NULL CONSTRAINT DF_DanhGiaChuyenXe_ThoiDiemDanhGia DEFAULT SYSDATETIME(),
+            NgayTao DATETIME2(0) NOT NULL CONSTRAINT DF_DanhGiaChuyenXe_NgayTao DEFAULT SYSDATETIME(),
+            NgayCapNhat DATETIME2(0) NOT NULL CONSTRAINT DF_DanhGiaChuyenXe_NgayCapNhat DEFAULT SYSDATETIME(),
+
+            CONSTRAINT PK_DanhGiaChuyenXe PRIMARY KEY (MaDanhGia),
+            CONSTRAINT UQ_DanhGiaChuyenXe_MaChuyen UNIQUE (MaChuyen),
+            CONSTRAINT FK_DanhGiaChuyenXe_DatXe FOREIGN KEY (MaChuyen)
+              REFERENCES dbo.DatXe(MaChuyen)
+              ON UPDATE NO ACTION
+              ON DELETE CASCADE,
+            CONSTRAINT FK_DanhGiaChuyenXe_TaiKhoan FOREIGN KEY (MaTK)
+              REFERENCES dbo.TaiKhoan(MaTK)
+              ON UPDATE CASCADE
+              ON DELETE SET NULL,
+            CONSTRAINT FK_DanhGiaChuyenXe_TaiXe FOREIGN KEY (MaTX)
+              REFERENCES dbo.TaiXe(CCCD)
+              ON UPDATE NO ACTION
+              ON DELETE SET NULL,
+            CONSTRAINT CK_DanhGiaChuyenXe_SoSao CHECK (SoSaoDanhGia BETWEEN 1 AND 5)
+          );
         END
       `);
 
@@ -1015,30 +1189,90 @@ export async function ensureRideSchema() {
       `);
 
       await pool.request().query(`
-        IF EXISTS (
-          SELECT 1
-          FROM sys.foreign_keys
-          WHERE name = N'FK_DatXe_TaiXe'
-            AND parent_object_id = OBJECT_ID(N'dbo.DatXe')
-        )
+        BEGIN TRY
+          IF EXISTS (
+            SELECT 1
+            FROM sys.foreign_keys
+            WHERE name = N'FK_DatXe_TaiXe'
+              AND parent_object_id = OBJECT_ID(N'dbo.DatXe')
+          )
+          BEGIN
+            ALTER TABLE dbo.DatXe DROP CONSTRAINT FK_DatXe_TaiXe;
+          END
+        END TRY
+        BEGIN CATCH
+          IF ERROR_NUMBER() NOT IN (3727, 3728)
+          BEGIN
+            THROW;
+          END
+        END CATCH
+      `);
+
+      await pool.request().query(`
+        BEGIN TRY
+          IF NOT EXISTS (
+            SELECT 1
+            FROM sys.foreign_keys
+            WHERE name = N'FK_DatXe_TaiXe'
+              AND parent_object_id = OBJECT_ID(N'dbo.DatXe')
+          )
+          BEGIN
+            ALTER TABLE dbo.DatXe
+            ADD CONSTRAINT FK_DatXe_TaiXe FOREIGN KEY (MaTX)
+                REFERENCES dbo.TaiXe(CCCD)
+                ON UPDATE NO ACTION
+                ON DELETE SET NULL;
+          END
+        END TRY
+        BEGIN CATCH
+          IF ERROR_NUMBER() NOT IN (2714, 3727, 3728)
+          BEGIN
+            THROW;
+          END
+        END CATCH
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXe', N'GiaGoc') IS NULL
         BEGIN
-          ALTER TABLE dbo.DatXe DROP CONSTRAINT FK_DatXe_TaiXe;
+          ALTER TABLE dbo.DatXe ADD GiaGoc INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXe', N'TienGiam') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe ADD TienGiam INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXe', N'MaUuDai') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe ADD MaUuDai VARCHAR(40) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXe', N'TenUuDai') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe ADD TenUuDai NVARCHAR(120) NULL;
         END
       `);
 
       await pool.request().query(`
-        IF NOT EXISTS (
-          SELECT 1
-          FROM sys.foreign_keys
-          WHERE name = N'FK_DatXe_TaiXe'
-            AND parent_object_id = OBJECT_ID(N'dbo.DatXe')
-        )
+        IF COL_LENGTH(N'dbo.ThanhToan', N'GiaGoc') IS NULL
         BEGIN
-          ALTER TABLE dbo.DatXe
-          ADD CONSTRAINT FK_DatXe_TaiXe FOREIGN KEY (MaTX)
-              REFERENCES dbo.TaiXe(CCCD)
-              ON UPDATE NO ACTION
-              ON DELETE SET NULL;
+          ALTER TABLE dbo.ThanhToan ADD GiaGoc INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'TienGiam') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD TienGiam INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'MaUuDai') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD MaUuDai VARCHAR(40) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'TenUuDai') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD TenUuDai NVARCHAR(120) NULL;
         END
       `);
 
@@ -1178,6 +1412,123 @@ function getBaseRatePerKm(vehiclePricing) {
   return roundCurrency(mainTier.extraRate / unitKm);
 }
 
+function normalizePromotionLookupId(value) {
+  const parsedValue = Number(value);
+
+  if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
+    return null;
+  }
+
+  return parsedValue;
+}
+
+function normalizePromotionLookupCode(value) {
+  return normalizeText(value).toUpperCase();
+}
+
+function calculatePromotionPricing(basePrice, promotion = null) {
+  const originalPrice = roundCurrency(basePrice);
+
+  if (!promotion) {
+    return {
+      originalPrice,
+      discountAmount: 0,
+      finalPrice: originalPrice,
+    };
+  }
+
+  const discountPercent = Number(promotion.discountPercent ?? 0);
+  const maxAmount = Number(promotion.maxAmount ?? 0);
+  const safeDiscountPercent = Number.isFinite(discountPercent) && discountPercent > 0 ? discountPercent : 0;
+  const rawDiscountAmount = roundCurrency(originalPrice * safeDiscountPercent / 100);
+  const limitedDiscountAmount = Number.isFinite(maxAmount) && maxAmount > 0
+    ? Math.min(rawDiscountAmount, roundCurrency(maxAmount))
+    : rawDiscountAmount;
+  const discountAmount = Math.min(originalPrice, Math.max(0, limitedDiscountAmount));
+  const finalPrice = Math.max(0, originalPrice - discountAmount);
+
+  return {
+    originalPrice,
+    discountAmount,
+    finalPrice,
+  };
+}
+
+function buildPromotionSummaryText(promotion = null, discountAmount = 0) {
+  if (!promotion) {
+    return '';
+  }
+
+  const promotionCode = normalizeText(promotion.code);
+  const promotionTitle = normalizeText(promotion.title);
+  const parts = [];
+
+  if (promotionCode) {
+    parts.push(`Mã ${promotionCode}`);
+  }
+
+  if (promotionTitle && promotionTitle !== promotionCode) {
+    parts.push(promotionTitle);
+  }
+
+  if (discountAmount > 0) {
+    parts.push(`Giảm ${formatCurrency(discountAmount)}`);
+  }
+
+  return parts.join(' · ').trim();
+}
+
+async function resolveBookingPromotion(payload = {}) {
+  const promotionId = normalizePromotionLookupId(payload?.promotionId);
+  const promotionCode = normalizePromotionLookupCode(payload?.promotionCode);
+  const hasPromotionPayload = promotionId !== null || Boolean(promotionCode);
+
+  if (!hasPromotionPayload) {
+    return null;
+  }
+
+  if (isSqlServerConfigured()) {
+    const promotionResult = await listPromotions({ status: 'active' });
+    const activePromotions = Array.isArray(promotionResult?.promotions) ? promotionResult.promotions : [];
+    let resolvedPromotion = null;
+
+    if (promotionId !== null) {
+      resolvedPromotion = activePromotions.find((promotion) => Number(promotion.id) === promotionId) ?? null;
+    }
+
+    if (!resolvedPromotion && promotionCode) {
+      resolvedPromotion = activePromotions.find((promotion) => normalizePromotionLookupCode(promotion.code) === promotionCode) ?? null;
+    }
+
+    if (!resolvedPromotion) {
+      throw createValidationError('Ma uu dai khong hop le hoac da het han. Vui long chon lai.');
+    }
+
+    return resolvedPromotion;
+  }
+
+  const fallbackDiscountPercent = Number(payload?.promotionDiscountPercent);
+  const fallbackMaxAmount = Number(payload?.promotionMaxAmount);
+  const fallbackPromotionTitle = normalizeText(payload?.promotionTitle);
+  const fallbackPromotionScope = normalizeText(payload?.promotionScope);
+  const fallbackPromotionExpiresAt = normalizeText(payload?.promotionExpiresAt);
+
+  if (!Number.isFinite(fallbackDiscountPercent) || fallbackDiscountPercent <= 0) {
+    return null;
+  }
+
+  return {
+    id: promotionId,
+    code: promotionCode,
+    title: fallbackPromotionTitle,
+    scope: fallbackPromotionScope,
+    discountPercent: fallbackDiscountPercent,
+    maxAmount: Number.isFinite(fallbackMaxAmount) && fallbackMaxAmount >= 0 ? fallbackMaxAmount : 0,
+    expiresAt: fallbackPromotionExpiresAt,
+    status: 'active',
+  };
+}
+
 function buildRideResults(vehicle, distanceKm, baseDurationMinutes) {
   const config = VEHICLE_CONFIG[vehicle] ?? VEHICLE_CONFIG.motorbike;
   const vehiclePricing = getVehiclePricing(vehicle);
@@ -1267,6 +1618,8 @@ function buildDriverRideRequestNotificationContent(booking) {
     type: 'ride_request',
     source: 'booking',
     bookingCode: booking.bookingCode,
+    customerAccountId: booking.customerAccountId,
+    driverAccountId: booking.driverAccountId,
     createdAt: booking.createdAt,
     customerName: booking.customerName,
     customerPhone: booking.customerPhone,
@@ -1324,7 +1677,10 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
   const resolvedBooking = cloneRideBookingSnapshot(bookingSnapshot ?? findRecentBookingByCode(bookingCode)) ?? {};
   const customerAccountId = normalizeText(currentRow?.MaTK ?? currentRow?.customerAccountId ?? resolvedBooking?.customerAccountId);
   const driverAccountId = normalizeText(
-    tripStatusResult?.driverAccountId ?? currentRow?.MaTX ?? currentRow?.driverAccountId ?? resolvedBooking?.driverAccountId,
+    tripStatusResult?.driverAccountId
+      ?? currentRow?.driverAccountId
+      ?? resolvedBooking?.driverAccountId
+      ?? currentRow?.MaTX,
   );
   const driverVehicleLicensePlate = normalizeText(
     currentRow?.driverVehicleLicensePlate ?? resolvedBooking?.driverVehicleLicensePlate ?? resolvedBooking?.driverLicensePlate,
@@ -1354,6 +1710,9 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
     bookingCode: normalizeText(bookingCode),
     customerAccountId,
     driverAccountId,
+    cancelledByAccountId: normalizeText(tripStatusResult?.cancelledByAccountId ?? resolvedBooking?.cancelledByAccountId),
+    cancelledByRoleCode: normalizeText(tripStatusResult?.cancelledByRoleCode ?? resolvedBooking?.cancelledByRoleCode),
+    cancelReason: normalizeText(tripStatusResult?.cancelReason ?? resolvedBooking?.cancelReason),
     tripStatus: normalizeTripStatus(tripStatusResult?.tripStatus),
     tripStatusLabel: normalizeText(tripStatusResult?.tripStatusLabel),
     tripStatusTone: normalizeText(tripStatusResult?.tripStatusTone),
@@ -1361,6 +1720,53 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
     booking: resolvedBooking,
     source: 'status-update',
     createdAt: tripStatusResult?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function buildRideTripRatingUpdatedEvent(bookingCode, ratingResult, currentRow = null, bookingSnapshot = null) {
+  const resolvedBooking = cloneRideBookingSnapshot(bookingSnapshot ?? findRecentBookingByCode(bookingCode)) ?? {};
+  const customerAccountId = normalizeText(currentRow?.customerAccountId ?? currentRow?.MaTK ?? resolvedBooking?.customerAccountId);
+  const driverAccountId = normalizeText(
+    currentRow?.driverAccountId
+      ?? resolvedBooking?.driverAccountId
+      ?? currentRow?.MaTX,
+  );
+  const normalizedRatingScore = Number(
+    ratingResult?.ratingScore ?? currentRow?.ratingScore ?? resolvedBooking?.ratingScore,
+  );
+  const ratingScore = Number.isFinite(normalizedRatingScore) && normalizedRatingScore > 0 ? normalizedRatingScore : null;
+  const ratingComment = normalizeText(
+    ratingResult?.ratingComment ?? currentRow?.ratingComment ?? resolvedBooking?.ratingComment,
+  );
+  const ratingSubmittedAt = normalizeText(
+    ratingResult?.ratingSubmittedAt ?? currentRow?.ratingSubmittedAt ?? resolvedBooking?.ratingSubmittedAt,
+  );
+
+  if (ratingScore !== null) {
+    resolvedBooking.ratingScore = ratingScore;
+  }
+
+  if (ratingComment) {
+    resolvedBooking.ratingComment = ratingComment;
+  }
+
+  if (ratingSubmittedAt) {
+    resolvedBooking.ratingSubmittedAt = ratingSubmittedAt;
+  }
+
+  return {
+    type: 'ride.trip.rating.updated',
+    routingKey: 'ride.trip.rating.updated',
+    bookingCode: normalizeText(bookingCode),
+    customerAccountId,
+    driverAccountId,
+    ratingScore,
+    ratingComment,
+    ratingSubmittedAt,
+    audience: ['customer', ...(driverAccountId ? ['driver'] : [])],
+    booking: resolvedBooking,
+    source: 'rating-update',
+    createdAt: ratingSubmittedAt || new Date().toISOString(),
   };
 }
 
@@ -1392,7 +1798,7 @@ function findRecentBookingByCode(bookingCode) {
   return recentBookings.find((booking) => normalizeText(booking.bookingCode) === normalizedBookingCode) ?? null;
 }
 
-function updateRecentBookingTripStatus(bookingCode, tripStatus, driverAccountId = '') {
+function updateRecentBookingTripStatus(bookingCode, tripStatus, driverAccountId = '', cancelMeta = {}) {
   const booking = findRecentBookingByCode(bookingCode);
 
   if (!booking) {
@@ -1409,7 +1815,7 @@ function updateRecentBookingTripStatus(bookingCode, tripStatus, driverAccountId 
     }
 
     if (currentDriverAccountId && currentDriverAccountId.toLowerCase() !== normalizedDriverAccountId.toLowerCase()) {
-      throw createValidationError('Chuyến này đã được tài xế khác nhận.');
+      throw createValidationError('Đã có tài xế khác nhận đơn');
     }
 
     booking.driverAccountId = normalizedDriverAccountId;
@@ -1422,14 +1828,40 @@ function updateRecentBookingTripStatus(bookingCode, tripStatus, driverAccountId 
   booking.tripStatusTone = getTripStatusTone(booking.tripStatus);
   booking.updatedAt = new Date().toISOString();
 
+  if (normalizedTripStatus === 'DaHuy') {
+    const normalizedCancellationMeta = normalizeCancellationMeta(cancelMeta);
+
+    booking.cancelledByAccountId = normalizedCancellationMeta.cancelledByAccountId;
+    booking.cancelledByRoleCode = normalizedCancellationMeta.cancelledByRoleCode;
+    booking.cancelReason = normalizedCancellationMeta.cancelReason;
+  }
+
   return booking;
 }
 
-function buildTripStatusSqlRequest(transaction, bookingCode, tripStatus, driverAccountId = null) {
+function updateRecentBookingRating(bookingCode, ratingScore, ratingComment = '', ratingSubmittedAt = '') {
+  const booking = findRecentBookingByCode(bookingCode);
+
+  if (!booking) {
+    return null;
+  }
+
+  booking.ratingScore = ratingScore;
+  booking.ratingComment = normalizeText(ratingComment);
+  booking.ratingSubmittedAt = ratingSubmittedAt || new Date().toISOString();
+  booking.updatedAt = booking.ratingSubmittedAt;
+
+  return booking;
+}
+
+function buildTripStatusSqlRequest(transaction, bookingCode, tripStatus, driverAccountId = null, cancelMeta = {}) {
+  const cancellationPayload = serializeCancellationMeta(cancelMeta);
+
   return new sql.Request(transaction)
     .input('bookingCode', sql.VarChar(30), bookingCode)
     .input('tripStatus', sql.NVarChar(20), tripStatus)
-    .input('driverAccountId', sql.VarChar(20), driverAccountId || null);
+    .input('driverAccountId', sql.VarChar(20), driverAccountId || null)
+    .input('cancelReasonPayload', sql.NVarChar(500), cancellationPayload || null);
 }
 
 async function readTripStatusRow(transaction, bookingCode) {
@@ -1441,8 +1873,11 @@ async function readTripStatusRow(transaction, bookingCode) {
         dx.MaTK,
         dx.MaTX,
         dx.MaTBThongBaoTaiXe AS driverRequestNotificationId,
+        dx.LyDoHuy AS cancelReasonRaw,
         dx.TrangThaiChuyen,
         dx.NgayCapNhat,
+        tx.MaTK AS driverAccountId,
+        tx.CCCD AS driverCccd,
         JSON_VALUE(tx.ThongTinXe, '$.licensePlate') AS driverVehicleLicensePlate,
         JSON_VALUE(tx.ThongTinXe, '$.name') AS driverVehicleName
       FROM DatXe dx WITH (UPDLOCK, ROWLOCK)
@@ -1479,7 +1914,7 @@ async function resolveDriverRideRequestNotificationId(transaction, bookingCode, 
   return Number(queryResult.recordset?.[0]?.MaTB ?? 0) || null;
 }
 
-async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccountId = '') {
+async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccountId = '', cancelMeta = {}) {
   await ensureRideSchema();
 
   const pool = await getSqlServerPool();
@@ -1510,6 +1945,10 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       throw createValidationError('Trang thai chuyen khong hop le.');
     }
 
+    if (normalizedTripStatus === 'DaHuy' && ['DaDon', 'DangThucHien'].includes(currentTripStatus)) {
+      throw createValidationError('Không thể hủy chuyến sau khi khách đã được đón.');
+    }
+
     if (!canTransitionTripStatus(currentTripStatus, normalizedTripStatus)) {
       throw createValidationError('Khong the cap nhat trang thai chuyen theo thu tu hien tai.');
     }
@@ -1527,10 +1966,10 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
     }
 
     if (currentDriverCccd && driverTripId && currentDriverCccd.toLowerCase() !== driverTripId.toLowerCase()) {
-      throw createValidationError('Chuyến này đã được tài xế khác nhận.');
+      throw createValidationError('Đã có tài xế khác nhận đơn');
     }
 
-    await buildTripStatusSqlRequest(transaction, bookingCode, normalizedTripStatus, driverTripId || null)
+    await buildTripStatusSqlRequest(transaction, bookingCode, normalizedTripStatus, driverTripId || null, cancelMeta)
       .query(`
         UPDATE DatXe
         SET
@@ -1538,6 +1977,10 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
           MaTX = CASE
             WHEN @tripStatus = N'DaNhanChuyen' THEN COALESCE(MaTX, @driverAccountId)
             ELSE MaTX
+          END,
+          LyDoHuy = CASE
+            WHEN @tripStatus = N'DaHuy' THEN NULLIF(@cancelReasonPayload, '')
+            ELSE LyDoHuy
           END
         WHERE MaChuyen = @bookingCode;
       `);
@@ -1563,12 +2006,22 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
 
     await transaction.commit();
 
-    const updatedBooking = updateRecentBookingTripStatus(bookingCode, normalizedTripStatus, driverTripId || normalizedDriverAccountId);
+    const updatedBooking = updateRecentBookingTripStatus(
+      bookingCode,
+      normalizedTripStatus,
+      normalizedDriverAccountId || driverTripId,
+      cancelMeta,
+    );
+    const normalizedCancellationMeta = normalizeCancellationMeta({
+      ...cancelMeta,
+      ...parseCancellationMeta(updatedRow?.cancelReasonRaw ?? currentRow?.cancelReasonRaw ?? ''),
+    });
     const tripStatusResult = buildTripStatusResult(
       normalizeText(updatedRow?.MaChuyen ?? bookingCode),
       updatedRow?.TrangThaiChuyen ?? normalizedTripStatus,
       updatedRow?.NgayCapNhat ?? new Date(),
-      normalizeText(updatedRow?.MaTX ?? currentRow.MaTX ?? driverTripId) || null,
+      normalizeText(updatedRow?.driverAccountId ?? currentRow?.driverAccountId ?? normalizedDriverAccountId) || null,
+      normalizedCancellationMeta,
     );
 
     publishRideEventSafely(
@@ -1623,11 +2076,16 @@ async function persistBookingToDatabase(booking) {
       .input('destinationLabel', sql.NVarChar(255), booking.destination?.label ?? '')
       .input('routeDistanceKm', sql.Decimal(10, 2), booking.routeDistanceKm ?? null)
       .input('routeProvider', sql.NVarChar(30), booking.routeProvider)
+      .input('routeGeometryJson', sql.NVarChar(sql.MAX), serializeRouteGeometry(booking.routeGeometry))
       .input('rideId', sql.VarChar(64), booking.selectedRideId)
       .input('rideTitle', sql.NVarChar(100), booking.rideTitle)
       .input('seatLabel', sql.NVarChar(50), booking.seatLabel || null)
       .input('etaMinutes', sql.Int, booking.etaMinutes)
       .input('price', sql.Int, booking.price)
+      .input('originalPrice', sql.Int, booking.originalPrice ?? booking.price)
+      .input('discountAmount', sql.Int, booking.discountAmount ?? 0)
+      .input('promotionCode', sql.VarChar(40), booking.promotionCode || null)
+      .input('promotionTitle', sql.NVarChar(120), booking.promotionTitle || null)
       .input('paymentMethod', sql.VarChar(20), booking.paymentMethod)
       .input('paymentProvider', sql.VarChar(20), booking.paymentProvider || null)
       .input('tripStatus', sql.NVarChar(20), booking.tripStatus)
@@ -1647,11 +2105,16 @@ async function persistBookingToDatabase(booking) {
           DiemDen,
           QuangDuongKm,
           NguonTuyenDuong,
+          TuyenDuongJson,
           MaHangXe,
           TenHangXe,
           LoaiGhe,
           ThoiGianDuKienPhut,
           GiaTien,
+          GiaGoc,
+          TienGiam,
+          MaUuDai,
+          TenUuDai,
           PhuongThucThanhToan,
           NhaCungCapThanhToan,
           TrangThaiChuyen,
@@ -1672,11 +2135,16 @@ async function persistBookingToDatabase(booking) {
           @destinationLabel,
           @routeDistanceKm,
           @routeProvider,
+          @routeGeometryJson,
           @rideId,
           @rideTitle,
           @seatLabel,
           @etaMinutes,
           @price,
+          @originalPrice,
+          @discountAmount,
+          @promotionCode,
+          @promotionTitle,
           @paymentMethod,
           @paymentProvider,
           @tripStatus,
@@ -1690,6 +2158,11 @@ async function persistBookingToDatabase(booking) {
       .input('paymentCode', sql.VarChar(30), paymentCode)
       .input('bookingCode', sql.VarChar(30), booking.bookingCode)
       .input('amount', sql.Int, booking.price)
+      .input('originalAmount', sql.Int, booking.originalPrice ?? booking.price)
+      .input('discountAmount', sql.Int, booking.discountAmount ?? 0)
+      .input('promotionCode', sql.VarChar(40), booking.promotionCode || null)
+      .input('promotionTitle', sql.NVarChar(120), booking.promotionTitle || null)
+      .input('note', sql.NVarChar(255), booking.promotionSummary || null)
       .input('paymentMethod', sql.VarChar(20), booking.paymentMethod)
       .input('paymentProvider', sql.VarChar(20), booking.paymentProvider || null)
       .input('paymentStatus', sql.NVarChar(20), paymentStatus)
@@ -1700,6 +2173,10 @@ async function persistBookingToDatabase(booking) {
           MaTT,
           MaChuyen,
           SoTien,
+          GiaGoc,
+          TienGiam,
+          MaUuDai,
+          TenUuDai,
           PhuongThucThanhToan,
           NhaCungCapThanhToan,
           TrangThaiThanhToan,
@@ -1713,11 +2190,15 @@ async function persistBookingToDatabase(booking) {
           @paymentCode,
           @bookingCode,
           @amount,
+          @originalAmount,
+          @discountAmount,
+          @promotionCode,
+          @promotionTitle,
           @paymentMethod,
           @paymentProvider,
           @paymentStatus,
           NULL,
-          NULL,
+          @note,
           @createdAt,
           @createdAt
         )
@@ -1728,6 +2209,7 @@ async function persistBookingToDatabase(booking) {
     const driverNotificationResult = await new sql.Request(transaction)
       .input('title', sql.NVarChar(200), driverNotificationTitle)
       .input('content', sql.NVarChar(sql.MAX), driverNotificationContent)
+      .input('accountId', sql.VarChar(20), booking.customerAccountId || null)
       .input('recipient', sql.VarChar(20), DRIVER_RIDE_REQUEST_NOTIFICATION_RECIPIENT)
       .input('status', sql.VarChar(20), DRIVER_RIDE_REQUEST_NOTIFICATION_STATUS)
       .input('sendAt', sql.DateTime2(0), new Date(booking.createdAt))
@@ -1735,6 +2217,7 @@ async function persistBookingToDatabase(booking) {
       .query(`
         INSERT INTO dbo.ThongBao
         (
+          MaTK,
           TieuDe,
           NoiDung,
           NguoiNhan,
@@ -1746,6 +2229,7 @@ async function persistBookingToDatabase(booking) {
         OUTPUT INSERTED.MaTB
         VALUES
         (
+          @accountId,
           @title,
           @content,
           @recipient,
@@ -1852,6 +2336,10 @@ export async function bookRide(payload) {
     throw createValidationError('Vui long chon hang xe truoc khi dat xe.');
   }
 
+  if (!customerAccountId) {
+    throw createValidationError('Vui lòng đăng nhập để đặt xe.');
+  }
+
   const quoteResult = await searchRides({
     vehicle: payload?.vehicle,
     scheduleEnabled: payload?.scheduleEnabled,
@@ -1864,6 +2352,10 @@ export async function bookRide(payload) {
   if (!selectedRide) {
     throw createValidationError('Hang xe da chon khong ton tai hoac da thay doi gia. Vui long tim lai chuyen.');
   }
+
+  const appliedPromotion = await resolveBookingPromotion(payload);
+  const promotionPricing = calculatePromotionPricing(selectedRide.price, appliedPromotion);
+  const promotionSummary = buildPromotionSummaryText(appliedPromotion, promotionPricing.discountAmount);
 
   const booking = {
     bookingCode: generateBookingCode(),
@@ -1884,8 +2376,20 @@ export async function bookRide(payload) {
     rideTitle: selectedRide.title,
     seatLabel: selectedRide.seatLabel,
     etaMinutes: selectedRide.etaMinutes,
-    price: selectedRide.price,
-    priceFormatted: selectedRide.priceFormatted,
+    price: promotionPricing.finalPrice,
+    priceFormatted: formatCurrency(promotionPricing.finalPrice),
+    originalPrice: promotionPricing.originalPrice,
+    originalPriceFormatted: formatCurrency(promotionPricing.originalPrice),
+    discountAmount: promotionPricing.discountAmount,
+    discountAmountFormatted: formatCurrency(promotionPricing.discountAmount),
+    promotionId: appliedPromotion ? normalizePromotionLookupId(appliedPromotion.id) : null,
+    promotionCode: normalizeText(appliedPromotion?.code).toUpperCase() || null,
+    promotionTitle: normalizeText(appliedPromotion?.title) || null,
+    promotionDiscountPercent: Number(appliedPromotion?.discountPercent ?? 0) || 0,
+    promotionMaxAmount: Number(appliedPromotion?.maxAmount ?? 0) || 0,
+    promotionScope: normalizeText(appliedPromotion?.scope) || null,
+    promotionExpiresAt: normalizeText(appliedPromotion?.expiresAt) || null,
+    promotionSummary,
     paymentMethod,
     paymentMethodLabel: getPaymentMethodLabel(paymentMethod),
     paymentProvider,
@@ -2046,6 +2550,27 @@ function buildTripHistoryNote(row, statusLabel) {
   }
 
   if (statusLabel === 'Đã hủy') {
+    const cancellationMeta = parseCancellationMeta(row.cancelReasonRaw ?? row.cancelReason ?? row.LyDoHuy);
+    const cancelledByRoleCode = normalizeText(cancellationMeta.cancelledByRoleCode ?? row.cancelledByRoleCode).toLowerCase();
+    const cancelledByLabel = cancelledByRoleCode === 'q3' || cancelledByRoleCode === 'driver'
+      ? 'Tài xế'
+      : cancelledByRoleCode === 'q2' || cancelledByRoleCode === 'customer'
+        ? 'Khách hàng'
+        : '';
+    const cancelReason = normalizeText(cancellationMeta.cancelReason ?? row.cancelReason);
+
+    if (cancelledByLabel && cancelReason) {
+      return `Hủy bởi ${cancelledByLabel}: ${cancelReason}`;
+    }
+
+    if (cancelledByLabel) {
+      return `Hủy bởi ${cancelledByLabel}.`;
+    }
+
+    if (cancelReason) {
+      return `Lý do hủy: ${cancelReason}`;
+    }
+
     return 'Giao dịch không hoàn tất hoặc cần kiểm tra lại.';
   }
 
@@ -2104,6 +2629,72 @@ function buildTripHistorySummary(rows = []) {
   });
 }
 
+function normalizeTripHistoryDate(value) {
+  const parsedDate = value ? new Date(value) : null;
+
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate;
+}
+
+function buildTripHistoryReviewSummary(rows = []) {
+  const ratingCounts = {
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
+  };
+
+  let totalReviews = 0;
+  let ratingTotal = 0;
+  let firstTripAt = null;
+  let latestTripAt = null;
+  let latestReviewAt = null;
+
+  rows.forEach((row) => {
+    const tripDate = normalizeTripHistoryDate(row.bookedAt ?? row.NgayTao ?? row.updatedAt ?? row.NgayCapNhat);
+
+    if (tripDate) {
+      if (!firstTripAt || tripDate < firstTripAt) {
+        firstTripAt = tripDate;
+      }
+
+      if (!latestTripAt || tripDate > latestTripAt) {
+        latestTripAt = tripDate;
+      }
+    }
+
+    const normalizedRatingScore = Number(row.ratingScore ?? 0);
+
+    if (!Number.isFinite(normalizedRatingScore) || normalizedRatingScore <= 0) {
+      return;
+    }
+
+    const ratingScore = Math.max(1, Math.min(5, Math.round(normalizedRatingScore)));
+    totalReviews += 1;
+    ratingTotal += ratingScore;
+    ratingCounts[ratingScore] += 1;
+
+    const reviewDate = normalizeTripHistoryDate(row.ratingSubmittedAt ?? row.updatedAt ?? row.NgayCapNhat);
+
+    if (reviewDate && (!latestReviewAt || reviewDate > latestReviewAt)) {
+      latestReviewAt = reviewDate;
+    }
+  });
+
+  return {
+    totalReviews,
+    averageRating: totalReviews > 0 ? Number((ratingTotal / totalReviews).toFixed(2)) : 0,
+    ratingCounts,
+    firstTripAt: firstTripAt?.toISOString?.() ?? '',
+    latestTripAt: latestTripAt?.toISOString?.() ?? '',
+    latestReviewAt: latestReviewAt?.toISOString?.() ?? '',
+  };
+}
+
 async function resolveHistoryAccount(payload = {}) {
   const accountId = normalizeText(payload.accountId);
   const identifier = normalizeText(payload.identifier).toLowerCase();
@@ -2158,6 +2749,7 @@ function buildTripHistorySelectClause() {
       dx.MaChuyen AS bookingCode,
       dx.MaTK AS accountId,
       dx.MaTX AS driverAccountId,
+      dx.LyDoHuy AS cancelReasonRaw,
       dx.TenKhachHang AS customerName,
       dx.SDT AS customerPhone,
       dx.LoaiXe AS vehicle,
@@ -2166,11 +2758,19 @@ function buildTripHistorySelectClause() {
       dx.DiemDen AS destinationLabel,
       dx.QuangDuongKm AS routeDistanceKm,
       dx.NguonTuyenDuong AS routeProvider,
+      dx.TuyenDuongJson AS routeGeometryJson,
+      dg.SoSaoDanhGia AS ratingScore,
+      dg.NhanXetDanhGia AS ratingComment,
+      dg.ThoiDiemDanhGia AS ratingSubmittedAt,
       dx.MaHangXe AS rideId,
       dx.TenHangXe AS rideTitle,
       dx.LoaiGhe AS seatLabel,
       dx.ThoiGianDuKienPhut AS etaMinutes,
       dx.GiaTien AS basePrice,
+      dx.GiaGoc AS originalPrice,
+      dx.TienGiam AS discountAmount,
+      dx.MaUuDai AS promotionCode,
+      dx.TenUuDai AS promotionTitle,
       dx.PhuongThucThanhToan AS paymentMethod,
       dx.NhaCungCapThanhToan AS paymentProvider,
       dx.TrangThaiChuyen AS tripStatus,
@@ -2179,6 +2779,10 @@ function buildTripHistorySelectClause() {
       dx.NgayCapNhat AS updatedAt,
       tt.MaTT AS paymentCode,
       tt.SoTien AS paymentAmount,
+      tt.GiaGoc AS paymentOriginalAmount,
+      tt.TienGiam AS paymentDiscountAmount,
+      tt.MaUuDai AS paymentPromotionCode,
+      tt.TenUuDai AS paymentPromotionTitle,
       tt.PhuongThucThanhToan AS paymentMethodFromPayment,
       tt.NhaCungCapThanhToan AS paymentProviderFromPayment,
       tt.TrangThaiThanhToan AS paymentStatus,
@@ -2196,6 +2800,7 @@ function buildTripHistorySelectClause() {
       JSON_VALUE(tx.ThongTinXe, '$.licensePlate') AS driverVehicleLicensePlate,
       JSON_VALUE(tx.ThongTinXe, '$.name') AS driverVehicleName
     FROM DatXe dx
+    LEFT JOIN DanhGiaChuyenXe dg ON dg.MaChuyen = dx.MaChuyen
     LEFT JOIN ThanhToan tt ON tt.MaChuyen = dx.MaChuyen
     LEFT JOIN TaiKhoan tk ON tk.MaTK = dx.MaTK
     LEFT JOIN TaiXe tx ON tx.CCCD = dx.MaTX
@@ -2251,34 +2856,49 @@ function buildTripHistoryQuery(roleCode) {
 async function enrichTripHistoryRow(row, account = null) {
   const pickupLabel = normalizeText(row.pickupLabel);
   const destinationLabel = normalizeText(row.destinationLabel);
-  const [pickupPosition, destinationPosition] = await Promise.all([
-    pickupLabel ? resolveLocationPosition({ label: pickupLabel }) : Promise.resolve(null),
-    destinationLabel ? resolveLocationPosition({ label: destinationLabel }) : Promise.resolve(null),
-  ]);
-  const routeMetrics = pickupPosition && destinationPosition
-    ? await getShortestRouteMetrics(pickupPosition, destinationPosition)
+  const storedRouteGeometry = normalizeStoredRouteGeometry(row.routeGeometryJson);
+  let pickupPosition = storedRouteGeometry?.[0] ? { ...storedRouteGeometry[0] } : null;
+  let destinationPosition = storedRouteGeometry?.[storedRouteGeometry.length - 1]
+    ? { ...storedRouteGeometry[storedRouteGeometry.length - 1] }
     : null;
-  const routeGeometry = routeMetrics?.geometry
-    ? cloneRouteGeometry(routeMetrics.geometry)
-    : pickupPosition && destinationPosition
-      ? [
-          {
-            lat: pickupPosition.lat,
-            lng: pickupPosition.lng,
-          },
-          {
-            lat: destinationPosition.lat,
-            lng: destinationPosition.lng,
-          },
-        ]
-      : null;
+
+  if (!storedRouteGeometry) {
+    const [pickupPositionRaw, destinationPositionRaw] = await Promise.all([
+      pickupLabel ? resolveLocationPosition({ label: pickupLabel }) : Promise.resolve(null),
+      destinationLabel ? resolveLocationPosition({ label: destinationLabel }) : Promise.resolve(null),
+    ]);
+
+    pickupPosition = pickupPositionRaw;
+    destinationPosition = destinationPositionRaw;
+  }
+
+  const fallbackRouteGeometry = pickupPosition && destinationPosition
+    ? [
+        {
+          lat: pickupPosition.lat,
+          lng: pickupPosition.lng,
+        },
+        {
+          lat: destinationPosition.lat,
+          lng: destinationPosition.lng,
+        },
+      ]
+    : null;
+  const routeGeometry = storedRouteGeometry ?? fallbackRouteGeometry;
+  const normalizedRatingScore = Number(row.ratingScore ?? 0);
+  const ratingScore = Number.isFinite(normalizedRatingScore) && normalizedRatingScore > 0 ? normalizedRatingScore : null;
+  const ratingComment = normalizeText(row.ratingComment);
+  const ratingSubmittedAtValue = row.ratingSubmittedAt;
+  const ratingSubmittedAtDate = ratingSubmittedAtValue ? new Date(ratingSubmittedAtValue) : null;
 
   const paymentMethod = normalizeText(row.paymentMethodFromPayment ?? row.paymentMethod).toLowerCase();
   const paymentProvider = normalizeText(row.paymentProviderFromPayment ?? row.paymentProvider).toLowerCase();
   const paymentStatus = normalizeText(row.paymentStatus ?? row.bookingPaymentStatus).toLowerCase();
   const tripStatus = normalizeTripStatus(row.tripStatus ?? row.TrangThaiChuyen);
   const status = getTripHistoryStatus(row);
-  const basePrice = Number(row.paymentAmount ?? row.basePrice ?? 0);
+  const finalPrice = Number(row.paymentAmount ?? row.basePrice ?? row.price ?? 0);
+  const originalPrice = Number(row.originalPrice ?? row.paymentOriginalAmount ?? finalPrice);
+  const discountAmount = Number(row.discountAmount ?? row.paymentDiscountAmount ?? Math.max(0, originalPrice - finalPrice));
   const routeDistanceKm = Number(row.routeDistanceKm ?? 0);
   const etaMinutes = Number(row.etaMinutes ?? 0);
   const bookedAt = row.bookedAt ? new Date(row.bookedAt) : null;
@@ -2291,11 +2911,18 @@ async function enrichTripHistoryRow(row, account = null) {
   const customerPhone = normalizeText(row.customerPhone);
   const vehicle = normalizeText(row.vehicle).toLowerCase();
   const vehicleLabel = getTripHistoryVehicleLabel(vehicle);
-  const routeProvider = routeMetrics?.provider ?? getTripHistoryRouteProvider(row.routeProvider);
+  const routeProvider = getTripHistoryRouteProvider(row.routeProvider);
   const paymentLabel = getTripHistoryPaymentLabel(paymentMethod, paymentProvider);
   const paymentStatusLabel = getPaymentStatusLabel(paymentStatus || row.bookingPaymentStatus);
   const driverVehicleLicensePlate = normalizeText(row.driverVehicleLicensePlate);
   const driverVehicleName = normalizeText(row.driverVehicleName);
+  const promotionCode = normalizeText(row.promotionCode ?? row.paymentPromotionCode);
+  const promotionTitle = normalizeText(row.promotionTitle ?? row.paymentPromotionTitle);
+  const promotionSummary = [
+    promotionCode ? `Mã ${promotionCode}` : '',
+    promotionTitle && promotionTitle !== promotionCode ? promotionTitle : '',
+    discountAmount > 0 ? `Giảm ${formatCurrency(discountAmount)}` : '',
+  ].filter(Boolean).join(' · ');
 
   return {
     id: bookingCode || paymentCode,
@@ -2320,8 +2947,15 @@ async function enrichTripHistoryRow(row, account = null) {
     paymentProvider,
     paymentStatus,
     paymentStatusLabel,
-    price: basePrice,
-    priceFormatted: formatCurrency(basePrice),
+    price: finalPrice,
+    priceFormatted: formatCurrency(finalPrice),
+    originalPrice,
+    originalPriceFormatted: formatCurrency(originalPrice),
+    discountAmount,
+    discountAmountFormatted: formatCurrency(discountAmount),
+    promotionCode,
+    promotionTitle,
+    promotionSummary,
     routeDistanceKm,
     etaMinutes,
     pickupLabel,
@@ -2330,8 +2964,16 @@ async function enrichTripHistoryRow(row, account = null) {
     destinationPosition,
     routeProvider,
     routeGeometry,
+    ratingScore,
+    ratingComment,
+    ratingSubmittedAt: ratingSubmittedAtDate && !Number.isNaN(ratingSubmittedAtDate.getTime())
+      ? ratingSubmittedAtDate.toISOString()
+      : '',
     scheduleEnabled: Boolean(row.scheduleEnabled),
     note: buildTripHistoryNote(row, getHistoryStatusLabel(status)),
+    cancelledByAccountId: normalizeText(parseCancellationMeta(row.cancelReasonRaw ?? row.cancelReason ?? row.LyDoHuy).cancelledByAccountId),
+    cancelledByRoleCode: normalizeText(parseCancellationMeta(row.cancelReasonRaw ?? row.cancelReason ?? row.LyDoHuy).cancelledByRoleCode),
+    cancelReason: normalizeText(parseCancellationMeta(row.cancelReasonRaw ?? row.cancelReason ?? row.LyDoHuy).cancelReason),
     accountDisplayName: account?.displayName ?? normalizeText(row.accountName),
     accountIdentifier: account?.email ?? normalizeText(row.accountEmail || row.accountUsername || row.accountId),
     accountPhone: account?.phone ?? normalizeText(row.accountPhone),
@@ -2351,6 +2993,7 @@ export async function updateTripStatus(payload = {}) {
   const bookingCode = normalizeText(payload?.bookingCode ?? payload?.tripCode ?? payload?.id);
   const requestedTripStatus = parseTripStatus(payload?.status);
   const normalizedDriverAccountId = normalizeText(payload?.driverAccountId ?? payload?.driverId);
+  const cancelMeta = normalizeCancellationMeta(payload);
 
   if (!bookingCode) {
     throw createValidationError('Vui long cung cap ma chuyen de cap nhat trang thai.');
@@ -2361,7 +3004,7 @@ export async function updateTripStatus(payload = {}) {
   }
 
   if (!isSqlServerConfigured()) {
-    const updatedBooking = updateRecentBookingTripStatus(bookingCode, requestedTripStatus, normalizedDriverAccountId);
+    const updatedBooking = updateRecentBookingTripStatus(bookingCode, requestedTripStatus, normalizedDriverAccountId, cancelMeta);
 
     if (!updatedBooking) {
       throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
@@ -2372,10 +3015,225 @@ export async function updateTripStatus(payload = {}) {
       updatedBooking.tripStatus,
       updatedBooking.updatedAt,
       updatedBooking.driverAccountId,
+      cancelMeta,
     );
   }
 
-  return updateTripStatusInDatabase(bookingCode, requestedTripStatus, normalizedDriverAccountId);
+  return updateTripStatusInDatabase(bookingCode, requestedTripStatus, normalizedDriverAccountId, cancelMeta);
+}
+
+export async function submitRideRating(payload = {}) {
+  const bookingCode = normalizeText(payload?.bookingCode ?? payload?.tripCode ?? payload?.id);
+  const normalizedAccountId = normalizeText(payload?.accountId ?? payload?.customerAccountId ?? payload?.userId);
+  const ratingValue = Number(payload?.rating ?? payload?.score ?? payload?.stars);
+  const normalizedRatingScore = Number.isFinite(ratingValue) ? Math.round(ratingValue) : NaN;
+  const ratingComment = normalizeText(payload?.comment ?? payload?.note ?? payload?.feedback ?? '');
+
+  if (!bookingCode) {
+    throw createValidationError('Vui long cung cap ma chuyen de gui danh gia.');
+  }
+
+  if (!Number.isInteger(normalizedRatingScore) || normalizedRatingScore < 1 || normalizedRatingScore > 5) {
+    throw createValidationError('So sao danh gia khong hop le. Vui long chon tu 1 den 5 sao.');
+  }
+
+  const ratingSubmittedAt = new Date().toISOString();
+
+  if (!isSqlServerConfigured()) {
+    const updatedBooking = updateRecentBookingRating(bookingCode, normalizedRatingScore, ratingComment, ratingSubmittedAt);
+
+    if (!updatedBooking) {
+      throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
+    }
+
+    const ratingResult = {
+      bookingCode,
+      ratingScore: normalizedRatingScore,
+      ratingComment,
+      ratingSubmittedAt,
+    };
+
+    publishRideEventSafely(buildRideTripRatingUpdatedEvent(bookingCode, ratingResult, updatedBooking, updatedBooking));
+
+    return {
+      success: true,
+      message: 'Danh gia da duoc ghi nhan trong bo nho tam.',
+      bookingCode,
+      rating: ratingResult,
+      booking: updatedBooking,
+    };
+  }
+
+  await ensureRideSchema();
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+
+  await transaction.begin();
+
+  try {
+    const currentRowResult = await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), bookingCode)
+      .query(`
+        SELECT TOP 1
+          dx.MaChuyen AS bookingCode,
+          dx.MaTK AS customerAccountId,
+          dx.MaTX AS driverCccd,
+          dx.TrangThaiChuyen AS tripStatus,
+          dg.SoSaoDanhGia AS ratingScore,
+          dg.NhanXetDanhGia AS ratingComment,
+          dg.ThoiDiemDanhGia AS ratingSubmittedAt,
+          tx.MaTK AS driverAccountId
+        FROM DatXe dx WITH (UPDLOCK, ROWLOCK)
+        LEFT JOIN DanhGiaChuyenXe dg ON dg.MaChuyen = dx.MaChuyen
+        LEFT JOIN TaiXe tx ON LOWER(ISNULL(tx.CCCD, '')) = LOWER(ISNULL(dx.MaTX, ''))
+        WHERE dx.MaChuyen = @bookingCode;
+      `);
+
+    const currentRow = currentRowResult.recordset?.[0] ?? null;
+
+    if (!currentRow) {
+      throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
+    }
+
+    if (normalizedAccountId && normalizeText(currentRow.customerAccountId) && normalizeText(currentRow.customerAccountId).toLowerCase() !== normalizedAccountId.toLowerCase()) {
+      throw createForbiddenError('Ban khong co quyen danh gia chuyen nay.');
+    }
+
+    if (normalizeTripStatus(currentRow.tripStatus) !== 'HoanThanh') {
+      throw createValidationError('Chi co the danh gia sau khi hoan thanh chuyen xe.');
+    }
+
+    await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), bookingCode)
+      .input('customerAccountId', sql.VarChar(20), currentRow.customerAccountId ?? null)
+      .input('driverCccd', sql.VarChar(20), currentRow.driverCccd ?? null)
+      .input('ratingScore', sql.Int, normalizedRatingScore)
+      .input('ratingComment', sql.NVarChar(1000), ratingComment || null)
+      .input('ratingSubmittedAt', sql.DateTime2(0), new Date(ratingSubmittedAt))
+      .query(`
+        IF EXISTS (
+          SELECT 1
+          FROM dbo.DanhGiaChuyenXe WITH (UPDLOCK, HOLDLOCK)
+          WHERE MaChuyen = @bookingCode
+        )
+        BEGIN
+          UPDATE dbo.DanhGiaChuyenXe
+          SET
+            MaTK = @customerAccountId,
+            MaTX = @driverCccd,
+            SoSaoDanhGia = @ratingScore,
+            NhanXetDanhGia = @ratingComment,
+            ThoiDiemDanhGia = @ratingSubmittedAt,
+            NgayCapNhat = @ratingSubmittedAt
+          WHERE MaChuyen = @bookingCode;
+        END
+        ELSE
+        BEGIN
+          INSERT INTO dbo.DanhGiaChuyenXe (
+            MaChuyen,
+            MaTK,
+            MaTX,
+            SoSaoDanhGia,
+            NhanXetDanhGia,
+            ThoiDiemDanhGia,
+            NgayTao,
+            NgayCapNhat
+          )
+          VALUES (
+            @bookingCode,
+            @customerAccountId,
+            @driverCccd,
+            @ratingScore,
+            @ratingComment,
+            @ratingSubmittedAt,
+            @ratingSubmittedAt,
+            @ratingSubmittedAt
+          );
+        END
+      `);
+
+    const updatedRowResult = await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), bookingCode)
+      .query(`
+        SELECT TOP 1
+          dx.MaChuyen AS bookingCode,
+          dx.MaTK AS customerAccountId,
+          dx.MaTX AS driverCccd,
+          dx.TrangThaiChuyen AS tripStatus,
+          dg.SoSaoDanhGia AS ratingScore,
+          dg.NhanXetDanhGia AS ratingComment,
+          dg.ThoiDiemDanhGia AS ratingSubmittedAt,
+          tx.MaTK AS driverAccountId
+        FROM DatXe dx
+        LEFT JOIN DanhGiaChuyenXe dg ON dg.MaChuyen = dx.MaChuyen
+        LEFT JOIN TaiXe tx ON LOWER(ISNULL(tx.CCCD, '')) = LOWER(ISNULL(dx.MaTX, ''))
+        WHERE dx.MaChuyen = @bookingCode;
+      `);
+
+    const updatedRow = updatedRowResult.recordset?.[0] ?? currentRow;
+
+    await transaction.commit();
+
+    const updatedBooking = updateRecentBookingRating(bookingCode, normalizedRatingScore, ratingComment, ratingSubmittedAt);
+    const ratingResult = {
+      bookingCode,
+      ratingScore: normalizedRatingScore,
+      ratingComment,
+      ratingSubmittedAt,
+    };
+
+    publishRideEventSafely(
+      buildRideTripRatingUpdatedEvent(
+        bookingCode,
+        ratingResult,
+        {
+          ...currentRow,
+          ...updatedRow,
+        },
+        updatedBooking,
+      ),
+    );
+
+    return {
+      success: true,
+      message: 'Danh gia da duoc luu thanh cong.',
+      bookingCode,
+      rating: ratingResult,
+      booking: updatedBooking ?? null,
+    };
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch {
+      // Ignore rollback failures.
+    }
+
+    if (error?.code === 'ETIMEOUT' || error?.code === 'ECONNREFUSED' || error?.code === 'ELOGIN') {
+      const fallbackBooking = updateRecentBookingRating(bookingCode, normalizedRatingScore, ratingComment, ratingSubmittedAt);
+
+      if (fallbackBooking) {
+        const ratingResult = {
+          bookingCode,
+          ratingScore: normalizedRatingScore,
+          ratingComment,
+          ratingSubmittedAt,
+        };
+
+        publishRideEventSafely(buildRideTripRatingUpdatedEvent(bookingCode, ratingResult, fallbackBooking, fallbackBooking));
+
+        return {
+          success: true,
+          message: 'Khong the ket noi SQL Server, da ghi nhan danh gia tam thoi trong bo nho.',
+          bookingCode,
+          rating: ratingResult,
+          booking: fallbackBooking,
+        };
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function getTripHistory(payload = {}) {
@@ -2403,6 +3261,7 @@ export async function getTripHistory(payload = {}) {
 
   const rows = queryResult.recordset ?? [];
   const summary = buildTripHistorySummary(rows);
+  const reviewSummary = buildTripHistoryReviewSummary(rows);
   const items = await Promise.all(rows.slice(0, limit).map((row) => enrichTripHistoryRow(row, resolvedAccount)));
 
   return {
@@ -2413,6 +3272,7 @@ export async function getTripHistory(payload = {}) {
     totalCount: rows.length,
     limit,
     summary,
+    reviewSummary,
     items,
   };
 }

@@ -4,6 +4,7 @@ import DestinationPickerModal from '../components/ui/DestinationPickerModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import RoutePreviewMap from '../components/ui/RoutePreviewMap';
 import RideTrackingModal from '../components/ui/RideTrackingModal';
+import TripRatingDialog from '../components/ui/TripRatingDialog';
 import DriverRideRequestModal from '../components/ui/DriverRideRequestModal';
 import DriverRideRejectModal from '../components/ui/DriverRideRejectModal';
 import DriverTripActionModal from '../components/ui/DriverTripActionModal';
@@ -33,8 +34,11 @@ import { promoCards, serviceCards, testimonials, vehicleTabs } from '../data/sit
 import { classNames } from '../utils/classNames';
 import { authService } from '../services/authService';
 import { driverSignupService } from '../services/driverSignupService';
+import { promotionService } from '../services/promotionService';
 import { rideService } from '../services/rideService';
-import { connectRideEventStream } from '../services/rideRealtimeService';
+import { connectRideEventStream, createRideSocketConnection } from '../services/rideRealtimeService';
+import { acquireBodyScrollLock } from '../utils/bodyScrollLock';
+import { subscribePromotionCatalogChanged } from '../utils/promotionEvents';
 import {
   DRIVER_RIDE_REQUEST_NEARBY_DISTANCE_KM,
   DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY,
@@ -217,6 +221,95 @@ function normalizePromoSearchValue(value) {
     .replace(/Đ/g, 'D')
     .toLowerCase()
     .trim();
+}
+
+function formatBookingPromoAmount(value) {
+  const amount = Number(value ?? 0);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return '';
+  }
+
+  return `${amount.toLocaleString('vi-VN')}đ`;
+}
+
+function formatBookingPromoValidUntil(value) {
+  const normalizedValue = String(value ?? '').trim();
+
+  if (!normalizedValue) {
+    return '--';
+  }
+
+  const parsedDate = normalizedValue.length === 10 ? parse(normalizedValue, 'yyyy-MM-dd', new Date()) : new Date(normalizedValue);
+
+  if (!isValid(parsedDate)) {
+    return normalizedValue.slice(0, 10) || '--';
+  }
+
+  return format(parsedDate, 'dd/MM/yyyy');
+}
+
+function normalizeBookingPromoCard(promotion) {
+  const code = String(promotion?.code ?? promotion?.promotionCode ?? '').trim();
+  const title = String(promotion?.title ?? '').trim() || `Ưu đãi ${code || String(promotion?.id ?? '').trim()}`;
+  const description = String(promotion?.description ?? '').trim();
+  const scope = String(promotion?.scope ?? '').trim();
+  const discountPercent = Number(promotion?.discountPercent ?? 0);
+  const maxAmount = Number(promotion?.maxAmount ?? 0);
+  const descriptionParts = [];
+
+  if (description) {
+    descriptionParts.push(description);
+  }
+
+  const discountParts = [];
+
+  if (Number.isFinite(discountPercent) && discountPercent > 0) {
+    discountParts.push(`Giảm ${discountPercent}%`);
+  }
+
+  const formattedMaxAmount = formatBookingPromoAmount(maxAmount);
+
+  if (formattedMaxAmount) {
+    discountParts.push(`tối đa ${formattedMaxAmount}`);
+  }
+
+  if (discountParts.length > 0) {
+    descriptionParts.push(discountParts.join(' '));
+  }
+
+  if (scope) {
+    descriptionParts.push(scope);
+  }
+
+  return {
+    id: String(promotion?.id ?? code),
+    code,
+    title,
+    description: descriptionParts.filter(Boolean).join(' • ') || 'Ưu đãi áp dụng cho chuyến đi.',
+    badge: code || `Giảm ${Number.isFinite(discountPercent) && discountPercent > 0 ? discountPercent : 0}%`,
+    validUntil: formatBookingPromoValidUntil(promotion?.expiresAt),
+    status: String(promotion?.status ?? ''),
+    discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0,
+    maxAmount: Number.isFinite(maxAmount) ? maxAmount : 0,
+    scope,
+  };
+}
+
+function extractPromotionList(response) {
+  if (Array.isArray(response?.promotions)) {
+    return response.promotions;
+  }
+
+  if (Array.isArray(response?.data?.promotions)) {
+    return response.data.promotions;
+  }
+
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+
+  return [];
 }
 
 const DRIVER_SIGNUP_ITEMS = {
@@ -542,6 +635,64 @@ function getRideBookingCode(record = null) {
   return String(record?.bookingCode ?? record?.id ?? record?.requestId ?? '').trim();
 }
 
+function normalizeRoutePoint(position) {
+  if (!position || typeof position !== 'object') {
+    return null;
+  }
+
+  const lat = Number(position.lat);
+  const lng = Number(position.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
+function normalizeRouteGeometry(routeGeometry) {
+  if (!Array.isArray(routeGeometry)) {
+    return null;
+  }
+
+  const normalizedRouteGeometry = routeGeometry
+    .map((point) => normalizeRoutePoint(point))
+    .filter(Boolean);
+
+  return normalizedRouteGeometry.length >= 2 ? normalizedRouteGeometry : null;
+}
+
+function pickPreferredRouteGeometry(currentRouteGeometry, nextRouteGeometry) {
+  const normalizedCurrentRouteGeometry = normalizeRouteGeometry(currentRouteGeometry);
+  const normalizedNextRouteGeometry = normalizeRouteGeometry(nextRouteGeometry);
+
+  if (!normalizedCurrentRouteGeometry) {
+    return normalizedNextRouteGeometry;
+  }
+
+  if (!normalizedNextRouteGeometry) {
+    return normalizedCurrentRouteGeometry;
+  }
+
+  return normalizedNextRouteGeometry.length > normalizedCurrentRouteGeometry.length
+    ? normalizedNextRouteGeometry
+    : normalizedCurrentRouteGeometry;
+}
+
+function pickPreferredRoutePosition(currentPosition, nextPosition) {
+  return normalizeRoutePoint(nextPosition) ?? normalizeRoutePoint(currentPosition) ?? null;
+}
+
+function hasSubmittedTripRating(record) {
+  const normalizedRatingScore = Number(record?.ratingScore);
+
+  if (Number.isFinite(normalizedRatingScore) && normalizedRatingScore > 0) {
+    return true;
+  }
+
+  return Boolean(String(record?.ratingSubmittedAt ?? '').trim());
+}
+
 function isCustomerTrackedRideStatus(value) {
   const normalizedStatusToken = normalizeRideStatusToken(value);
 
@@ -553,6 +704,16 @@ function isCustomerTrackedRideStatus(value) {
     normalizedStatusToken !== 'completed' &&
     normalizedStatusToken !== 'dahuy' &&
     normalizedStatusToken !== 'cancelled';
+}
+
+function isCompletedRideStatus(value) {
+  const normalizedStatusToken = normalizeRideStatusToken(value);
+
+  if (!normalizedStatusToken) {
+    return false;
+  }
+
+  return normalizedStatusToken === 'hoanthanh' || normalizedStatusToken === 'completed';
 }
 
 function isDriverTrackedRideStatus(value) {
@@ -577,10 +738,34 @@ function mergeRideBookingSnapshot(currentBooking, nextBooking) {
   const nextBookingCode = getRideBookingCode(nextBooking);
 
   if (currentBooking && currentBookingCode && nextBookingCode && currentBookingCode === nextBookingCode) {
-    return {
+    const mergedBooking = {
       ...currentBooking,
       ...nextBooking,
     };
+
+    const preferredRouteGeometry = pickPreferredRouteGeometry(currentBooking?.routeGeometry, nextBooking?.routeGeometry);
+    const preferredPickupPosition = pickPreferredRoutePosition(currentBooking?.pickupPosition, nextBooking?.pickupPosition);
+    const preferredDestinationPosition = pickPreferredRoutePosition(currentBooking?.destinationPosition, nextBooking?.destinationPosition);
+
+    if (preferredRouteGeometry) {
+      mergedBooking.routeGeometry = preferredRouteGeometry;
+    }
+
+    if (preferredPickupPosition) {
+      mergedBooking.pickupPosition = preferredPickupPosition;
+    }
+
+    if (preferredDestinationPosition) {
+      mergedBooking.destinationPosition = preferredDestinationPosition;
+    }
+
+    if (!hasSubmittedTripRating(mergedBooking) && hasSubmittedTripRating(currentBooking)) {
+      mergedBooking.ratingScore = currentBooking.ratingScore ?? mergedBooking.ratingScore;
+      mergedBooking.ratingComment = currentBooking.ratingComment ?? mergedBooking.ratingComment;
+      mergedBooking.ratingSubmittedAt = currentBooking.ratingSubmittedAt ?? mergedBooking.ratingSubmittedAt;
+    }
+
+    return mergedBooking;
   }
 
   return nextBooking;
@@ -1086,6 +1271,7 @@ export default function HomePage() {
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [bookingTrackingModalOpen, setBookingTrackingModalOpen] = useState(false);
   const [bookingTrackingBubbleOpen, setBookingTrackingBubbleOpen] = useState(false);
+  const [bookingRatingModalOpen, setBookingRatingModalOpen] = useState(false);
   const [driverRideRequestModalOpen, setDriverRideRequestModalOpen] = useState(false);
   const [activeDriverRideRequest, setActiveDriverRideRequest] = useState(null);
   const [driverRideRejectModalOpen, setDriverRideRejectModalOpen] = useState(false);
@@ -1102,6 +1288,7 @@ export default function HomePage() {
   const [bookingPromoSearchValue, setBookingPromoSearchValue] = useState('');
   const [bookingPromoFilterValue, setBookingPromoFilterValue] = useState('');
   const [bookingSelectedPromoId, setBookingSelectedPromoId] = useState('');
+  const [bookingPromoCards, setBookingPromoCards] = useState(() => promoCards);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [driverSignupModalOpen, setDriverSignupModalOpen] = useState(false);
@@ -1147,10 +1334,23 @@ export default function HomePage() {
   const [authenticatedUser, setAuthenticatedUser] = useState(null);
   const driverRideRequestScanInFlightRef = useRef(false);
   const bookingTrackingModalOpenRef = useRef(false);
+  const bookingRatingPromptedBookingCodeRef = useRef('');
+  const bookingCompletionNotifiedBookingCodeRef = useRef('');
+  const activeDriverRideRequestRef = useRef(null);
+  const activeDriverTripActionRef = useRef(null);
   const customerRideEventIdRef = useRef('');
   const customerRideSyncInFlightRef = useRef(false);
   const driverRideSyncInFlightRef = useRef(false);
   const normalizedUserRoleCode = normalizeAppRoleCode(authenticatedUser?.roleCode);
+  const activeDriverTripBookingCode = String(activeDriverTripAction?.bookingCode ?? '').trim();
+  const activeDriverTripCustomerAccountId = String(activeDriverTripAction?.customerAccountId ?? activeDriverTripAction?.accountId ?? '').trim();
+  const activeDriverTripStatusToken = String(activeDriverTripAction?.tripStatus ?? activeDriverTripAction?.status ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  const activeDriverTripVehicleLabel = String(activeDriverTripAction?.driverVehicleLabel ?? activeDriverTripAction?.vehicleLabel ?? activeDriverTripAction?.rideTitle ?? '').trim();
+  const activeDriverTripLicensePlate = String(activeDriverTripAction?.driverLicensePlate ?? activeDriverTripAction?.driverVehicleLicensePlate ?? '').trim();
+  const activeDriverDisplayName = String(authenticatedUser?.fullName ?? authenticatedUser?.displayName ?? authenticatedUser?.name ?? '').trim();
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [driverFeatureLockModalOpen, setDriverFeatureLockModalOpen] = useState(false);
   const [driverFeatureLockMessage, setDriverFeatureLockMessage] = useState(DRIVER_FEATURE_LOCK_DEFAULT_MESSAGE);
@@ -1251,6 +1451,14 @@ export default function HomePage() {
   }, [bookingTrackingModalOpen]);
 
   useEffect(() => {
+    activeDriverRideRequestRef.current = activeDriverRideRequest;
+  }, [activeDriverRideRequest]);
+
+  useEffect(() => {
+    activeDriverTripActionRef.current = activeDriverTripAction;
+  }, [activeDriverTripAction]);
+
+  useEffect(() => {
     setSearchResult(null);
     setSelectedRideId(null);
     setSearchError('');
@@ -1328,6 +1536,7 @@ export default function HomePage() {
     if (
       !previewModalOpen &&
       !bookingTrackingModalOpen &&
+      !bookingRatingModalOpen &&
       !loginModalOpen &&
       !registerModalOpen &&
       !forgotPasswordModalOpen &&
@@ -1339,8 +1548,7 @@ export default function HomePage() {
       return undefined;
     }
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const releaseBodyScrollLock = acquireBodyScrollLock();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -1393,7 +1601,7 @@ export default function HomePage() {
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      releaseBodyScrollLock();
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [
@@ -1402,6 +1610,7 @@ export default function HomePage() {
     driverSignupModalOpen,
     forgotPasswordModalOpen,
     loginModalOpen,
+    bookingRatingModalOpen,
     bookingTrackingModalOpen,
     previewModalOpen,
     profileModalOpen,
@@ -1423,7 +1632,14 @@ export default function HomePage() {
     let isMounted = true;
 
     const scanForDriverRideRequest = async () => {
-      if (!isMounted || driverRideRequestModalOpen || driverRideRejectModalOpen || driverTripActionModalOpen || driverRideRequestScanInFlightRef.current) {
+      if (
+        !isMounted ||
+        activeDriverTripActionRef.current ||
+        driverRideRequestModalOpen ||
+        driverRideRejectModalOpen ||
+        driverTripActionModalOpen ||
+        driverRideRequestScanInFlightRef.current
+      ) {
         return;
       }
 
@@ -1500,7 +1716,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const accountId = String(authenticatedUser?.id ?? '').trim();
-    const isCustomerRole = normalizedUserRoleCode === 'Q2';
+    const isCustomerRole = normalizedUserRoleCode !== 'Q3';
     const isDriverRole = normalizedUserRoleCode === 'Q3' && !isDriverFeatureLockedState(authenticatedUser);
 
     if (!accountId || (!isCustomerRole && !isDriverRole)) {
@@ -1508,6 +1724,12 @@ export default function HomePage() {
     }
 
     let isMounted = true;
+
+    const isOwnCustomerBooking = (candidateBooking) => {
+      const bookingAccountId = String(candidateBooking?.customerAccountId ?? candidateBooking?.accountId ?? candidateBooking?.MaTK ?? '').trim();
+
+      return Boolean(bookingAccountId && bookingAccountId.toLowerCase() === accountId.toLowerCase());
+    };
 
     const applyCustomerRideBooking = (nextBooking) => {
       if (!isMounted || !nextBooking || typeof nextBooking !== 'object') {
@@ -1535,6 +1757,10 @@ export default function HomePage() {
         const eventBookingCode = getRideBookingCode(eventBooking ?? event);
 
         if (eventBooking && eventBookingCode) {
+          if (!isOwnCustomerBooking(eventBooking)) {
+            return null;
+          }
+
           const appliedBooking = applyCustomerRideBooking(eventBooking);
 
           if (appliedBooking) {
@@ -1617,22 +1843,22 @@ export default function HomePage() {
       const eventType = String(event?.type ?? '').trim().toLowerCase();
 
       if (isCustomerRole) {
+        const eventBooking = event?.booking ?? event?.payload ?? event;
+
+        if (!isOwnCustomerBooking(eventBooking)) {
+          return;
+        }
+
         if (eventType === 'ride.trip.status.updated') {
-          const eventBooking = event?.booking ?? event?.payload ?? event;
-          const eventBookingCode = getRideBookingCode(eventBooking);
           const normalizedTripStatus = String(event?.tripStatus ?? eventBooking?.tripStatus ?? '').trim().toLowerCase();
           const isCancelledEvent = normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled';
 
           if (isCancelledEvent) {
-            const activeBookingCode = getRideBookingCode(bookingSuccess);
-
-            if (!activeBookingCode || !eventBookingCode || activeBookingCode === eventBookingCode) {
-              closeBookingTrackingModal();
-              closeDriverTripActionModal();
-              closeDriverRideRequestModal();
-              setBookingSuccess(null);
-              showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
-            }
+            closeBookingTrackingModal();
+            closeDriverTripActionModal();
+            closeDriverRideRequestModal();
+            setBookingSuccess(null);
+            showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
 
             return;
           }
@@ -1646,8 +1872,18 @@ export default function HomePage() {
       }
 
       if (isDriverRole) {
+        const eventBooking = event?.booking ?? event?.payload ?? event;
+
+        if (isOwnCustomerBooking(eventBooking)) {
+          return;
+        }
+
         if (eventType === 'ride.booking.created') {
-          const enqueuedRequest = enqueueDriverRideRequest(event?.booking ?? event?.payload ?? event);
+          if (activeDriverTripActionRef.current) {
+            return;
+          }
+
+          const enqueuedRequest = enqueueDriverRideRequest(eventBooking, { accountId });
 
           if (enqueuedRequest && typeof window !== 'undefined' && typeof StorageEvent === 'function') {
             window.dispatchEvent(
@@ -1665,7 +1901,6 @@ export default function HomePage() {
         }
 
         if (eventType === 'ride.trip.status.updated') {
-          const eventBooking = event?.booking ?? event?.payload ?? event;
           const eventBookingCode = getRideBookingCode(eventBooking);
 
           if (!eventBookingCode) {
@@ -1679,7 +1914,7 @@ export default function HomePage() {
           if (isAcceptedEvent || isCancelledEvent) {
             void consumeDriverRideRequest(eventBooking, { accountId }).catch(() => {});
 
-            if (activeDriverRideRequest && getRideBookingCode(activeDriverRideRequest) === eventBookingCode) {
+            if (activeDriverRideRequestRef.current && getRideBookingCode(activeDriverRideRequestRef.current) === eventBookingCode) {
               setDriverRideRequestModalOpen(false);
               setDriverRideRejectModalOpen(false);
               setActiveDriverRideRequest(null);
@@ -1690,14 +1925,8 @@ export default function HomePage() {
             showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
 
             closeBookingTrackingModal();
-
-            if (activeDriverTripAction && getRideBookingCode(activeDriverTripAction) === eventBookingCode) {
-              closeDriverTripActionModal();
-            }
-
-            if (activeDriverRideRequest && getRideBookingCode(activeDriverRideRequest) === eventBookingCode) {
-              closeDriverRideRequestModal();
-            }
+            closeDriverTripActionModal();
+            closeDriverRideRequestModal();
 
             return;
           }
@@ -1743,6 +1972,146 @@ export default function HomePage() {
       disconnectRideEventStream();
     };
   }, [authenticatedUser, normalizedUserRoleCode]);
+
+  useEffect(() => {
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+    const shouldTrackLocation =
+      normalizedUserRoleCode === 'Q3' &&
+      !isDriverFeatureLockedState(authenticatedUser) &&
+      accountId &&
+      activeDriverTripBookingCode;
+
+    if (!shouldTrackLocation || typeof navigator === 'undefined' || !navigator.geolocation) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    let watchId = null;
+    let lastEmitAt = 0;
+
+    const socket = createRideSocketConnection({
+      accountId,
+      roleCode: 'Q3',
+    });
+
+    if (!socket) {
+      return undefined;
+    }
+
+    const emitLocation = (coords) => {
+      if (!isMounted || !coords) {
+        return;
+      }
+
+      const now = Date.now();
+
+      if (now - lastEmitAt < 2500) {
+        return;
+      }
+
+      lastEmitAt = now;
+      socket.emit('ride.location.update', {
+        bookingCode: activeDriverTripBookingCode,
+        customerAccountId: activeDriverTripCustomerAccountId,
+        driverAccountId: accountId,
+        driverName: activeDriverDisplayName,
+        driverVehicleLabel: activeDriverTripVehicleLabel,
+        driverLicensePlate: activeDriverTripLicensePlate,
+        tripStatus: activeDriverTripStatusToken,
+        position: coords,
+        source: 'driver-web',
+        createdAt: new Date().toISOString(),
+      });
+    };
+
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        emitLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          heading: position.coords.heading,
+          speed: position.coords.speed,
+        });
+      },
+      () => {
+        // Keep the existing trip flow working even if geolocation is denied or unavailable.
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 2500,
+        timeout: 8000,
+      },
+    );
+
+    return () => {
+      isMounted = false;
+
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+
+      socket.removeAllListeners();
+      socket.disconnect();
+    };
+  }, [
+    activeDriverDisplayName,
+    activeDriverTripBookingCode,
+    activeDriverTripCustomerAccountId,
+    activeDriverTripLicensePlate,
+    activeDriverTripStatusToken,
+    activeDriverTripVehicleLabel,
+    authenticatedUser,
+    normalizedUserRoleCode,
+  ]);
+
+  useEffect(() => {
+    const currentBookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
+    const currentTripStatus = bookingSuccess?.tripStatus ?? bookingSuccess?.status ?? '';
+
+    if (
+      normalizedUserRoleCode !== 'Q3' &&
+      currentBookingCode &&
+      isCompletedRideStatus(currentTripStatus) &&
+      bookingCompletionNotifiedBookingCodeRef.current !== currentBookingCode
+    ) {
+      bookingCompletionNotifiedBookingCodeRef.current = currentBookingCode;
+      showMiniToast('Chuyến đã hoàn thành. Cảm ơn bạn đã đặt chuyến cùng SmartRide.', 'success', 2400);
+    }
+
+    if (normalizedUserRoleCode === 'Q3' || !currentBookingCode || !isCompletedRideStatus(currentTripStatus)) {
+      setBookingRatingModalOpen(false);
+      return undefined;
+    }
+
+    if (hasSubmittedTripRating(bookingSuccess)) {
+      bookingRatingPromptedBookingCodeRef.current = currentBookingCode;
+      setBookingRatingModalOpen(false);
+      return undefined;
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const storedValue = window.localStorage.getItem(`smartride.tripRating.${currentBookingCode}`);
+
+        if (storedValue) {
+          bookingRatingPromptedBookingCodeRef.current = currentBookingCode;
+          setBookingRatingModalOpen(false);
+          return undefined;
+        }
+      } catch {
+        // Ignore storage access issues and fall back to the in-memory guard.
+      }
+    }
+
+    if (bookingRatingPromptedBookingCodeRef.current === currentBookingCode) {
+      return undefined;
+    }
+
+    bookingRatingPromptedBookingCodeRef.current = currentBookingCode;
+    setBookingRatingModalOpen(true);
+    return undefined;
+  }, [bookingSuccess?.bookingCode, bookingSuccess?.ratingScore, bookingSuccess?.ratingSubmittedAt, bookingSuccess?.status, bookingSuccess?.tripStatus, normalizedUserRoleCode]);
 
   useEffect(() => {
     if (credentialLockRemainingSeconds <= 0) {
@@ -1913,12 +2282,7 @@ export default function HomePage() {
 
     if (!authenticatedUser) {
       setLoginModalOpen(true);
-      showMiniToast('Vui lòng đăng nhập tài khoản Khách hàng để đặt xe.', 'error', 2200);
-      return;
-    }
-
-    if (normalizedUserRoleCode !== 'Q2') {
-      showMiniToast('Chỉ tài khoản Khách hàng mới được đặt xe.', 'error', 2200);
+      showMiniToast('Vui lòng đăng nhập để đặt xe.', 'error', 2200);
       return;
     }
 
@@ -1939,6 +2303,13 @@ export default function HomePage() {
           normalizeBookingPaymentMethod(bookingPaymentMethod) === 'wallet'
             ? normalizeBookingPaymentProvider(bookingPaymentProvider)
             : '',
+        promotionId: selectedBookingPromotion?.id ?? '',
+        promotionCode: selectedBookingPromotion?.code ?? '',
+        promotionTitle: selectedBookingPromotion?.title ?? '',
+        promotionDiscountPercent: selectedBookingPromotion?.discountPercent ?? 0,
+        promotionMaxAmount: selectedBookingPromotion?.maxAmount ?? 0,
+        promotionScope: selectedBookingPromotion?.scope ?? '',
+        promotionExpiresAt: selectedBookingPromotion?.expiresAt ?? '',
         customerName: authenticatedUser?.name ?? authenticatedUser?.fullName ?? authenticatedUser?.email ?? 'Khách hàng SmartRide',
         customerPhone: authenticatedUser?.phone ?? '',
       });
@@ -1952,7 +2323,7 @@ export default function HomePage() {
 
       if (nextBooking) {
         if (!nextBooking.driverRequestNotificationId) {
-          enqueueDriverRideRequest(nextBooking);
+          enqueueDriverRideRequest(nextBooking, { accountId: authenticatedUser?.id ?? '' });
         }
 
         setBookingTrackingModalOpen(true);
@@ -1992,11 +2363,27 @@ export default function HomePage() {
   };
 
   const handleBookingPromoApply = () => {
-    setBookingPromoFilterValue(bookingPromoSearchValue.trim());
+    const normalizedPromoCode = bookingPromoSearchValue.trim();
+
+    setBookingPromoFilterValue(normalizedPromoCode);
+
+    if (!normalizedPromoCode) {
+      return;
+    }
+
+    const normalizedSearchValue = normalizePromoSearchValue(normalizedPromoCode);
+    const matchedPromo = bookingPromoCards.find((card) => {
+      const searchableCode = normalizePromoSearchValue(card.code || card.badge || card.title);
+      return searchableCode === normalizedSearchValue;
+    });
+
+    if (matchedPromo) {
+      setBookingSelectedPromoId(matchedPromo.id);
+    }
   };
 
   const handleUsePromoCard = (card) => {
-    const promoLabel = String(card?.badge ?? card?.title ?? '').trim();
+    const promoLabel = String(card?.code ?? card?.badge ?? card?.title ?? '').trim();
 
     if (!promoLabel) {
       return;
@@ -2095,6 +2482,46 @@ export default function HomePage() {
     };
   }, [bookingPaymentMethod, route.pickup?.label, route.destination?.label, searchResult?.vehicle, selectedRideId]);
 
+  useEffect(() => {
+    let isActive = true;
+    const controller = new AbortController();
+
+    const refreshBookingPromotions = async () => {
+      try {
+        const response = await promotionService.listPromotions(
+          { status: 'active' },
+          { signal: controller.signal },
+        );
+        const livePromotions = extractPromotionList(response).map(normalizeBookingPromoCard);
+
+        if (!isActive) {
+          return;
+        }
+
+        setBookingPromoCards(livePromotions);
+        setBookingSelectedPromoId((currentPromoId) =>
+          livePromotions.some((promo) => promo.id === currentPromoId) ? currentPromoId : '',
+        );
+      } catch (error) {
+        if (error?.name === 'AbortError' || !isActive) {
+          return;
+        }
+      }
+    };
+
+    void refreshBookingPromotions();
+
+    const unsubscribePromotionCatalogChanged = subscribePromotionCatalogChanged(() => {
+      void refreshBookingPromotions();
+    });
+
+    return () => {
+      isActive = false;
+      controller.abort();
+      unsubscribePromotionCatalogChanged();
+    };
+  }, []);
+
   const selectedBookingPaymentMethod = BOOKING_PAYMENT_METHODS[bookingPaymentMethod] ?? BOOKING_PAYMENT_METHODS.cash;
   const selectedBookingPaymentProvider =
     BOOKING_WALLET_PROVIDERS.find((provider) => provider.id === normalizeBookingPaymentProvider(bookingPaymentProvider)) ??
@@ -2112,18 +2539,28 @@ export default function HomePage() {
   const searchResultItems = Array.isArray(searchResult?.results) ? searchResult.results : [];
   const searchPickupLabel = String(searchResult?.pickup?.label ?? '').trim() || 'Điểm đón';
   const searchDestinationLabel = String(searchResult?.destination?.label ?? '').trim() || 'Điểm đến';
-  const visiblePromoCards = useMemo(() => {
-    const normalizedSearch = normalizePromoSearchValue(bookingPromoFilterValue);
-
-    if (!normalizedSearch) {
-      return promoCards;
+  const selectedBookingPromotion = useMemo(() => {
+    if (!bookingSelectedPromoId) {
+      return null;
     }
 
-    return promoCards.filter((card) => {
-      const searchableText = normalizePromoSearchValue([card.title, card.description, card.badge, card.validUntil].filter(Boolean).join(' '));
+    return bookingPromoCards.find((card) => card.id === bookingSelectedPromoId) ?? null;
+  }, [bookingPromoCards, bookingSelectedPromoId]);
+  const visiblePromoCards = useMemo(() => {
+    const normalizedSearch = normalizePromoSearchValue(bookingPromoFilterValue);
+    const promoSource = Array.isArray(bookingPromoCards) ? bookingPromoCards : [];
+
+    if (!normalizedSearch) {
+      return promoSource;
+    }
+
+    return promoSource.filter((card) => {
+      const searchableText = normalizePromoSearchValue(
+        [card.code, card.title, card.description, card.badge, card.validUntil, card.scope].filter(Boolean).join(' '),
+      );
       return searchableText.includes(normalizedSearch);
     });
-  }, [bookingPromoFilterValue]);
+  }, [bookingPromoCards, bookingPromoFilterValue]);
 
   const activeRoutePreset = MOCKUP_ROUTE_PRESETS[activeVehicle] ?? MOCKUP_ROUTE_PRESETS.motorbike;
   const mockupPickupLabel =
@@ -2599,8 +3036,55 @@ export default function HomePage() {
   };
 
   const closeBookingTrackingModal = () => {
+    const currentBookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
+    const currentTripStatus = bookingSuccess?.tripStatus ?? bookingSuccess?.status ?? '';
+
+    if (bookingSuccess && (bookingRatingModalOpen || isCompletedRideStatus(currentTripStatus))) {
+      if (currentBookingCode) {
+        bookingRatingPromptedBookingCodeRef.current = currentBookingCode;
+        bookingCompletionNotifiedBookingCodeRef.current = currentBookingCode;
+      }
+
+      setBookingRatingModalOpen(false);
+      setBookingTrackingModalOpen(false);
+      setBookingTrackingBubbleOpen(false);
+      setBookingSuccess(null);
+
+      if (typeof window !== 'undefined') {
+        try {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch {
+          // Ignore scroll failures.
+        }
+      }
+
+      return;
+    }
+
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(false);
+  };
+
+  const closeCompletedBookingFlow = (bookingCode = '') => {
+    const normalizedBookingCode = String(bookingCode ?? bookingSuccess?.bookingCode ?? '').trim();
+
+    if (normalizedBookingCode) {
+      bookingRatingPromptedBookingCodeRef.current = normalizedBookingCode;
+      bookingCompletionNotifiedBookingCodeRef.current = normalizedBookingCode;
+    }
+
+    setBookingRatingModalOpen(false);
+    setBookingTrackingModalOpen(false);
+    setBookingTrackingBubbleOpen(false);
+    setBookingSuccess(null);
+
+    if (typeof window !== 'undefined') {
+      try {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch {
+        // Ignore scroll failures.
+      }
+    }
   };
 
   const minimizeBookingTrackingModal = () => {
@@ -2624,6 +3108,85 @@ export default function HomePage() {
     setBookingTrackingModalOpen(true);
   };
 
+  const persistBookingRatingState = (bookingCode, payload) => {
+    const normalizedBookingCode = String(bookingCode ?? '').trim();
+
+    if (!normalizedBookingCode || typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        `smartride.tripRating.${normalizedBookingCode}`,
+        JSON.stringify({
+          bookingCode: normalizedBookingCode,
+          updatedAt: new Date().toISOString(),
+          ...payload,
+        }),
+      );
+    } catch {
+      // Ignore storage write failures and keep the UI responsive.
+    }
+  };
+
+  const handleCloseBookingRatingModal = () => {
+    const bookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
+
+    if (bookingCode) {
+      bookingRatingPromptedBookingCodeRef.current = bookingCode;
+      persistBookingRatingState(bookingCode, {
+        status: 'dismissed',
+        rating: null,
+        comment: '',
+      });
+    }
+
+    closeCompletedBookingFlow(bookingCode);
+  };
+
+  const handleBookingRatingSubmit = async ({ booking, rating, comment } = {}) => {
+    const bookingCode = String(booking?.bookingCode ?? bookingSuccess?.bookingCode ?? '').trim();
+
+    if (!bookingCode) {
+      throw new Error('Không thể xác định chuyến để gửi đánh giá.');
+    }
+
+    const normalizedRating = Number(rating);
+    const normalizedComment = String(comment ?? '').trim();
+    const submittedRatingScore = Number.isFinite(normalizedRating) ? Math.max(1, Math.min(5, Math.round(normalizedRating))) : 5;
+    const submittedAt = new Date().toISOString();
+
+    const ratingResult = await rideService.submitTripRating(bookingCode, {
+      accountId: String(booking?.customerAccountId ?? booking?.accountId ?? authenticatedUser?.id ?? authenticatedUser?.accountId ?? '').trim(),
+      rating: submittedRatingScore,
+      comment: normalizedComment,
+    });
+
+    const returnedBooking = ratingResult?.booking && typeof ratingResult.booking === 'object' ? ratingResult.booking : null;
+    const mergedRatedBooking = mergeRideBookingSnapshot(booking, {
+      ...returnedBooking,
+      bookingCode,
+      ratingScore: ratingResult?.rating?.ratingScore ?? returnedBooking?.ratingScore ?? submittedRatingScore,
+      ratingComment: ratingResult?.rating?.ratingComment ?? returnedBooking?.ratingComment ?? normalizedComment,
+      ratingSubmittedAt: ratingResult?.rating?.ratingSubmittedAt ?? returnedBooking?.ratingSubmittedAt ?? submittedAt,
+    });
+
+    bookingRatingPromptedBookingCodeRef.current = bookingCode;
+    persistBookingRatingState(bookingCode, {
+      status: 'submitted',
+      rating: submittedRatingScore,
+      ratingScore: submittedRatingScore,
+      comment: normalizedComment,
+      ratingSubmittedAt: mergedRatedBooking?.ratingSubmittedAt ?? submittedAt,
+      driverName: String(mergedRatedBooking?.driverDisplayName ?? mergedRatedBooking?.driverName ?? booking?.driverDisplayName ?? booking?.driverName ?? '').trim(),
+      driverLicensePlate: String(mergedRatedBooking?.driverLicensePlate ?? mergedRatedBooking?.driverVehicleLicensePlate ?? booking?.driverLicensePlate ?? booking?.driverVehicleLicensePlate ?? '').trim(),
+    });
+
+    closeCompletedBookingFlow(bookingCode);
+
+    showMiniToast('Bạn đã đánh giá thành công', 'success', 2200);
+  };
+
   const handleCancelBooking = async (cancelDetails = null) => {
     const cancelReason =
       typeof cancelDetails === 'string'
@@ -2643,6 +3206,8 @@ export default function HomePage() {
         bookingCode,
         'DaHuy',
         {
+          cancelledByAccountId: String(currentBooking?.customerAccountId ?? currentBooking?.accountId ?? authenticatedUser?.id ?? '').trim(),
+          cancelledByRoleCode: 'Q2',
           cancelReasonId: String(cancelDetails?.reasonId ?? '').trim(),
           cancelReasonLabel: String(cancelDetails?.reasonLabel ?? '').trim(),
           cancelReasonText: cancelReason,
@@ -2656,6 +3221,7 @@ export default function HomePage() {
 
       setBookingTrackingModalOpen(false);
       setBookingTrackingBubbleOpen(false);
+  setBookingRatingModalOpen(false);
       setBookingSuccess(null);
       setBookingError('');
       setSearchError('');
@@ -2732,12 +3298,14 @@ export default function HomePage() {
   };
 
   const cleanupDriverRideRequestLocally = (request) => {
+    const accountId = authenticatedUser?.id ?? '';
+
     if (request?.notificationId) {
-      markDriverRideRequestNotificationSeen(request.notificationId, authenticatedUser?.id ?? '');
+      markDriverRideRequestNotificationSeen(request.notificationId, accountId);
     }
 
     if (request?.requestId) {
-      removeDriverRideRequest(request.requestId);
+      removeDriverRideRequest(request.requestId, accountId);
     }
   };
 
@@ -2745,6 +3313,17 @@ export default function HomePage() {
     void consumeDriverRideRequest(request, { accountId: authenticatedUser?.id ?? '' }).catch(() => {
       // Local cleanup already happened, so the driver flow should not block.
     });
+  };
+
+  const isDriverAcceptanceConflictMessage = (message) => {
+    const normalizedMessage = String(message ?? '').trim().toLowerCase();
+
+    return (
+      normalizedMessage.includes('đã có tài xế khác nhận đơn') ||
+      normalizedMessage.includes('da co tai xe khac nhan don') ||
+      normalizedMessage.includes('chuyến này đã được tài xế khác nhận') ||
+      normalizedMessage.includes('chuyen nay da duoc tai xe khac nhan')
+    );
   };
 
   const handleDriverRideRequestAccept = async (request) => {
@@ -2760,11 +3339,11 @@ export default function HomePage() {
     } catch (error) {
       const backendMessage = String(error?.message ?? '').trim();
       const normalizedBackendMessage = backendMessage.toLowerCase();
+      const isAcceptanceConflict = isDriverAcceptanceConflictMessage(backendMessage);
       const shouldDismissRequest =
         normalizedBackendMessage.includes('không tìm thấy chuyến') ||
         normalizedBackendMessage.includes('khong tim thay chuyen') ||
-        normalizedBackendMessage.includes('chuyến này đã được tài xế khác nhận') ||
-        normalizedBackendMessage.includes('chuyen nay da duoc tai xe khac nhan');
+        isAcceptanceConflict;
 
       if (shouldDismissRequest) {
         cleanupDriverRideRequestLocally(request);
@@ -2773,7 +3352,9 @@ export default function HomePage() {
       }
 
       showMiniToast(
-        backendMessage || 'Không thể lưu trạng thái nhận chuyến lên máy chủ. Vui lòng thử lại.',
+        isAcceptanceConflict
+          ? 'Đã có tài xế khác nhận đơn'
+          : backendMessage || 'Không thể lưu trạng thái nhận chuyến lên máy chủ. Vui lòng thử lại.',
         'error',
         2400,
       );
@@ -2782,8 +3363,23 @@ export default function HomePage() {
 
     if (!tripStatusResult?.success) {
       const backendMessage = String(tripStatusResult?.message ?? '').trim();
+      const normalizedBackendMessage = backendMessage.toLowerCase();
+      const isAcceptanceConflict = isDriverAcceptanceConflictMessage(backendMessage);
+      const shouldDismissRequest =
+        normalizedBackendMessage.includes('không tìm thấy chuyến') ||
+        normalizedBackendMessage.includes('khong tim thay chuyen') ||
+        isAcceptanceConflict;
+
+      if (shouldDismissRequest) {
+        cleanupDriverRideRequestLocally(request);
+        cleanupDriverRideRequestInBackground(request);
+        closeDriverRideRequestModal();
+      }
+
       showMiniToast(
-        backendMessage || 'Không thể lưu trạng thái nhận chuyến lên máy chủ. Vui lòng thử lại.',
+        isAcceptanceConflict
+          ? 'Đã có tài xế khác nhận đơn'
+          : backendMessage || 'Không thể lưu trạng thái nhận chuyến lên máy chủ. Vui lòng thử lại.',
         'error',
         2400,
       );
@@ -2852,7 +3448,7 @@ export default function HomePage() {
     });
 
     if (nextStage === 'completed') {
-      showMiniToast('Đã hoàn thành chuyến.', 'success', 1800);
+      showMiniToast('Chuyến đã hoàn thành. Cảm ơn bạn đã hoàn tất chuyến và phục vụ khách hàng.', 'success', 2200);
     } else {
       showMiniToast(`Đã cập nhật trạng thái: ${tripStatusResult.tripStatusLabel}.`, 'success', 1800);
     }
@@ -2872,6 +3468,8 @@ export default function HomePage() {
       DRIVER_TRIP_STAGE_TO_SERVER_STATUS.cancelled,
       {
         driverAccountId,
+        cancelledByAccountId: String(authenticatedUser?.id ?? request.driverAccountId ?? '').trim(),
+        cancelledByRoleCode: 'Q3',
         cancelReasonId: String(cancelDetails?.reasonId ?? '').trim(),
         cancelReasonLabel: String(cancelDetails?.reasonLabel ?? '').trim(),
         cancelReasonText: cancelReason,
@@ -5714,6 +6312,13 @@ export default function HomePage() {
                       <span>
                         {bookingSuccess.rideTitle} - {bookingSuccess.priceFormatted}
                       </span>
+                      {bookingSuccess.discountAmount > 0 || bookingSuccess.promotionSummary ? (
+                        <span>
+                          {bookingSuccess.originalPriceFormatted ? `Giá gốc: ${bookingSuccess.originalPriceFormatted}` : 'Giá gốc: --'}
+                          {bookingSuccess.discountAmountFormatted ? ` · Giảm: ${bookingSuccess.discountAmountFormatted}` : ''}
+                          {bookingSuccess.promotionSummary ? ` · ${bookingSuccess.promotionSummary}` : ''}
+                        </span>
+                      ) : null}
                       <span>Thanh toán: {bookingSuccess.paymentSummary ?? selectedBookingPaymentSummary}</span>
                     </div>
                   ) : null}
@@ -8096,6 +8701,7 @@ export default function HomePage() {
                       {bookingSuccess ? (
                         <p className="booking-feedback booking-feedback--success">
                           Mã chuyến {bookingSuccess.bookingCode} - {bookingSuccess.rideTitle} ({bookingSuccess.priceFormatted})
+                          {bookingSuccess.promotionSummary ? ` · ${bookingSuccess.promotionSummary}` : ''}
                           {' '}- Thanh toán: {bookingSuccess.paymentSummary ?? selectedBookingPaymentSummary}
                         </p>
                       ) : null}
@@ -8149,6 +8755,13 @@ export default function HomePage() {
           onMinimize={minimizeBookingTrackingModal}
           onCancel={handleCancelBooking}
           onNotify={showMiniToast}
+        />
+
+        <TripRatingDialog
+          open={bookingRatingModalOpen}
+          booking={bookingSuccess}
+          onClose={handleCloseBookingRatingModal}
+          onSubmit={handleBookingRatingSubmit}
         />
 
         {bookingTrackingBubbleOpen && bookingSuccess && !bookingTrackingModalOpen
