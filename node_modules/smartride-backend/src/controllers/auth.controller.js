@@ -18,6 +18,7 @@ import {
   verifyForgotPasswordCode,
   verifySignupVerificationCode,
 } from '../services/auth.service.js';
+import { broadcastAdminEvent } from '../services/ride.realtime.service.js';
 
 function sendKnownAuthError(response, error) {
   if (!error?.statusCode) {
@@ -191,7 +192,9 @@ export async function deleteAccountController(request, response, next) {
 
 export async function lockAccountController(request, response, next) {
   try {
-    const result = await lockAccount(request.params.accountId);
+    const accountId = request.params.accountId;
+    const result = await lockAccount(accountId);
+    broadcastAdminEvent('admin.account.changed', { action: 'locked', accountId: String(accountId) });
     response.status(200).json(result);
   } catch (error) {
     if (sendKnownAuthError(response, error)) {

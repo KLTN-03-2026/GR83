@@ -1,174 +1,15 @@
--- Dọn để chạy lại nhiều lần (trong cùng DB)
+-- ============================================================================
+-- DỌN DỮ LIỆU ĐỂ CHẠY LẠI NHIỀU LẦN (TRONG CÙNG DB)
+-- Thứ tự: Drop triggers → Drop tables (con trước, cha sau) → Tạo lại
+-- ============================================================================
+
+-- 1) DROP ALL TRIGGERS
 IF OBJECT_ID(N'dbo.TR_ThanhToan_SetNgayCapNhat', N'TR') IS NOT NULL
     DROP TRIGGER dbo.TR_ThanhToan_SetNgayCapNhat;
 GO
 
 IF OBJECT_ID(N'dbo.TR_UuDai_SetNgayCapNhat', N'TR') IS NOT NULL
     DROP TRIGGER dbo.TR_UuDai_SetNgayCapNhat;
-GO
-
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM sys.foreign_keys
-        WHERE name = N'FK_TinNhan_TaiKhoan'
-          AND parent_object_id = OBJECT_ID(N'dbo.TinNhan')
-    )
-    BEGIN
-        ALTER TABLE dbo.TinNhan DROP CONSTRAINT FK_TinNhan_TaiKhoan;
-    END
-
-    IF EXISTS (
-        SELECT 1
-        FROM sys.foreign_keys
-        WHERE name = N'FK_TinNhan_DatXe'
-          AND parent_object_id = OBJECT_ID(N'dbo.TinNhan')
-    )
-    BEGIN
-        ALTER TABLE dbo.TinNhan DROP CONSTRAINT FK_TinNhan_DatXe;
-    END
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-    AND COL_LENGTH(N'dbo.TinNhan', N'MaTN') IS NOT NULL
-    AND COL_LENGTH(N'dbo.TinNhan', N'MaTinNhan') IS NULL
-BEGIN
-    EXEC sys.sp_rename N'dbo.TinNhan.MaTN', N'MaTinNhan', N'COLUMN';
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-    AND COL_LENGTH(N'dbo.TinNhan', N'MaTKNguoiGui') IS NOT NULL
-    AND COL_LENGTH(N'dbo.TinNhan', N'MaTK') IS NULL
-BEGIN
-    EXEC sys.sp_rename N'dbo.TinNhan.MaTKNguoiGui', N'MaTK', N'COLUMN';
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-BEGIN
-    IF COL_LENGTH(N'dbo.TinNhan', N'VaiTro') IS NULL
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD VaiTro VARCHAR(20) NOT NULL CONSTRAINT DF_TinNhan_VaiTro DEFAULT 'customer';
-    END
-
-    IF COL_LENGTH(N'dbo.TinNhan', N'Ten') IS NULL
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD Ten NVARCHAR(200) NOT NULL CONSTRAINT DF_TinNhan_Ten DEFAULT N'Người dùng';
-    END
-
-    IF COL_LENGTH(N'dbo.TinNhan', N'SDT') IS NULL
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD SDT VARCHAR(30) NULL;
-    END
-
-    IF COL_LENGTH(N'dbo.TinNhan', N'NgayCapNhat') IS NULL
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD NgayCapNhat DATETIME2(0) NOT NULL CONSTRAINT DF_TinNhan_NgayCapNhat DEFAULT SYSDATETIME();
-    END
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-    AND COL_LENGTH(N'dbo.TinNhan', N'MaTK') IS NOT NULL
-BEGIN
-    ALTER TABLE dbo.TinNhan
-    ALTER COLUMN MaTK VARCHAR(20) NULL;
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-BEGIN
-    UPDATE mt
-    SET
-        mt.VaiTro = CASE
-            WHEN LOWER(ISNULL(tk.MaQuyen, '')) = 'q3' THEN 'driver'
-            ELSE 'customer'
-        END,
-        mt.Ten = COALESCE(
-            NULLIF(LTRIM(RTRIM(tk.Ten)), ''),
-            NULLIF(LTRIM(RTRIM(tk.TaiKhoan)), ''),
-            NULLIF(LTRIM(RTRIM(mt.Ten)), ''),
-            N'Người dùng'
-        ),
-        mt.SDT = COALESCE(
-            NULLIF(LTRIM(RTRIM(tk.SDT)), ''),
-            NULLIF(LTRIM(RTRIM(mt.SDT)), '')
-        ),
-        mt.NgayCapNhat = COALESCE(mt.NgayCapNhat, mt.NgayTao, SYSDATETIME())
-    FROM dbo.TinNhan mt
-    LEFT JOIN dbo.TaiKhoan tk ON tk.MaTK = mt.MaTK
-    WHERE
-        NULLIF(LTRIM(RTRIM(mt.Ten)), '') IS NULL
-        OR NULLIF(LTRIM(RTRIM(mt.SDT)), '') IS NULL
-        OR mt.NgayCapNhat IS NULL
-        OR NULLIF(LTRIM(RTRIM(mt.VaiTro)), '') IS NULL;
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM sys.foreign_keys
-        WHERE name = N'FK_TinNhan_DatXe'
-          AND parent_object_id = OBJECT_ID(N'dbo.TinNhan')
-    )
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD CONSTRAINT FK_TinNhan_DatXe FOREIGN KEY (MaChuyen)
-            REFERENCES dbo.DatXe(MaChuyen)
-            ON UPDATE CASCADE
-            ON DELETE CASCADE;
-    END
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM sys.foreign_keys
-        WHERE name = N'FK_TinNhan_TaiKhoan'
-          AND parent_object_id = OBJECT_ID(N'dbo.TinNhan')
-    )
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD CONSTRAINT FK_TinNhan_TaiKhoan FOREIGN KEY (MaTK)
-            REFERENCES dbo.TaiKhoan(MaTK)
-            ON UPDATE NO ACTION
-            ON DELETE NO ACTION;
-    END
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM sys.check_constraints
-        WHERE name = N'CK_TinNhan_VaiTro'
-          AND parent_object_id = OBJECT_ID(N'dbo.TinNhan')
-    )
-    BEGIN
-        ALTER TABLE dbo.TinNhan
-        ADD CONSTRAINT CK_TinNhan_VaiTro CHECK (VaiTro IN ('customer', 'driver'));
-    END
-END
-GO
-
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM sys.indexes
-        WHERE name = N'IX_TinNhan_MaChuyen_NgayTao'
-          AND object_id = OBJECT_ID(N'dbo.TinNhan')
-    )
-    BEGIN
-        CREATE INDEX IX_TinNhan_MaChuyen_NgayTao
-        ON dbo.TinNhan (MaChuyen, NgayTao DESC, MaTinNhan DESC);
-    END
-END
 GO
 
 IF OBJECT_ID(N'dbo.TR_DatXe_SetNgayCapNhat', N'TR') IS NOT NULL
@@ -183,16 +24,41 @@ IF OBJECT_ID(N'dbo.TR_TaiKhoan_SetNgayCapNhat', N'TR') IS NOT NULL
     DROP TRIGGER dbo.TR_TaiKhoan_SetNgayCapNhat;
 GO
 
+-- 2) DROP ALL TABLES (thứ tự: bảng con trước, bảng cha sau)
+IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NOT NULL
+    DROP TABLE dbo.TinNhan;
+GO
+
+IF OBJECT_ID(N'dbo.DanhGiaChuyenXe', N'U') IS NOT NULL
+    DROP TABLE dbo.DanhGiaChuyenXe;
+GO
+
 IF OBJECT_ID(N'dbo.ThanhToan', N'U') IS NOT NULL
     DROP TABLE dbo.ThanhToan;
+GO
+
+IF OBJECT_ID(N'dbo.DatXe', N'U') IS NOT NULL
+    DROP TABLE dbo.DatXe;
+GO
+
+IF OBJECT_ID(N'dbo.ThongBao', N'U') IS NOT NULL
+    DROP TABLE dbo.ThongBao;
 GO
 
 IF OBJECT_ID(N'dbo.UuDai', N'U') IS NOT NULL
     DROP TABLE dbo.UuDai;
 GO
 
-IF OBJECT_ID(N'dbo.DatXe', N'U') IS NOT NULL
-    DROP TABLE dbo.DatXe;
+IF OBJECT_ID(N'dbo.TaiXeYeuCauDoiThongTinXe', N'U') IS NOT NULL
+    DROP TABLE dbo.TaiXeYeuCauDoiThongTinXe;
+GO
+
+IF OBJECT_ID(N'dbo.TaiXeGiaoDichVi', N'U') IS NOT NULL
+    DROP TABLE dbo.TaiXeGiaoDichVi;
+GO
+
+IF OBJECT_ID(N'dbo.TaiXeVi', N'U') IS NOT NULL
+    DROP TABLE dbo.TaiXeVi;
 GO
 
 IF OBJECT_ID(N'dbo.TaiXe', N'U') IS NOT NULL
@@ -210,6 +76,10 @@ GO
 IF OBJECT_ID(N'dbo.Quyen', N'U') IS NOT NULL
     DROP TABLE dbo.Quyen;
 GO
+
+-- ============================================================================
+-- TẠO LẠI CÁC BẢNG (thứ tự: bảng cha trước, bảng con sau)
+-- ============================================================================
 
 -- 1) Bảng Quyền
 CREATE TABLE dbo.Quyen
@@ -372,7 +242,135 @@ BEGIN
     WHERE EXISTS (
         SELECT 1
         FROM inserted AS i
-        WHERE i.MaTK = tx.MaTK
+        WHERE i.CCCD = tx.CCCD
+    );
+END
+GO
+
+-- 4.1) Bảng Ví Tài Xế
+CREATE TABLE dbo.TaiXeVi
+(
+    MaVi         INT           IDENTITY(1,1) NOT NULL,
+    MaTK         VARCHAR(20)   NOT NULL,
+    SoDu         INT           NOT NULL CONSTRAINT DF_TaiXeVi_SoDu DEFAULT 0,
+    NgayTao      DATETIME2(0)  NOT NULL CONSTRAINT DF_TaiXeVi_NgayTao DEFAULT SYSDATETIME(),
+    NgayCapNhat  DATETIME2(0)  NOT NULL CONSTRAINT DF_TaiXeVi_NgayCapNhat DEFAULT SYSDATETIME(),
+
+    CONSTRAINT PK_TaiXeVi PRIMARY KEY (MaVi),
+    CONSTRAINT UQ_TaiXeVi_MaTK UNIQUE (MaTK),
+    CONSTRAINT FK_TaiXeVi_TaiKhoan FOREIGN KEY (MaTK)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT CK_TaiXeVi_SoDu CHECK (SoDu >= 0)
+);
+GO
+
+CREATE OR ALTER TRIGGER dbo.TR_TaiXeVi_SetNgayCapNhat
+ON dbo.TaiXeVi
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE tv
+    SET tv.NgayCapNhat = SYSDATETIME()
+    FROM dbo.TaiXeVi AS tv
+    WHERE EXISTS (
+        SELECT 1
+        FROM inserted AS i
+        WHERE i.MaVi = tv.MaVi
+    );
+END
+GO
+
+-- 4.2) Bảng Lịch Sử Giao Dịch Ví Tài Xế
+CREATE TABLE dbo.TaiXeGiaoDichVi
+(
+    MaGD            INT            IDENTITY(1,1) NOT NULL,
+    MaTK            VARCHAR(20)    NOT NULL,
+    LoaiGiaoDich    VARCHAR(20)    NOT NULL,
+    SoTien          INT            NOT NULL,
+    SoDuTruoc       INT            NOT NULL,
+    SoDuSau         INT            NOT NULL,
+    MoTa            NVARCHAR(255)  NULL,
+    SoDTNguoiNhan   VARCHAR(20)    NULL,
+    SoDTNguoiGui    VARCHAR(20)    NULL,
+    MaThamChieu     VARCHAR(40)    NULL,
+    TrangThai       VARCHAR(20)    NOT NULL CONSTRAINT DF_TaiXeGiaoDichVi_TrangThai DEFAULT 'completed',
+    NgayTao         DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeGiaoDichVi_NgayTao DEFAULT SYSDATETIME(),
+
+    CONSTRAINT PK_TaiXeGiaoDichVi PRIMARY KEY (MaGD),
+    CONSTRAINT FK_TaiXeGiaoDichVi_TaiKhoan FOREIGN KEY (MaTK)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT CK_TaiXeGiaoDichVi_Loai CHECK (LoaiGiaoDich IN ('topup', 'transfer', 'receive', 'adjustment')),
+    CONSTRAINT CK_TaiXeGiaoDichVi_TrangThai CHECK (TrangThai IN ('completed', 'pending', 'failed')),
+    CONSTRAINT CK_TaiXeGiaoDichVi_SoTien CHECK (SoTien <> 0),
+    CONSTRAINT CK_TaiXeGiaoDichVi_SoDuTruoc CHECK (SoDuTruoc >= 0),
+    CONSTRAINT CK_TaiXeGiaoDichVi_SoDuSau CHECK (SoDuSau >= 0)
+);
+GO
+
+CREATE INDEX IX_TaiXeGiaoDichVi_MaTK_NgayTao
+ON dbo.TaiXeGiaoDichVi (MaTK, NgayTao DESC, MaGD DESC);
+GO
+
+-- 4.3) Bảng Yêu Cầu Đổi Thông Tin Xe
+CREATE TABLE dbo.TaiXeYeuCauDoiThongTinXe
+(
+    MaYC              INT            IDENTITY(1,1) NOT NULL,
+    MaTK              VARCHAR(20)    NOT NULL,
+    LoaiXeCu          NVARCHAR(120)  NOT NULL,
+    BienSoCu          VARCHAR(20)    NOT NULL,
+    LoaiXeMoi         NVARCHAR(120)  NOT NULL,
+    BienSoMoi         VARCHAR(20)    NOT NULL,
+    TrangThai         VARCHAR(20)    NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_TrangThai DEFAULT 'pending',
+    GhiChuTuChoi      NVARCHAR(500)  NULL,
+    NguoiDuyetMaTK    VARCHAR(20)    NULL,
+    TaiXeDaXem        BIT            NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_TaiXeDaXem DEFAULT 0,
+    NgayTao           DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_NgayTao DEFAULT SYSDATETIME(),
+    NgayCapNhat       DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_NgayCapNhat DEFAULT SYSDATETIME(),
+    NgayXuLy          DATETIME2(0)   NULL,
+    NgayThongBaoTaiXe DATETIME2(0)   NULL,
+
+    CONSTRAINT PK_TaiXeYeuCauDoiThongTinXe PRIMARY KEY (MaYC),
+    CONSTRAINT FK_TaiXeYeuCauDoiThongTinXe_TaiKhoan FOREIGN KEY (MaTK)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT FK_TaiXeYeuCauDoiThongTinXe_NguoiDuyet FOREIGN KEY (NguoiDuyetMaTK)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT CK_TaiXeYeuCauDoiThongTinXe_TrangThai CHECK (TrangThai IN ('pending', 'approved', 'rejected'))
+);
+GO
+
+CREATE INDEX IX_TaiXeYeuCauDoiThongTinXe_TrangThai_NgayTao
+ON dbo.TaiXeYeuCauDoiThongTinXe (TrangThai, NgayTao DESC, MaYC DESC);
+GO
+
+CREATE UNIQUE INDEX UX_TaiXeYeuCauDoiThongTinXe_Pending
+ON dbo.TaiXeYeuCauDoiThongTinXe (MaTK)
+WHERE TrangThai = 'pending';
+GO
+
+CREATE OR ALTER TRIGGER dbo.TR_TaiXeYeuCauDoiThongTinXe_SetNgayCapNhat
+ON dbo.TaiXeYeuCauDoiThongTinXe
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE yc
+    SET yc.NgayCapNhat = SYSDATETIME()
+    FROM dbo.TaiXeYeuCauDoiThongTinXe AS yc
+    WHERE EXISTS (
+        SELECT 1
+        FROM inserted AS i
+        WHERE i.MaYC = yc.MaYC
     );
 END
 GO
@@ -524,82 +522,66 @@ END
 GO
 
 -- 8) Bảng Thông Báo
-IF OBJECT_ID(N'dbo.ThongBao', N'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.ThongBao
-    (
-        MaTB                  INT            IDENTITY(1,1) NOT NULL,
-        MaTK                  VARCHAR(20)    NULL,
-        TieuDe                NVARCHAR(200)  NOT NULL,
-        NoiDung               NVARCHAR(MAX)  NOT NULL,
-        NguoiNhan             VARCHAR(20)    NOT NULL CONSTRAINT DF_ThongBao_NguoiNhan DEFAULT 'customer',
-        TrangThai             VARCHAR(20)    NOT NULL CONSTRAINT DF_ThongBao_TrangThai DEFAULT 'scheduled',
-        ThoiGianGuiDuKien     DATETIME2(0)   NOT NULL,
-        NgayTao               DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayTao DEFAULT SYSDATETIME(),
-        NgayCapNhat           DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayCapNhat DEFAULT SYSDATETIME(),
+CREATE TABLE dbo.ThongBao
+(
+    MaTB                  INT            IDENTITY(1,1) NOT NULL,
+    MaTK                  VARCHAR(20)    NULL,
+    TieuDe                NVARCHAR(200)  NOT NULL,
+    NoiDung               NVARCHAR(MAX)  NOT NULL,
+    NguoiNhan             VARCHAR(20)    NOT NULL CONSTRAINT DF_ThongBao_NguoiNhan DEFAULT 'customer',
+    TrangThai             VARCHAR(20)    NOT NULL CONSTRAINT DF_ThongBao_TrangThai DEFAULT 'scheduled',
+    ThoiGianGuiDuKien     DATETIME2(0)   NOT NULL,
+    NgayTao               DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayTao DEFAULT SYSDATETIME(),
+    NgayCapNhat           DATETIME2(0)   NOT NULL CONSTRAINT DF_ThongBao_NgayCapNhat DEFAULT SYSDATETIME(),
 
-        CONSTRAINT PK_ThongBao PRIMARY KEY (MaTB),
-        CONSTRAINT CK_ThongBao_NguoiNhan CHECK (NguoiNhan IN ('all', 'customer', 'driver')),
-        CONSTRAINT CK_ThongBao_TrangThai CHECK (TrangThai IN ('scheduled', 'sent'))
-    );
-END
-GO
-
-IF COL_LENGTH(N'dbo.ThongBao', N'MaTK') IS NULL
-BEGIN
-    ALTER TABLE dbo.ThongBao
-    ADD MaTK VARCHAR(20) NULL;
-END
-GO
-
-IF OBJECT_ID(N'dbo.TaiKhoan', N'U') IS NOT NULL
-    AND NOT EXISTS (
-    SELECT 1
-    FROM sys.foreign_keys
-    WHERE name = N'FK_ThongBao_TaiKhoan'
-      AND parent_object_id = OBJECT_ID(N'dbo.ThongBao')
-)
-BEGIN
-    ALTER TABLE dbo.ThongBao
-    ADD CONSTRAINT FK_ThongBao_TaiKhoan FOREIGN KEY (MaTK)
+    CONSTRAINT PK_ThongBao PRIMARY KEY (MaTB),
+    CONSTRAINT CK_ThongBao_NguoiNhan CHECK (NguoiNhan IN ('all', 'customer', 'driver')),
+    CONSTRAINT CK_ThongBao_TrangThai CHECK (TrangThai IN ('scheduled', 'sent')),
+    CONSTRAINT FK_ThongBao_TaiKhoan FOREIGN KEY (MaTK)
         REFERENCES dbo.TaiKhoan(MaTK)
         ON UPDATE CASCADE
-        ON DELETE SET NULL;
-END
+        ON DELETE SET NULL
+);
 GO
 
 -- 9) Bảng Ưu Đãi
-IF OBJECT_ID(N'dbo.UuDai', N'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.UuDai
-    (
-        MaUD             INT            IDENTITY(1,1) NOT NULL,
-        MaUuDai          VARCHAR(40)    NOT NULL,
-        TenUuDai         NVARCHAR(120)  NOT NULL,
-        MoTa             NVARCHAR(1000) NOT NULL,
-        PhanTramGiam     INT            NOT NULL,
-        GiaTriToiDa      INT            NOT NULL,
-        PhamViApDung     NVARCHAR(120)  NOT NULL,
-        TrangThai        VARCHAR(20)    NOT NULL CONSTRAINT DF_UuDai_TrangThai DEFAULT 'scheduled',
-        SoLuotDaDung     INT            NOT NULL CONSTRAINT DF_UuDai_SoLuotDaDung DEFAULT 0,
-        GioiHanLuotDung  INT            NULL,
-        NgayHetHan       DATE           NOT NULL,
-        NgayTao          DATETIME2(0)   NOT NULL CONSTRAINT DF_UuDai_NgayTao DEFAULT SYSDATETIME(),
-        NgayCapNhat      DATETIME2(0)   NOT NULL CONSTRAINT DF_UuDai_NgayCapNhat DEFAULT SYSDATETIME(),
+CREATE TABLE dbo.UuDai
+(
+    MaUD             INT            IDENTITY(1,1) NOT NULL,
+    MaUuDai          VARCHAR(40)    NOT NULL,
+    TenUuDai         NVARCHAR(120)  NOT NULL,
+    MoTa             NVARCHAR(1000) NOT NULL,
+    LoaiUuDai        VARCHAR(20)    NOT NULL CONSTRAINT DF_UuDai_LoaiUuDai DEFAULT 'percent',
+    PhanTramGiam     INT            NULL,
+    GiaTriToiDa      INT            NULL,
+    SoTienGiam       INT            NULL,
+    DonToiThieu      INT            NOT NULL CONSTRAINT DF_UuDai_DonToiThieu DEFAULT 0,
+    DoiTuong         VARCHAR(20)    NOT NULL CONSTRAINT DF_UuDai_DoiTuong DEFAULT 'customer',
+    HienThi          VARCHAR(20)    NOT NULL CONSTRAINT DF_UuDai_HienThi DEFAULT 'public',
+    TrangThai        VARCHAR(20)    NOT NULL CONSTRAINT DF_UuDai_TrangThai DEFAULT 'scheduled',
+    SoLuotDaDung     INT            NOT NULL CONSTRAINT DF_UuDai_SoLuotDaDung DEFAULT 0,
+    GioiHanLuotDung  INT            NULL,
+    NgayBatDau       DATE           NOT NULL,
+    NgayHetHan       DATE           NOT NULL,
+    NgayTao          DATETIME2(0)   NOT NULL CONSTRAINT DF_UuDai_NgayTao DEFAULT SYSDATETIME(),
+    NgayCapNhat      DATETIME2(0)   NOT NULL CONSTRAINT DF_UuDai_NgayCapNhat DEFAULT SYSDATETIME(),
 
-        CONSTRAINT PK_UuDai PRIMARY KEY (MaUD),
-        CONSTRAINT UQ_UuDai_MaUuDai UNIQUE (MaUuDai),
-        CONSTRAINT CK_UuDai_MaUuDai CHECK (LEN(LTRIM(RTRIM(MaUuDai))) > 0),
-        CONSTRAINT CK_UuDai_TenUuDai CHECK (LEN(LTRIM(RTRIM(TenUuDai))) > 0),
-        CONSTRAINT CK_UuDai_MoTa CHECK (LEN(LTRIM(RTRIM(MoTa))) > 0),
-        CONSTRAINT CK_UuDai_PhanTramGiam CHECK (PhanTramGiam BETWEEN 1 AND 100),
-        CONSTRAINT CK_UuDai_GiaTriToiDa CHECK (GiaTriToiDa >= 0),
-        CONSTRAINT CK_UuDai_PhamViApDung CHECK (LEN(LTRIM(RTRIM(PhamViApDung))) > 0),
-        CONSTRAINT CK_UuDai_TrangThai CHECK (TrangThai IN ('active', 'expired', 'scheduled')),
-        CONSTRAINT CK_UuDai_SoLuotDaDung CHECK (SoLuotDaDung >= 0),
-        CONSTRAINT CK_UuDai_GioiHanLuotDung CHECK (GioiHanLuotDung IS NULL OR GioiHanLuotDung >= 0)
-    );
-END
+    CONSTRAINT PK_UuDai PRIMARY KEY (MaUD),
+    CONSTRAINT UQ_UuDai_MaUuDai UNIQUE (MaUuDai),
+    CONSTRAINT CK_UuDai_MaUuDai CHECK (LEN(LTRIM(RTRIM(MaUuDai))) > 0),
+    CONSTRAINT CK_UuDai_TenUuDai CHECK (LEN(LTRIM(RTRIM(TenUuDai))) > 0),
+    CONSTRAINT CK_UuDai_MoTa CHECK (LEN(LTRIM(RTRIM(MoTa))) > 0),
+    CONSTRAINT CK_UuDai_LoaiUuDai CHECK (LoaiUuDai IN ('percent', 'fixed')),
+    CONSTRAINT CK_UuDai_PhanTramGiam CHECK (PhanTramGiam IS NULL OR PhanTramGiam BETWEEN 1 AND 100),
+    CONSTRAINT CK_UuDai_GiaTriToiDa CHECK (GiaTriToiDa IS NULL OR GiaTriToiDa >= 0),
+    CONSTRAINT CK_UuDai_SoTienGiam CHECK (SoTienGiam IS NULL OR SoTienGiam > 0),
+    CONSTRAINT CK_UuDai_DonToiThieu CHECK (DonToiThieu >= 0),
+    CONSTRAINT CK_UuDai_DoiTuong CHECK (DoiTuong IN ('all', 'customer', 'driver', 'admin')),
+    CONSTRAINT CK_UuDai_HienThi CHECK (HienThi IN ('public', 'hidden')),
+    CONSTRAINT CK_UuDai_TrangThai CHECK (TrangThai IN ('active', 'expired', 'scheduled')),
+    CONSTRAINT CK_UuDai_SoLuotDaDung CHECK (SoLuotDaDung >= 0),
+    CONSTRAINT CK_UuDai_GioiHanLuotDung CHECK (GioiHanLuotDung IS NULL OR GioiHanLuotDung >= 0)
+);
 GO
 
 CREATE OR ALTER TRIGGER dbo.TR_UuDai_SetNgayCapNhat
@@ -625,69 +607,64 @@ INSERT INTO dbo.UuDai
     MaUuDai,
     TenUuDai,
     MoTa,
+    LoaiUuDai,
     PhanTramGiam,
+    SoTienGiam,
     GiaTriToiDa,
-    PhamViApDung,
+    DonToiThieu,
+    DoiTuong,
+    HienThi,
     TrangThai,
     SoLuotDaDung,
     GioiHanLuotDung,
+    NgayBatDau,
     NgayHetHan,
     NgayTao,
     NgayCapNhat
 )
 VALUES
-('SALE10',    N'Giảm giá chuyến ngắn',   N'Ưu đãi giảm trực tiếp cho chuyến xe ngắn.',           10, 50000, N'Tất cả khách hàng',  'active',    186, 500, '2026-05-30', '2026-04-18T08:00:00', '2026-04-18T08:00:00'),
-('NEWUSER',   N'Ưu đãi khách hàng mới',   N'Mã ưu đãi dành cho người dùng lần đầu đặt xe.',      20, 100000, N'Khách hàng mới',     'active',     92, 300, '2026-06-10', '2026-04-21T09:00:00', '2026-04-21T09:00:00'),
-('SALE15',    N'Khuyến mãi cuối tuần',    N'Khuyến mãi cuối tuần cho toàn bộ chuyến xe.',        15, 50000, N'Tất cả khách hàng',  'active',    120, 450, '2026-05-15', '2026-04-18T11:00:00', '2026-04-18T11:00:00'),
-('BIKE20',    N'Ưu đãi xe máy',           N'Ưu đãi riêng cho các chuyến xe máy.',                20, 80000, N'RiBike',             'active',     68, 250, '2026-06-12', '2026-04-16T08:30:00', '2026-04-16T08:30:00'),
-('SPRING25',  N'Ưu đãi mùa mới',          N'Ưu đãi mùa mới dành cho người dùng quay lại.',       25, 75000, N'Khách hàng thân thiết', 'active',   44, 200, '2026-05-22', '2026-04-22T07:00:00', '2026-04-22T07:00:00'),
-('WEEKEND10', N'Cuối tuần tiết kiệm',     N'Khuyến mãi dùng cho khung giờ cuối tuần.',           10, 30000, N'Tất cả khách hàng',  'active',     77, 400, '2026-04-27', '2026-04-20T08:00:00', '2026-04-20T08:00:00'),
-('OLD5',      N'Ưu đãi cũ',               N'Mã cũ đã hết hiệu lực và được giữ để đối soát.',      5, 20000, N'Tất cả khách hàng',  'expired',   210, 600, '2026-03-02', '2026-03-01T08:00:00', '2026-03-01T08:00:00'),
-('TET2025',   N'Ưu đãi theo mùa vụ',      N'Ưu đãi theo mùa vụ đã ngừng áp dụng.',               30, 60000, N'Khách hàng thân thiết', 'expired', 305, 700, '2026-02-10', '2026-02-12T08:00:00', '2026-02-12T08:00:00'),
-('VIP30',     N'Ưu đãi khách VIP',        N'Mã ưu đãi dành cho tập khách hàng VIP.',             30, 90000, N'Khách VIP',          'expired',    41, 120, '2026-01-15', '2026-01-15T08:00:00', '2026-01-15T08:00:00'),
-('WELCOME5',  N'Mã chào mừng',            N'Ưu đãi chào mừng sẽ mở trong đợt tiếp theo.',         5, 40000, N'Khách hàng mới',     'scheduled',   0, 250, '2026-06-30', '2026-04-19T08:00:00', '2026-04-19T08:00:00');
+--                                                                                                          LoaiUuDai  PhanTram  SoTien  ToiDa   DonTT   DoiTuong   HienThi    TrangThai   DaDung  GioiHan  NgayBD        NgayHH        NgayTao               NgayCapNhat
+('SALE10',    N'Giảm giá chuyến ngắn',      N'Ưu đãi giảm trực tiếp cho chuyến xe ngắn.',    'percent',  10,       NULL,   50000,  0,      'customer', 'public',  'active',    186,    500,     '2026-04-01', '2026-05-30', '2026-04-18T08:00:00', '2026-04-18T08:00:00'),
+('NEWUSER',   N'Ưu đãi khách hàng mới',    N'Mã ưu đãi dành cho người dùng lần đầu đặt xe.','percent',  20,       NULL,   100000, 0,      'customer', 'public',  'active',     92,    300,     '2026-04-01', '2026-06-10', '2026-04-21T09:00:00', '2026-04-21T09:00:00'),
+('SALE15',    N'Khuyến mãi cuối tuần',      N'Khuyến mãi cuối tuần cho toàn bộ chuyến xe.',  'percent',  15,       NULL,   50000,  0,      'customer', 'public',  'active',    120,    450,     '2026-04-01', '2026-05-15', '2026-04-18T11:00:00', '2026-04-18T11:00:00'),
+('BIKE20',    N'Ưu đãi xe máy',             N'Ưu đãi riêng cho các chuyến xe máy.',          'percent',  20,       NULL,   80000,  0,      'customer', 'public',  'active',     68,    250,     '2026-04-01', '2026-06-12', '2026-04-16T08:30:00', '2026-04-16T08:30:00'),
+('SPRING25',  N'Ưu đãi mùa mới',            N'Ưu đãi mùa mới dành cho người dùng quay lại.','percent',  25,       NULL,   75000,  0,      'customer', 'public',  'active',     44,    200,     '2026-04-01', '2026-05-22', '2026-04-22T07:00:00', '2026-04-22T07:00:00'),
+('WEEKEND10', N'Cuối tuần tiết kiệm',       N'Khuyến mãi dùng cho khung giờ cuối tuần.',     'fixed',    NULL,     20000,  NULL,   50000,  'all',      'hidden',  'active',     77,    400,     '2026-04-01', '2026-04-27', '2026-04-20T08:00:00', '2026-04-20T08:00:00'),
+('OLD5',      N'Ưu đãi cũ',                 N'Mã cũ đã hết hiệu lực và được giữ để đối soát.','percent',  5,       NULL,   20000,  0,      'customer', 'public',  'expired',   210,    600,     '2026-02-01', '2026-03-02', '2026-03-01T08:00:00', '2026-03-01T08:00:00'),
+('TET2025',   N'Ưu đãi theo mùa vụ',        N'Ưu đãi theo mùa vụ đã ngừng áp dụng.',        'percent',  30,       NULL,   60000,  0,      'customer', 'public',  'expired',   305,    700,     '2026-01-20', '2026-02-10', '2026-02-12T08:00:00', '2026-02-12T08:00:00'),
+('VIP30',     N'Ưu đãi khách VIP',          N'Mã ưu đãi dành cho tập khách hàng VIP.',       'percent',  30,       NULL,   90000,  0,      'customer', 'public',  'expired',    41,    120,     '2026-01-01', '2026-01-15', '2026-01-15T08:00:00', '2026-01-15T08:00:00'),
+('WELCOME5',  N'Mã chào mừng',              N'Ưu đãi chào mừng sẽ mở trong đợt tiếp theo.',  'percent',   5,       NULL,   40000,  0,      'customer', 'public',  'scheduled',   0,    250,     '2026-05-01', '2026-06-30', '2026-04-19T08:00:00', '2026-04-19T08:00:00');
 GO
 
 -- 10) Bảng Tin Nhắn Chuyến Xe
-IF OBJECT_ID(N'dbo.TinNhan', N'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.TinNhan
-    (
-        MaTinNhan           BIGINT         IDENTITY(1,1) NOT NULL,
-        MaChuyen            VARCHAR(30)    NOT NULL,
-        MaTK                VARCHAR(20)    NULL,
-        VaiTro      VARCHAR(20)    NOT NULL CONSTRAINT DF_TinNhan_VaiTro DEFAULT 'customer',
-        Ten         NVARCHAR(200)  NOT NULL CONSTRAINT DF_TinNhan_Ten DEFAULT N'Người dùng',
-        SDT VARCHAR(30)    NULL,
-        NoiDung             NVARCHAR(1000) NOT NULL,
-        NgayTao             DATETIME2(0)   NOT NULL CONSTRAINT DF_TinNhan_NgayTao DEFAULT SYSDATETIME(),
-        NgayCapNhat         DATETIME2(0)   NOT NULL CONSTRAINT DF_TinNhan_NgayCapNhat DEFAULT SYSDATETIME(),
+CREATE TABLE dbo.TinNhan
+(
+    MaTinNhan           BIGINT         IDENTITY(1,1) NOT NULL,
+    MaChuyen            VARCHAR(30)    NOT NULL,
+    MaTK                VARCHAR(20)    NULL,
+    VaiTro              VARCHAR(20)    NOT NULL CONSTRAINT DF_TinNhan_VaiTro DEFAULT 'customer',
+    Ten                 NVARCHAR(200)  NOT NULL CONSTRAINT DF_TinNhan_Ten DEFAULT N'Người dùng',
+    SDT                 VARCHAR(30)    NULL,
+    NoiDung             NVARCHAR(1000) NOT NULL,
+    NgayTao             DATETIME2(0)   NOT NULL CONSTRAINT DF_TinNhan_NgayTao DEFAULT SYSDATETIME(),
+    NgayCapNhat         DATETIME2(0)   NOT NULL CONSTRAINT DF_TinNhan_NgayCapNhat DEFAULT SYSDATETIME(),
 
-        CONSTRAINT PK_TinNhan PRIMARY KEY (MaTinNhan),
-        CONSTRAINT FK_TinNhan_DatXe FOREIGN KEY (MaChuyen)
-            REFERENCES dbo.DatXe(MaChuyen)
-            ON UPDATE CASCADE
-            ON DELETE CASCADE,
-        CONSTRAINT FK_TinNhan_TaiKhoan FOREIGN KEY (MaTK)
-            REFERENCES dbo.TaiKhoan(MaTK)
-            ON UPDATE NO ACTION
-            ON DELETE NO ACTION,
-        CONSTRAINT CK_TinNhan_NoiDung CHECK (LEN(LTRIM(RTRIM(NoiDung))) > 0),
-        CONSTRAINT CK_TinNhan_VaiTro CHECK (VaiTro IN ('customer', 'driver'))
-    );
-END
+    CONSTRAINT PK_TinNhan PRIMARY KEY (MaTinNhan),
+    CONSTRAINT FK_TinNhan_DatXe FOREIGN KEY (MaChuyen)
+        REFERENCES dbo.DatXe(MaChuyen)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT FK_TinNhan_TaiKhoan FOREIGN KEY (MaTK)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT CK_TinNhan_NoiDung CHECK (LEN(LTRIM(RTRIM(NoiDung))) > 0),
+    CONSTRAINT CK_TinNhan_VaiTro CHECK (VaiTro IN ('customer', 'driver'))
+);
 GO
 
-IF NOT EXISTS (
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_TinNhan_MaChuyen_NgayTao'
-      AND object_id = OBJECT_ID(N'dbo.TinNhan')
-)
-BEGIN
-    CREATE INDEX IX_TinNhan_MaChuyen_NgayTao
-    ON dbo.TinNhan (MaChuyen, NgayTao DESC, MaTinNhan DESC);
-END
+CREATE INDEX IX_TinNhan_MaChuyen_NgayTao
+ON dbo.TinNhan (MaChuyen, NgayTao DESC, MaTinNhan DESC);
 GO
 
 -- Dữ liệu mẫu tài khoản tài xế
@@ -751,6 +728,25 @@ VALUES
     N'{"relationship":"Em","fullName":"Le Thi F","phone":"0933333333","address":"Lien Chieu, Da Nang"}',
     N'Khoa'
 );
+GO
+
+-- Dữ liệu mẫu ví tài xế
+INSERT INTO dbo.TaiXeVi (MaTK, SoDu)
+VALUES
+('TK0002', 320000),
+('TK0003', 150000),
+('TK0004', 50000);
+GO
+
+-- Dữ liệu mẫu giao dịch ví tài xế
+INSERT INTO dbo.TaiXeGiaoDichVi
+(
+    MaTK, LoaiGiaoDich, SoTien, SoDuTruoc, SoDuSau, MoTa, SoDTNguoiNhan, SoDTNguoiGui, MaThamChieu, TrangThai
+)
+VALUES
+('TK0002', 'topup',    200000, 120000, 320000, N'Nạp tiền ví qua MoMo',          NULL,          NULL,          'TX2-TOPUP-001',    'completed'),
+('TK0002', 'transfer', -50000,  320000, 270000, N'Chuyển tiền cho khách quen',    '0909999999',  '0901111111',  'TX2-TRANSFER-001', 'completed'),
+('TK0003', 'topup',    150000,       0, 150000, N'Nạp tiền ví qua ngân hàng',     NULL,          NULL,          'TX3-TOPUP-001',    'completed');
 GO
 
 

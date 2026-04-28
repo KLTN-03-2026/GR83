@@ -329,6 +329,14 @@ async function ensureRideEventBroker() {
   return rideEventSetupPromise;
 }
 
+export function broadcastAdminEvent(eventType, data = {}) {
+  if (!rideSocketServer) {
+    return;
+  }
+
+  rideSocketServer.emit('admin.event', { type: eventType, ...data, createdAt: new Date().toISOString() });
+}
+
 export async function connectRideEventBroker() {
   return ensureRideEventBroker();
 }

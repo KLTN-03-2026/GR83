@@ -38,4 +38,5 @@ export const env = {
   dbConnectionTimeoutMs: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15000),
   dbRequestTimeoutMs: Number(process.env.DB_REQUEST_TIMEOUT_MS ?? 15000),
   dbConnectionRetryCooldownMs: Number(process.env.DB_CONNECTION_RETRY_COOLDOWN_MS ?? 30000),
+  driverPlatformFeePercent: Number(process.env.DRIVER_PLATFORM_FEE_PERCENT ?? 30),
 };

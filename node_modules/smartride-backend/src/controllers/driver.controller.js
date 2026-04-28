@@ -1,13 +1,26 @@
 import {
+  acknowledgeDriverVehicleChangeResolution,
+  approveVehicleChangeRequest,
   approveDriver,
+  createVehicleChangeRequest,
   createDriver,
+  getDriverProfile,
+  getDriverWallet,
+  getVehicleChangeRequestDetail,
   listDrivers,
+  listDriverVehicleChangeResolutions,
+  listDriverWalletTransactions,
+  listPendingVehicleChangeRequests,
   lockDriver,
   registerDriverApplication,
+  rejectVehicleChangeRequest,
   rejectDriver,
+  topupDriverWallet,
+  transferDriverWallet,
   unlockDriver,
   updateDriver,
 } from '../services/driver.service.js';
+import { broadcastAdminEvent } from '../services/ride.realtime.service.js';
 
 const uploadedDriverDocumentDirectories = {
   portrait: 'portraits',
@@ -150,7 +163,9 @@ export async function rejectDriverController(request, response, next) {
 
 export async function lockDriverController(request, response, next) {
   try {
-    const result = await lockDriver(request.params.driverId);
+    const driverId = request.params.driverId;
+    const result = await lockDriver(driverId);
+    broadcastAdminEvent('admin.account.changed', { action: 'locked', accountId: String(driverId) });
     response.status(200).json(result);
   } catch (error) {
     if (sendKnownDriverError(response, error)) {
@@ -164,6 +179,189 @@ export async function lockDriverController(request, response, next) {
 export async function unlockDriverController(request, response, next) {
   try {
     const result = await unlockDriver(request.params.driverId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getDriverProfileController(request, response, next) {
+  try {
+    const result = await getDriverProfile(request.params.driverId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getDriverWalletController(request, response, next) {
+  try {
+    const result = await getDriverWallet(request.params.driverId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function listDriverWalletTransactionsController(request, response, next) {
+  try {
+    const result = await listDriverWalletTransactions(request.params.driverId, request.query);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function topupDriverWalletController(request, response, next) {
+  try {
+    const result = await topupDriverWallet(request.params.driverId, request.body);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function transferDriverWalletController(request, response, next) {
+  try {
+    const result = await transferDriverWallet(request.params.driverId, request.body);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function createVehicleChangeRequestController(request, response, next) {
+  try {
+    const result = await createVehicleChangeRequest(request.params.driverId, request.body);
+
+    broadcastAdminEvent('admin.driver.vehicle-change', {
+      action: 'requested',
+      request: result.request,
+    });
+
+    response.status(201).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function listPendingVehicleChangeRequestsController(request, response, next) {
+  try {
+    const result = await listPendingVehicleChangeRequests();
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getVehicleChangeRequestDetailController(request, response, next) {
+  try {
+    const result = await getVehicleChangeRequestDetail(request.params.requestId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function approveVehicleChangeRequestController(request, response, next) {
+  try {
+    const result = await approveVehicleChangeRequest(request.params.requestId, {
+      ...request.body,
+      approvedByAccountId: request.body?.approvedByAccountId ?? request.body?.adminAccountId,
+    });
+
+    broadcastAdminEvent('admin.driver.vehicle-change', {
+      action: 'resolved',
+      request: result.request,
+      outcome: 'approved',
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function rejectVehicleChangeRequestController(request, response, next) {
+  try {
+    const result = await rejectVehicleChangeRequest(request.params.requestId, {
+      ...request.body,
+      approvedByAccountId: request.body?.approvedByAccountId ?? request.body?.adminAccountId,
+    });
+
+    broadcastAdminEvent('admin.driver.vehicle-change', {
+      action: 'resolved',
+      request: result.request,
+      outcome: 'rejected',
+      message: result.request?.rejectReason || 'Yêu cầu thay đổi thông tin xe đã bị từ chối.',
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function listDriverVehicleChangeResolutionsController(request, response, next) {
+  try {
+    const result = await listDriverVehicleChangeResolutions(request.params.driverId, request.query);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function acknowledgeDriverVehicleChangeResolutionController(request, response, next) {
+  try {
+    const result = await acknowledgeDriverVehicleChangeResolution(request.params.driverId, request.params.requestId);
     response.status(200).json(result);
   } catch (error) {
     if (sendKnownDriverError(response, error)) {

@@ -3,9 +3,15 @@ import { adminPromotionService } from '../../services/adminPromotionService';
 import { classNames } from '../../utils/classNames';
 import { dispatchPromotionCatalogChanged } from '../../utils/promotionEvents';
 import ConfirmDialog from '../ui/ConfirmDialog';
+import DatePicker, { registerLocale } from 'react-datepicker';
+import { format, isValid, parse } from 'date-fns';
+import { vi } from 'date-fns/locale';
+import 'react-datepicker/dist/react-datepicker.css';
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import './AdminPromotionManagementModal.css';
+
+registerLocale('vi-VN', vi);
 
 const PROMOTION_STATUS_META = {
   active: { label: 'Hoạt động', tone: 'active' },
@@ -20,10 +26,14 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'expired', label: 'Hết hạn' },
 ];
 
-const EDITOR_STATUS_OPTIONS = [
-  { value: 'scheduled', label: 'Sắp mở' },
-  { value: 'active', label: 'Hoạt động' },
-  { value: 'expired', label: 'Hết hạn' },
+const DISCOUNT_TYPE_OPTIONS = [
+  { value: 'percent', label: 'Giảm theo %' },
+  { value: 'fixed', label: 'Giảm tiền cố định' },
+];
+
+const VISIBILITY_OPTIONS = [
+  { value: 'public', label: 'Công khai' },
+  { value: 'hidden', label: 'Ẩn' },
 ];
 
 function getApiErrorMessage(error, fallbackMessage) {
@@ -97,14 +107,14 @@ function getCreatePromotionDefaults(code = '') {
     return {
       title: 'Ưu đãi mới',
       description: 'Ưu đãi áp dụng cho khách hàng đủ điều kiện.',
-      scope: 'Tất cả khách hàng',
+      audience: 'customer',
     };
   }
 
   return {
     title: `Ưu đãi ${normalizedCode}`,
     description: `Ưu đãi áp dụng cho mã ${normalizedCode}.`,
-    scope: 'Tất cả khách hàng',
+    audience: 'customer',
   };
 }
 
@@ -113,12 +123,17 @@ function createEmptyPromotionForm() {
     code: '',
     title: 'Ưu đãi mới',
     description: 'Ưu đãi áp dụng cho khách hàng đủ điều kiện.',
+    discountType: 'percent',
     discountPercent: '10',
+    discountAmount: '',
     maxAmount: '',
+    minOrderAmount: '',
     usageLimit: '',
+    startsAt: '',
     expiresAt: '',
-    scope: 'Tất cả khách hàng',
-    status: 'scheduled',
+    scope: 'customer', // legacy placeholder; actual field is audience
+    audience: 'customer',
+    visibility: 'public',
   };
 }
 
@@ -159,8 +174,39 @@ function formatInputDate(value) {
   return normalizedValue.slice(0, 10);
 }
 
+function parseDateForPicker(value) {
+  const normalizedValue = String(value ?? '').trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedDate = parse(normalizedValue.slice(0, 10), 'yyyy-MM-dd', new Date());
+  return isValid(parsedDate) ? parsedDate : null;
+}
+
+function formatDateForPayload(value) {
+  if (!value) {
+    return '';
+  }
+
+  return format(value, 'yyyy-MM-dd');
+}
+
 function formatMoneyValue(value) {
   return new Intl.NumberFormat('vi-VN').format(Number(value) || 0);
+}
+
+function formatDiscountDisplay(promotion = {}) {
+  const discountType = String(promotion.discountType ?? 'percent').trim().toLowerCase();
+
+  if (discountType === 'fixed') {
+    const fixedAmount = Number(promotion.discountAmount ?? 0) || 0;
+    return fixedAmount > 0 ? `${formatMoneyValue(fixedAmount)}đ` : '0đ';
+  }
+
+  const discountPercent = Number(promotion.discountPercent ?? 0) || 0;
+  return `${discountPercent}%`;
 }
 
 function getStatusMeta(value) {
@@ -168,14 +214,22 @@ function getStatusMeta(value) {
 }
 
 function normalizePromotion(promotion = {}, fallbackId = 0) {
+  const discountType = String(promotion.discountType ?? promotion.LoaiUuDai ?? 'percent').trim().toLowerCase();
+
   return {
     id: Number(promotion.id ?? promotion.MaUD ?? fallbackId) || fallbackId,
     code: normalizeCode(promotion.code ?? promotion.MaUuDai),
     title: String(promotion.title ?? promotion.TenUuDai ?? '').trim(),
     description: String(promotion.description ?? promotion.MoTa ?? '').trim(),
+    discountType: discountType === 'fixed' ? 'fixed' : 'percent',
     discountPercent: Number(promotion.discountPercent ?? promotion.PhanTramGiam ?? 0) || 0,
+    discountAmount: Number(promotion.discountAmount ?? promotion.SoTienGiam ?? 0) || 0,
     maxAmount: Number(promotion.maxAmount ?? promotion.GiaTriToiDa ?? 0) || 0,
+    minOrderAmount: Number(promotion.minOrderAmount ?? promotion.DonToiThieu ?? 0) || 0,
     scope: String(promotion.scope ?? promotion.PhamViApDung ?? '').trim(),
+    audience: String(promotion.audience ?? promotion.scope ?? 'customer').trim().toLowerCase()
+      .replace('all', 'all').replace('driver', 'driver').replace('admin', 'admin') || 'customer',
+    visibility: String(promotion.visibility ?? promotion.HienThi ?? 'public').trim().toLowerCase() === 'hidden' ? 'hidden' : 'public',
     status: normalizeStatus(promotion.status ?? promotion.TrangThai),
     usageCount: Number(promotion.usageCount ?? promotion.SoLuotDaDung ?? 0) || 0,
     usageLimit:
@@ -184,6 +238,7 @@ function normalizePromotion(promotion = {}, fallbackId = 0) {
       promotion.usageLimit === ''
         ? ''
         : String(promotion.usageLimit),
+    startsAt: formatInputDate(promotion.startsAt ?? promotion.NgayBatDau),
     expiresAt: formatInputDate(promotion.expiresAt ?? promotion.NgayHetHan),
     createdAt: String(promotion.createdAt ?? promotion.NgayTao ?? '').trim(),
     updatedAt: String(promotion.updatedAt ?? promotion.NgayCapNhat ?? '').trim(),
@@ -199,12 +254,17 @@ function buildPromotionForm(promotion = null) {
     code: String(promotion.code ?? '').trim(),
     title: String(promotion.title ?? '').trim(),
     description: String(promotion.description ?? '').trim(),
+    discountType: String(promotion.discountType ?? 'percent').trim() === 'fixed' ? 'fixed' : 'percent',
     discountPercent: String(promotion.discountPercent ?? '').trim() || '10',
+    discountAmount: String(promotion.discountAmount ?? '').trim(),
     maxAmount: String(promotion.maxAmount ?? '').trim(),
+    minOrderAmount: String(promotion.minOrderAmount ?? '').trim(),
     usageLimit: promotion.usageLimit === null || promotion.usageLimit === undefined ? '' : String(promotion.usageLimit),
+    startsAt: formatInputDate(promotion.startsAt),
     expiresAt: formatInputDate(promotion.expiresAt),
     scope: String(promotion.scope ?? '').trim(),
-    status: normalizeStatus(promotion.status),
+    audience: String(promotion.audience ?? 'customer').trim(),
+    visibility: String(promotion.visibility ?? 'public').trim() === 'hidden' ? 'hidden' : 'public',
   };
 }
 
@@ -213,12 +273,17 @@ function normalizePromotionForm(form = {}) {
     code: normalizeCode(form.code),
     title: String(form.title ?? '').trim(),
     description: String(form.description ?? '').trim(),
+    discountType: String(form.discountType ?? 'percent').trim() === 'fixed' ? 'fixed' : 'percent',
     discountPercent: String(form.discountPercent ?? '').trim(),
+    discountAmount: String(form.discountAmount ?? '').trim(),
     maxAmount: String(form.maxAmount ?? '').trim(),
+    minOrderAmount: String(form.minOrderAmount ?? '').trim(),
     usageLimit: String(form.usageLimit ?? '').trim(),
+    startsAt: String(form.startsAt ?? '').trim().slice(0, 10),
     expiresAt: String(form.expiresAt ?? '').trim().slice(0, 10),
     scope: String(form.scope ?? '').trim(),
-    status: normalizeStatus(form.status),
+    audience: String(form.audience ?? 'customer').trim(),
+    visibility: String(form.visibility ?? 'public').trim() === 'hidden' ? 'hidden' : 'public',
   };
 }
 
@@ -230,12 +295,18 @@ function validatePromotionForm(form = {}) {
   const code = normalizeCode(form.code);
   const title = String(form.title ?? '').trim();
   const description = String(form.description ?? '').trim();
+  const VALID_AUDIENCE = new Set(['all', 'customer', 'driver', 'admin']);
   const scope = String(form.scope ?? '').trim();
+  const audience = VALID_AUDIENCE.has(String(form.audience ?? '').trim()) ? String(form.audience).trim() : 'customer';
+  const discountType = String(form.discountType ?? 'percent').trim() === 'fixed' ? 'fixed' : 'percent';
   const discountPercentValue = String(form.discountPercent ?? '').trim();
+  const discountAmountValue = String(form.discountAmount ?? '').trim();
   const maxAmountValue = String(form.maxAmount ?? '').trim();
+  const minOrderAmountValue = String(form.minOrderAmount ?? '').trim();
   const usageLimitValue = String(form.usageLimit ?? '').trim();
+  const startsAtValue = String(form.startsAt ?? '').trim().slice(0, 10);
   const expiresAtValue = String(form.expiresAt ?? '').trim().slice(0, 10);
-  const status = normalizeStatus(form.status);
+  const visibility = String(form.visibility ?? 'public').trim() === 'hidden' ? 'hidden' : 'public';
 
   if (!/^[A-Z0-9_-]{3,40}$/.test(code)) {
     return 'Mã ưu đãi chỉ được chứa chữ cái, số, dấu gạch ngang hoặc gạch dưới và dài từ 3 đến 40 ký tự.';
@@ -257,34 +328,54 @@ function validatePromotionForm(form = {}) {
     return 'Mô tả ưu đãi không được vượt quá 1000 ký tự.';
   }
 
-  if (!scope) {
-    return 'Phạm vi áp dụng không được để trống.';
+  if (!audience) {
+    return 'Đối tượng áp dụng không được để trống.';
   }
 
-  if (scope.length > 120) {
-    return 'Phạm vi áp dụng không được vượt quá 120 ký tự.';
+  if (!startsAtValue || !/^\d{4}-\d{2}-\d{2}$/.test(startsAtValue)) {
+    return 'Ngày bắt đầu không hợp lệ.';
   }
 
   if (!expiresAtValue || !/^\d{4}-\d{2}-\d{2}$/.test(expiresAtValue)) {
-    return 'Ngày hết hạn không hợp lệ.';
+    return 'Ngày kết thúc không hợp lệ.';
   }
 
-  const expiresAtDate = new Date(`${expiresAtValue}T00:00:00`);
-
-  if (Number.isNaN(expiresAtDate.getTime())) {
-    return 'Ngày hết hạn không hợp lệ.';
+  if (startsAtValue > expiresAtValue) {
+    return 'Ngày bắt đầu không được lớn hơn ngày kết thúc.';
   }
 
-  const discountPercent = Number.parseInt(discountPercentValue, 10);
+  let discountPercent = null;
+  let discountAmount = null;
+  let maxAmount = null;
 
-  if (!Number.isInteger(discountPercent) || discountPercent < 1 || discountPercent > 100) {
-    return 'Mức giảm phải là số từ 1 đến 100.';
+  if (discountType === 'percent') {
+    discountPercent = Number.parseInt(discountPercentValue, 10);
+
+    if (!Number.isInteger(discountPercent) || discountPercent < 1 || discountPercent > 100) {
+      return 'Phần trăm giảm phải là số nguyên từ 1 đến 100.';
+    }
+
+    maxAmount = Number.parseInt(maxAmountValue, 10);
+
+    if (!Number.isInteger(maxAmount) || maxAmount < 0) {
+      return 'Giảm tối đa phải là số nguyên không âm khi chọn giảm theo %.';
+    }
+  } else {
+    discountAmount = Number.parseInt(discountAmountValue, 10);
+
+    if (!Number.isInteger(discountAmount) || discountAmount <= 0) {
+      return 'Số tiền giảm phải là số nguyên dương khi chọn giảm tiền cố định.';
+    }
   }
 
-  const maxAmount = Number.parseInt(maxAmountValue, 10);
+  let minOrderAmount = 0;
 
-  if (!Number.isInteger(maxAmount) || maxAmount < 0) {
-    return 'Giảm tối đa phải là số nguyên không âm.';
+  if (minOrderAmountValue) {
+    minOrderAmount = Number.parseInt(minOrderAmountValue, 10);
+
+    if (!Number.isInteger(minOrderAmount) || minOrderAmount < 0) {
+      return 'Đơn tối thiểu phải là số nguyên không âm.';
+    }
   }
 
   let usageLimit = null;
@@ -301,12 +392,17 @@ function validatePromotionForm(form = {}) {
     code,
     title,
     description,
+    discountType,
     discountPercent,
+    discountAmount,
     maxAmount,
+    minOrderAmount,
     usageLimit,
+    startsAt: startsAtValue,
     expiresAt: expiresAtValue,
     scope,
-    status,
+    audience,
+    visibility,
   };
 }
 
@@ -368,7 +464,7 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
 
       if (normalizedSearchKeyword) {
         const searchableText = normalizeToken(
-          `${promotion.code} ${promotion.title} ${promotion.description} ${promotion.scope}`,
+          `${promotion.code} ${promotion.title} ${promotion.description} ${promotion.audience} ${promotion.visibility} ${promotion.discountType}`,
         );
 
         if (!searchableText.includes(normalizedSearchKeyword)) {
@@ -755,9 +851,10 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
             <thead>
               <tr>
                 <th>Mã</th>
-                <th>Giảm (%)</th>
-                <th>Tối đa</th>
-                <th>Hết hạn</th>
+                <th>Loại ưu đãi</th>
+                <th>Mức giảm</th>
+                <th>Hiển thị</th>
+                <th>Kết thúc</th>
                 <th>Trạng thái</th>
                 <th>Hành động</th>
               </tr>
@@ -773,11 +870,15 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
                     <tr key={promotion.id}>
                       <td className="admin-promotion-modal__code-cell">
                         <strong>{promotion.code}</strong>
-                        <span>{promotion.title || promotion.scope || 'Ưu đãi'}</span>
-                        <em>{promotion.scope || 'Tất cả khách hàng'} · {promotion.usageCount} lượt dùng</em>
+                        <span>{promotion.title || 'Ưu đãi'}</span>
+                        <em>
+                          {{all: 'Tất cả', customer: 'Khách hàng', driver: 'Tài xế', admin: 'Admin'}[promotion.audience] ?? promotion.audience ?? 'Tất cả'}
+                          {' · '}{promotion.usageCount} lượt dùng
+                        </em>
                       </td>
-                      <td className="admin-promotion-modal__discount-cell">{promotion.discountPercent}%</td>
-                      <td className="admin-promotion-modal__max-cell">{formatMoneyValue(promotion.maxAmount)}</td>
+                      <td>{promotion.discountType === 'fixed' ? 'Giảm cố định' : 'Giảm theo %'}</td>
+                      <td className="admin-promotion-modal__discount-cell">{formatDiscountDisplay(promotion)}</td>
+                      <td>{promotion.visibility === 'hidden' ? 'Ẩn' : 'Công khai'}</td>
                       <td className="admin-promotion-modal__date-cell">{formatDateDisplay(promotion.expiresAt)}</td>
                       <td>
                         <span
@@ -822,7 +923,7 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
                 })
               ) : !isLoading ? (
                 <tr>
-                  <td className="admin-promotion-modal__empty-row" colSpan={6}>
+                  <td className="admin-promotion-modal__empty-row" colSpan={7}>
                     Không có mã ưu đãi nào khớp với bộ lọc hiện tại.
                   </td>
                 </tr>
@@ -875,53 +976,168 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
                     </label>
 
                     <label>
-                      <span>Phần trăm giảm</span>
+                      <span>Tên chương trình</span>
                       <input
-                        type="number"
-                        min="1"
-                        max="100"
-                        value={promotionForm.discountPercent}
-                        onChange={(event) => updateField('discountPercent', event.target.value)}
+                        type="text"
+                        value={promotionForm.title}
+                        onChange={(event) => updateField('title', event.target.value)}
                         disabled={editorReadOnly}
-                        placeholder="VD: 20"
+                        placeholder="VD: KHUYENMAI02"
                       />
                     </label>
 
                     <label>
-                      <span>Số tiền giảm tối đa</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={promotionForm.maxAmount}
-                        onChange={(event) => updateField('maxAmount', event.target.value)}
-                        disabled={editorReadOnly}
-                        placeholder="VD: 50000"
-                      />
-                    </label>
-
-                    <label>
-                      <span>Hết hạn</span>
-                      <input
-                        type="date"
-                        value={promotionForm.expiresAt}
-                        onChange={(event) => updateField('expiresAt', event.target.value)}
-                        disabled={editorReadOnly}
-                      />
-                    </label>
-
-                    <label>
-                      <span>Trạng thái</span>
+                      <span>Loại ưu đãi</span>
                       <select
-                        value={promotionForm.status}
-                        onChange={(event) => updateField('status', event.target.value)}
+                        value={promotionForm.discountType}
+                        onChange={(event) => updateField('discountType', event.target.value)}
                         disabled={editorReadOnly}
                       >
-                        {EDITOR_STATUS_OPTIONS.map((option) => (
+                        {DISCOUNT_TYPE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
                         ))}
                       </select>
+                    </label>
+
+                    {promotionForm.discountType === 'fixed' ? (
+                      <label>
+                        <span>Số tiền giảm</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={promotionForm.discountAmount}
+                          onChange={(event) => updateField('discountAmount', event.target.value)}
+                          disabled={editorReadOnly}
+                          placeholder="VD: 50000"
+                        />
+                      </label>
+                    ) : (
+                      <>
+                        <label>
+                          <span>Phần trăm giảm (%)</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            value={promotionForm.discountPercent}
+                            onChange={(event) => updateField('discountPercent', event.target.value)}
+                            disabled={editorReadOnly}
+                            placeholder="VD: 20"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Giảm tối đa</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={promotionForm.maxAmount}
+                            onChange={(event) => updateField('maxAmount', event.target.value)}
+                            disabled={editorReadOnly}
+                            placeholder="VD: 50000"
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    <label>
+                      <span>Đơn tối thiểu</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={promotionForm.minOrderAmount}
+                        onChange={(event) => updateField('minOrderAmount', event.target.value)}
+                        disabled={editorReadOnly}
+                        placeholder="VD: 20000"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Ngày bắt đầu</span>
+                      <DatePicker
+                        selected={parseDateForPicker(promotionForm.startsAt)}
+                        onChange={(selectedDate) => updateField('startsAt', formatDateForPayload(selectedDate))}
+                        locale="vi-VN"
+                        dateFormat="dd/MM/yyyy"
+                        placeholderText="dd/mm/yyyy"
+                        showMonthDropdown
+                        showYearDropdown
+                        dropdownMode="select"
+                        className="admin-user-modal__date-input"
+                        calendarClassName="admin-user-modal__date-calendar"
+                        disabled={editorReadOnly}
+                      />
+                    </label>
+
+                    <label>
+                      <span>Ngày kết thúc</span>
+                      <DatePicker
+                        selected={parseDateForPicker(promotionForm.expiresAt)}
+                        onChange={(selectedDate) => updateField('expiresAt', formatDateForPayload(selectedDate))}
+                        locale="vi-VN"
+                        dateFormat="dd/MM/yyyy"
+                        placeholderText="dd/mm/yyyy"
+                        showMonthDropdown
+                        showYearDropdown
+                        dropdownMode="select"
+                        className="admin-user-modal__date-input"
+                        calendarClassName="admin-user-modal__date-calendar"
+                        disabled={editorReadOnly}
+                      />
+                    </label>
+
+                    <label>
+                      <span>Hiển thị</span>
+                      <select
+                        value={promotionForm.visibility}
+                        onChange={(event) => updateField('visibility', event.target.value)}
+                        disabled={editorReadOnly}
+                      >
+                        {VISIBILITY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Đối tượng</span>
+                      <select
+                        value={promotionForm.audience ?? 'customer'}
+                        onChange={(event) => updateField('audience', event.target.value)}
+                        disabled={editorReadOnly}
+                      >
+                        <option value="all">Tất cả</option>
+                        <option value="customer">Khách hàng</option>
+                        <option value="driver">Tài xế</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Giới hạn lượt dùng</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={promotionForm.usageLimit}
+                        onChange={(event) => updateField('usageLimit', event.target.value)}
+                        disabled={editorReadOnly}
+                        placeholder="VD: 100"
+                      />
+                    </label>
+
+                    <label className="is-wide">
+                      <span>Mô tả</span>
+                      <textarea
+                        value={promotionForm.description}
+                        onChange={(event) => updateField('description', event.target.value)}
+                        disabled={editorReadOnly}
+                        rows={4}
+                        placeholder="Mô tả chi tiết chương trình"
+                      />
                     </label>
                   </div>
 

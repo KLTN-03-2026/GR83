@@ -11,6 +11,14 @@ function buildQueryString(params = {}) {
     searchParams.set('keyword', String(params.keyword));
   }
 
+  if (params.visibility && params.visibility !== 'all') {
+    searchParams.set('visibility', String(params.visibility));
+  }
+
+  if (params.audience && params.audience !== 'all') {
+    searchParams.set('audience', String(params.audience));
+  }
+
   const queryString = searchParams.toString();
   return queryString ? `?${queryString}` : '';
 }

@@ -27,6 +27,14 @@ function normalizeRouteGeometry(routeGeometry) {
   return routeGeometry.map(normalizePosition).filter(Boolean);
 }
 
+function buildPointSignature(point) {
+  if (!point) {
+    return 'none';
+  }
+
+  return `${Number(point.lat).toFixed(6)},${Number(point.lng).toFixed(6)}`;
+}
+
 function createPointIcon(type) {
   const labelByType = {
     pickup: 'A',
@@ -129,9 +137,18 @@ export default function RoutePreviewMap({
   const previewMapContainerRef = useRef(null);
   const expandedMapContainerRef = useRef(null);
 
-  const pickup = normalizePosition(pickupPosition);
-  const destination = normalizePosition(destinationPosition);
-  const liveMarker = normalizePosition(liveMarkerPosition);
+  const pickup = useMemo(
+    () => normalizePosition(pickupPosition),
+    [pickupPosition?.lat, pickupPosition?.latitude, pickupPosition?.lng, pickupPosition?.longitude, pickupPosition?.lon],
+  );
+  const destination = useMemo(
+    () => normalizePosition(destinationPosition),
+    [destinationPosition?.lat, destinationPosition?.latitude, destinationPosition?.lng, destinationPosition?.longitude, destinationPosition?.lon],
+  );
+  const liveMarker = useMemo(
+    () => normalizePosition(liveMarkerPosition),
+    [liveMarkerPosition?.lat, liveMarkerPosition?.latitude, liveMarkerPosition?.lng, liveMarkerPosition?.longitude, liveMarkerPosition?.lon],
+  );
 
   const pathPoints = useMemo(() => {
     const points = normalizeRouteGeometry(routeGeometry);
@@ -153,7 +170,18 @@ export default function RoutePreviewMap({
     }
 
     return [];
-  }, [destination, liveMarker, pickup, routeGeometry]);
+  }, [destination?.lat, destination?.lng, liveMarker?.lat, liveMarker?.lng, pickup?.lat, pickup?.lng, routeGeometry]);
+
+  const mapDataSignature = useMemo(() => {
+    const pathSignature = pathPoints.map((point) => buildPointSignature(point)).join('|');
+
+    return [
+      pathSignature,
+      buildPointSignature(pickup),
+      buildPointSignature(destination),
+      buildPointSignature(liveMarker),
+    ].join('::');
+  }, [destination, liveMarker, pathPoints, pickup]);
 
   useEffect(() => {
     if (!previewMapContainerRef.current || pathPoints.length < 2) {
@@ -167,7 +195,7 @@ export default function RoutePreviewMap({
       map.remove();
       previewMapRef.current = null;
     };
-  }, [destination, liveMarker, pathPoints, pickup]);
+  }, [mapDataSignature]);
 
   useEffect(() => {
     if (!isExpanded || !expandedMapContainerRef.current || pathPoints.length < 2) {
@@ -186,7 +214,7 @@ export default function RoutePreviewMap({
       map.remove();
       expandedMapRef.current = null;
     };
-  }, [destination, isExpanded, liveMarker, pathPoints, pickup]);
+  }, [isExpanded, mapDataSignature]);
 
   useEffect(() => {
     if (!isExpanded) {

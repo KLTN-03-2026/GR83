@@ -8,6 +8,7 @@ import TripRatingDialog from '../components/ui/TripRatingDialog';
 import DriverRideRequestModal from '../components/ui/DriverRideRequestModal';
 import DriverRideRejectModal from '../components/ui/DriverRideRejectModal';
 import DriverTripActionModal from '../components/ui/DriverTripActionModal';
+import AdminDashboardSection from '../components/admin/AdminDashboardSection';
 import SectionHeading from '../components/ui/SectionHeading';
 import { createLocationRecord, useAppContext } from '../context/AppContext';
 import { DA_NANG_AIRPORT } from '../data/defaultLocations';
@@ -37,8 +38,8 @@ import { driverSignupService } from '../services/driverSignupService';
 import { promotionService } from '../services/promotionService';
 import { rideService } from '../services/rideService';
 import { connectRideEventStream, createRideSocketConnection } from '../services/rideRealtimeService';
-import { acquireBodyScrollLock } from '../utils/bodyScrollLock';
-import { subscribePromotionCatalogChanged } from '../utils/promotionEvents';
+import { acquireBodyScrollLock, resetBodyScrollLock } from '../utils/bodyScrollLock';
+import { subscribePromotionCatalogChanged, dispatchPromotionCatalogChanged } from '../utils/promotionEvents';
 import {
   DRIVER_RIDE_REQUEST_NEARBY_DISTANCE_KM,
   DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY,
@@ -98,6 +99,11 @@ const MOCKUP_ROUTE_PRESETS = {
 };
 
 const REMEMBER_LOGIN_STORAGE_KEY = 'smartride.rememberedLoginCredentials';
+const DRIVER_DISPATCH_SETTINGS_STORAGE_PREFIX = 'smartride.driver.dispatch.settings';
+const DEFAULT_DRIVER_DISPATCH_SETTINGS = {
+  checkedIn: false,
+  autoReceiveEnabled: true,
+};
 const DRIVER_TRIP_STAGE_TO_SERVER_STATUS = {
   accepted: 'DaNhanChuyen',
   'heading-pickup': 'DangDen',
@@ -106,6 +112,52 @@ const DRIVER_TRIP_STAGE_TO_SERVER_STATUS = {
   completed: 'HoanThanh',
   cancelled: 'DaHuy',
 };
+
+function getDriverDispatchSettingsStorageKey(accountId = '') {
+  const normalizedAccountId = String(accountId ?? '').trim().toLowerCase();
+  return `${DRIVER_DISPATCH_SETTINGS_STORAGE_PREFIX}.${normalizedAccountId || 'guest'}`;
+}
+
+function readDriverDispatchSettings(accountId = '') {
+  if (typeof window === 'undefined') {
+    return DEFAULT_DRIVER_DISPATCH_SETTINGS;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(getDriverDispatchSettingsStorageKey(accountId));
+
+    if (!storedValue) {
+      return DEFAULT_DRIVER_DISPATCH_SETTINGS;
+    }
+
+    const parsedValue = JSON.parse(storedValue);
+
+    return {
+      checkedIn: Boolean(parsedValue?.checkedIn),
+      autoReceiveEnabled: true,
+    };
+  } catch {
+    return DEFAULT_DRIVER_DISPATCH_SETTINGS;
+  }
+}
+
+function saveDriverDispatchSettings(accountId = '', settings = DEFAULT_DRIVER_DISPATCH_SETTINGS) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      getDriverDispatchSettingsStorageKey(accountId),
+      JSON.stringify({
+        checkedIn: Boolean(settings?.checkedIn),
+        autoReceiveEnabled: true,
+      }),
+    );
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 function normalizeLoginEmail(email) {
   return String(email ?? '').trim().toLowerCase();
@@ -249,13 +301,50 @@ function formatBookingPromoValidUntil(value) {
   return format(parsedDate, 'dd/MM/yyyy');
 }
 
+function computePromoSavings(ridePrice, promo) {
+  if (!promo || !Number.isFinite(ridePrice) || ridePrice <= 0) {
+    return null;
+  }
+
+  const discountType = String(promo.discountType ?? 'percent').toLowerCase();
+  const discountPercent = Number(promo.discountPercent ?? 0);
+  const discountAmount = Number(promo.discountAmount ?? 0);
+  const maxAmount = Number(promo.maxAmount ?? 0);
+  const minOrderAmount = Number(promo.minOrderAmount ?? 0);
+
+  if (minOrderAmount > 0 && ridePrice < minOrderAmount) {
+    return null;
+  }
+
+  let savings = 0;
+
+  if (discountType === 'fixed') {
+    savings = Math.min(discountAmount, ridePrice);
+  } else {
+    savings = Math.round((ridePrice * discountPercent) / 100);
+    if (maxAmount > 0) {
+      savings = Math.min(savings, maxAmount);
+    }
+  }
+
+  if (savings <= 0) {
+    return null;
+  }
+
+  return savings;
+}
+
 function normalizeBookingPromoCard(promotion) {
   const code = String(promotion?.code ?? promotion?.promotionCode ?? '').trim();
   const title = String(promotion?.title ?? '').trim() || `Ưu đãi ${code || String(promotion?.id ?? '').trim()}`;
   const description = String(promotion?.description ?? '').trim();
   const scope = String(promotion?.scope ?? '').trim();
+  const discountType = String(promotion?.discountType ?? 'percent').trim().toLowerCase();
   const discountPercent = Number(promotion?.discountPercent ?? 0);
+  const discountAmount = Number(promotion?.discountAmount ?? 0);
   const maxAmount = Number(promotion?.maxAmount ?? 0);
+  const minOrderAmount = Number(promotion?.minOrderAmount ?? 0);
+  const visibility = String(promotion?.visibility ?? 'public').trim().toLowerCase();
   const descriptionParts = [];
 
   if (description) {
@@ -264,14 +353,28 @@ function normalizeBookingPromoCard(promotion) {
 
   const discountParts = [];
 
-  if (Number.isFinite(discountPercent) && discountPercent > 0) {
-    discountParts.push(`Giảm ${discountPercent}%`);
+  if (discountType === 'fixed') {
+    const formattedDiscountAmount = formatBookingPromoAmount(discountAmount);
+
+    if (formattedDiscountAmount) {
+      discountParts.push(`Giảm ${formattedDiscountAmount}`);
+    }
+  } else {
+    if (Number.isFinite(discountPercent) && discountPercent > 0) {
+      discountParts.push(`Giảm ${discountPercent}%`);
+    }
+
+    const formattedMaxAmount = formatBookingPromoAmount(maxAmount);
+
+    if (formattedMaxAmount) {
+      discountParts.push(`tối đa ${formattedMaxAmount}`);
+    }
   }
 
-  const formattedMaxAmount = formatBookingPromoAmount(maxAmount);
+  const formattedMinOrderAmount = formatBookingPromoAmount(minOrderAmount);
 
-  if (formattedMaxAmount) {
-    discountParts.push(`tối đa ${formattedMaxAmount}`);
+  if (formattedMinOrderAmount) {
+    discountParts.push(`đơn từ ${formattedMinOrderAmount}`);
   }
 
   if (discountParts.length > 0) {
@@ -290,8 +393,14 @@ function normalizeBookingPromoCard(promotion) {
     badge: code || `Giảm ${Number.isFinite(discountPercent) && discountPercent > 0 ? discountPercent : 0}%`,
     validUntil: formatBookingPromoValidUntil(promotion?.expiresAt),
     status: String(promotion?.status ?? ''),
+    discountType,
     discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0,
+    discountAmount: Number.isFinite(discountAmount) ? discountAmount : 0,
     maxAmount: Number.isFinite(maxAmount) ? maxAmount : 0,
+    minOrderAmount: Number.isFinite(minOrderAmount) ? minOrderAmount : 0,
+    visibility,
+    audience: String(promotion?.audience ?? 'customer').trim(),
+    startsAt: String(promotion?.startsAt ?? '').trim(),
     scope,
   };
 }
@@ -1274,6 +1383,7 @@ export default function HomePage() {
   const [bookingRatingModalOpen, setBookingRatingModalOpen] = useState(false);
   const [driverRideRequestModalOpen, setDriverRideRequestModalOpen] = useState(false);
   const [activeDriverRideRequest, setActiveDriverRideRequest] = useState(null);
+  const [driverDispatchSettings, setDriverDispatchSettings] = useState(DEFAULT_DRIVER_DISPATCH_SETTINGS);
   const [driverRideRejectModalOpen, setDriverRideRejectModalOpen] = useState(false);
   const [driverTripActionModalOpen, setDriverTripActionModalOpen] = useState(false);
   const [driverTripActionBubbleOpen, setDriverTripActionBubbleOpen] = useState(false);
@@ -1287,7 +1397,9 @@ export default function HomePage() {
   const [bookingPromoPanelOpen, setBookingPromoPanelOpen] = useState(false);
   const [bookingPromoSearchValue, setBookingPromoSearchValue] = useState('');
   const [bookingPromoFilterValue, setBookingPromoFilterValue] = useState('');
+  const [bookingPendingManualCode, setBookingPendingManualCode] = useState('');
   const [bookingSelectedPromoId, setBookingSelectedPromoId] = useState('');
+  const [bookingHighlightedPromoId, setBookingHighlightedPromoId] = useState('');
   const [bookingPromoCards, setBookingPromoCards] = useState(() => promoCards);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
@@ -1333,6 +1445,8 @@ export default function HomePage() {
   const [miniToast, setMiniToast] = useState(null);
   const [authenticatedUser, setAuthenticatedUser] = useState(null);
   const driverRideRequestScanInFlightRef = useRef(false);
+  const bookingSuccessRef = useRef(null);
+  const dismissedCustomerTrackingBookingCodeRef = useRef('');
   const bookingTrackingModalOpenRef = useRef(false);
   const bookingRatingPromptedBookingCodeRef = useRef('');
   const bookingCompletionNotifiedBookingCodeRef = useRef('');
@@ -1342,6 +1456,8 @@ export default function HomePage() {
   const customerRideSyncInFlightRef = useRef(false);
   const driverRideSyncInFlightRef = useRef(false);
   const normalizedUserRoleCode = normalizeAppRoleCode(authenticatedUser?.roleCode);
+  const isDriverCheckedIn = Boolean(driverDispatchSettings.checkedIn);
+  const isDriverAutoReceiveEnabled = true;
   const activeDriverTripBookingCode = String(activeDriverTripAction?.bookingCode ?? '').trim();
   const activeDriverTripCustomerAccountId = String(activeDriverTripAction?.customerAccountId ?? activeDriverTripAction?.accountId ?? '').trim();
   const activeDriverTripStatusToken = String(activeDriverTripAction?.tripStatus ?? activeDriverTripAction?.status ?? '')
@@ -1451,8 +1567,67 @@ export default function HomePage() {
   }, [bookingTrackingModalOpen]);
 
   useEffect(() => {
+    bookingSuccessRef.current = bookingSuccess;
+
+    const currentBookingCode = getRideBookingCode(bookingSuccess);
+
+    if (!currentBookingCode) {
+      dismissedCustomerTrackingBookingCodeRef.current = '';
+      return;
+    }
+
+    if (dismissedCustomerTrackingBookingCodeRef.current && dismissedCustomerTrackingBookingCodeRef.current !== currentBookingCode) {
+      dismissedCustomerTrackingBookingCodeRef.current = '';
+    }
+  }, [bookingSuccess]);
+
+  // Reactively close customer modals when booking is cancelled externally (admin cancel missed via socket reconnect)
+  useEffect(() => {
+    const tripStatus = normalizeRideStatusToken(bookingSuccess?.tripStatus ?? bookingSuccess?.status ?? '');
+    const isCancelledStatus = tripStatus === 'dahuy' || tripStatus === 'cancelled';
+
+    if (!isCancelledStatus || !bookingTrackingModalOpen) {
+      return;
+    }
+
+    setBookingTrackingModalOpen(false);
+    setBookingTrackingBubbleOpen(false);
+    setBookingRatingModalOpen(false);
+    setBookingSuccess(null);
+    setActiveDriverTripAction(null);
+    setDriverTripActionModalOpen(false);
+    setDriverTripActionBubbleOpen(false);
+    setDriverRideRequestModalOpen(false);
+    setDriverRideRejectModalOpen(false);
+    setActiveDriverRideRequest(null);
+    dismissedCustomerTrackingBookingCodeRef.current = '';
+    resetBodyScrollLock();
+  }, [bookingSuccess, bookingTrackingModalOpen]);
+
+  useEffect(() => {
     activeDriverRideRequestRef.current = activeDriverRideRequest;
   }, [activeDriverRideRequest]);
+
+  useEffect(() => {
+    const driverAccountId = String(authenticatedUser?.id ?? '').trim();
+
+    if (normalizedUserRoleCode !== 'Q3' || !driverAccountId) {
+      setDriverDispatchSettings(DEFAULT_DRIVER_DISPATCH_SETTINGS);
+      return;
+    }
+
+    setDriverDispatchSettings(readDriverDispatchSettings(driverAccountId));
+  }, [authenticatedUser?.id, normalizedUserRoleCode]);
+
+  useEffect(() => {
+    const driverAccountId = String(authenticatedUser?.id ?? '').trim();
+
+    if (normalizedUserRoleCode !== 'Q3' || !driverAccountId) {
+      return;
+    }
+
+    saveDriverDispatchSettings(driverAccountId, driverDispatchSettings);
+  }, [authenticatedUser?.id, driverDispatchSettings, normalizedUserRoleCode]);
 
   useEffect(() => {
     activeDriverTripActionRef.current = activeDriverTripAction;
@@ -1618,12 +1793,19 @@ export default function HomePage() {
   ]);
 
   useEffect(() => {
-    if (normalizedUserRoleCode !== 'Q3' || isDriverFeatureLockedState(authenticatedUser)) {
+    if (normalizedUserRoleCode !== 'Q3' || isDriverFeatureLockedState(authenticatedUser) || !isDriverCheckedIn) {
+      const shouldForceCloseTripAction = normalizedUserRoleCode !== 'Q3' || isDriverFeatureLockedState(authenticatedUser);
+
       if (driverRideRequestModalOpen || driverRideRejectModalOpen || activeDriverRideRequest || driverTripActionModalOpen || activeDriverTripAction) {
         setDriverRideRequestModalOpen(false);
         setDriverRideRejectModalOpen(false);
         setActiveDriverRideRequest(null);
-        closeDriverTripActionModal();
+
+        if (shouldForceCloseTripAction) {
+          setDriverTripActionModalOpen(false);
+          setDriverTripActionBubbleOpen(false);
+          setActiveDriverTripAction(null);
+        }
       }
 
       return undefined;
@@ -1708,6 +1890,7 @@ export default function HomePage() {
     activeDriverRideRequest,
     activeDriverTripAction,
     authenticatedUser,
+    isDriverCheckedIn,
     driverRideRequestModalOpen,
     driverRideRejectModalOpen,
     driverTripActionModalOpen,
@@ -1728,7 +1911,18 @@ export default function HomePage() {
     const isOwnCustomerBooking = (candidateBooking) => {
       const bookingAccountId = String(candidateBooking?.customerAccountId ?? candidateBooking?.accountId ?? candidateBooking?.MaTK ?? '').trim();
 
-      return Boolean(bookingAccountId && bookingAccountId.toLowerCase() === accountId.toLowerCase());
+      if (bookingAccountId && bookingAccountId.toLowerCase() === accountId.toLowerCase()) {
+        return true;
+      }
+
+      const activeBookingCode = getRideBookingCode(bookingSuccessRef.current);
+      const candidateBookingCode = getRideBookingCode(candidateBooking);
+
+      if (activeBookingCode && candidateBookingCode && activeBookingCode === candidateBookingCode) {
+        return true;
+      }
+
+      return false;
     };
 
     const applyCustomerRideBooking = (nextBooking) => {
@@ -1736,9 +1930,18 @@ export default function HomePage() {
         return null;
       }
 
+      const nextBookingCode = getRideBookingCode(nextBooking);
+      const isDismissedByCustomer = Boolean(
+        nextBookingCode && dismissedCustomerTrackingBookingCodeRef.current === nextBookingCode,
+      );
+
       setBookingSuccess((currentBooking) => mergeRideBookingSnapshot(currentBooking, nextBooking));
 
-      if (!bookingTrackingModalOpenRef.current && isCustomerTrackedRideStatus(nextBooking?.tripStatus ?? nextBooking?.status)) {
+      if (
+        !bookingTrackingModalOpenRef.current &&
+        !isDismissedByCustomer &&
+        isCustomerTrackedRideStatus(nextBooking?.tripStatus ?? nextBooking?.status)
+      ) {
         setBookingTrackingModalOpen(true);
       }
 
@@ -1806,7 +2009,18 @@ export default function HomePage() {
         });
         const matchedBooking = findTrackedDriverRideBooking(response?.items);
 
-        if (!isMounted || !matchedBooking) {
+        if (!isMounted) {
+          return null;
+        }
+
+        if (!matchedBooking) {
+          // No active tracked booking — if the modal was open it means the trip ended/was cancelled.
+          // Close proactively so the driver UI doesn't stay stuck.
+          if (driverTripActionModalOpen || activeDriverTripActionRef.current) {
+            setDriverTripActionModalOpen(false);
+            setDriverTripActionBubbleOpen(false);
+            setActiveDriverTripAction(null);
+          }
           return null;
         }
 
@@ -1842,10 +2056,41 @@ export default function HomePage() {
 
       const eventType = String(event?.type ?? '').trim().toLowerCase();
 
+      // Handle admin broadcast events
+      if (eventType === 'admin.promotion.changed') {
+        dispatchPromotionCatalogChanged({ source: 'socket', action: event?.action });
+        return;
+      }
+
+      if (eventType === 'admin.account.changed') {
+        const changedAccountId = String(event?.accountId ?? '').trim();
+        const action = String(event?.action ?? '').trim();
+        const myAccountId = String(authenticatedUser?.id ?? '').trim();
+
+        if (action === 'locked' && changedAccountId && changedAccountId === myAccountId) {
+          showMiniToast('Tài khoản của bạn đã bị khóa. Đang đăng xuất...', 'error', 3000);
+          setTimeout(() => {
+            if (typeof window !== 'undefined') {
+              window.location.href = '/';
+            }
+          }, 1500);
+        }
+
+        return;
+      }
+
       if (isCustomerRole) {
+        // Check ownership using top-level fields first (admin cancel may have empty booking object)
+        const topLevelCustomerAccountId = String(event?.customerAccountId ?? '').trim();
+        const topLevelBookingCode = String(event?.bookingCode ?? '').trim();
+        const activeBookingCode = getRideBookingCode(bookingSuccessRef.current);
+        const isTopLevelMatch =
+          (topLevelCustomerAccountId && topLevelCustomerAccountId.toLowerCase() === accountId.toLowerCase()) ||
+          (topLevelBookingCode && activeBookingCode && topLevelBookingCode === activeBookingCode);
+
         const eventBooking = event?.booking ?? event?.payload ?? event;
 
-        if (!isOwnCustomerBooking(eventBooking)) {
+        if (!isTopLevelMatch && !isOwnCustomerBooking(eventBooking)) {
           return;
         }
 
@@ -1854,11 +2099,19 @@ export default function HomePage() {
           const isCancelledEvent = normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled';
 
           if (isCancelledEvent) {
-            closeBookingTrackingModal();
-            closeDriverTripActionModal();
-            closeDriverRideRequestModal();
+            setBookingTrackingModalOpen(false);
+            setBookingTrackingBubbleOpen(false);
+            setBookingRatingModalOpen(false);
+            setDriverTripActionModalOpen(false);
+            setDriverTripActionBubbleOpen(false);
+            setActiveDriverTripAction(null);
+            setDriverRideRequestModalOpen(false);
+            setDriverRideRejectModalOpen(false);
+            setActiveDriverRideRequest(null);
             setBookingSuccess(null);
-            showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
+            dismissedCustomerTrackingBookingCodeRef.current = '';
+            resetBodyScrollLock();
+            showMiniToast('Chuyến đã bị hủy.', 'error', 2600);
 
             return;
           }
@@ -1879,6 +2132,10 @@ export default function HomePage() {
         }
 
         if (eventType === 'ride.booking.created') {
+          if (!isDriverCheckedIn || !isDriverAutoReceiveEnabled) {
+            return;
+          }
+
           if (activeDriverTripActionRef.current) {
             return;
           }
@@ -1902,16 +2159,44 @@ export default function HomePage() {
 
         if (eventType === 'ride.trip.status.updated') {
           const eventBookingCode = getRideBookingCode(eventBooking);
-
-          if (!eventBookingCode) {
-            return;
-          }
-
           const normalizedTripStatus = String(event?.tripStatus ?? eventBooking?.tripStatus ?? '').trim().toLowerCase();
           const isAcceptedEvent = normalizedTripStatus === 'danhanchuyen';
           const isCancelledEvent = normalizedTripStatus === 'dahuy';
 
+          // If no booking code but it is a cancellation, still close driver modals.
+          if (!eventBookingCode) {
+            if (isCancelledEvent) {
+              setDriverTripActionModalOpen(false);
+              setDriverTripActionBubbleOpen(false);
+              setActiveDriverTripAction(null);
+              setDriverRideRequestModalOpen(false);
+              setDriverRideRejectModalOpen(false);
+              setActiveDriverRideRequest(null);
+              setBookingTrackingModalOpen(false);
+              setBookingTrackingBubbleOpen(false);
+              setBookingRatingModalOpen(false);
+              setBookingSuccess(null);
+              dismissedCustomerTrackingBookingCodeRef.current = '';
+              resetBodyScrollLock();
+              showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
+            }
+            return;
+          }
+
           if (isAcceptedEvent || isCancelledEvent) {
+            // Synchronously clear queue to prevent race condition where scan
+            // re-fetches the notification before async consumeDriverRideRequest completes.
+            const clearNotifId = Number(
+              eventBooking?.driverRequestNotificationId
+                ?? activeDriverRideRequestRef.current?.notificationId
+                ?? 0,
+            );
+            if (eventBookingCode) {
+              removeDriverRideRequest(eventBookingCode, accountId);
+            }
+            if (clearNotifId > 0) {
+              markDriverRideRequestNotificationSeen(clearNotifId, accountId);
+            }
             void consumeDriverRideRequest(eventBooking, { accountId }).catch(() => {});
 
             if (activeDriverRideRequestRef.current && getRideBookingCode(activeDriverRideRequestRef.current) === eventBookingCode) {
@@ -1924,9 +2209,18 @@ export default function HomePage() {
           if (isCancelledEvent) {
             showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
 
-            closeBookingTrackingModal();
-            closeDriverTripActionModal();
-            closeDriverRideRequestModal();
+            setBookingTrackingModalOpen(false);
+            setBookingTrackingBubbleOpen(false);
+            setBookingRatingModalOpen(false);
+            setBookingSuccess(null);
+            dismissedCustomerTrackingBookingCodeRef.current = '';
+            setDriverTripActionModalOpen(false);
+            setDriverTripActionBubbleOpen(false);
+            setActiveDriverTripAction(null);
+            setDriverRideRequestModalOpen(false);
+            setDriverRideRejectModalOpen(false);
+            setActiveDriverRideRequest(null);
+            resetBodyScrollLock();
 
             return;
           }
@@ -1971,7 +2265,39 @@ export default function HomePage() {
       driverRideSyncInFlightRef.current = false;
       disconnectRideEventStream();
     };
-  }, [authenticatedUser, normalizedUserRoleCode]);
+  }, [
+    authenticatedUser,
+    bookingTrackingModalOpen,
+    driverTripActionModalOpen,
+    isDriverAutoReceiveEnabled,
+    isDriverCheckedIn,
+    normalizedUserRoleCode,
+    showMiniToast,
+  ]);
+
+  const handleDriverCheckedInChange = (nextCheckedIn) => {
+    const normalizedNextCheckedIn = Boolean(nextCheckedIn);
+
+    setDriverDispatchSettings((currentSettings) => ({
+      ...currentSettings,
+      checkedIn: normalizedNextCheckedIn,
+      autoReceiveEnabled: true,
+    }));
+
+    if (!normalizedNextCheckedIn) {
+      setDriverRideRequestModalOpen(false);
+      setDriverRideRejectModalOpen(false);
+      setActiveDriverRideRequest(null);
+    }
+
+    showMiniToast(
+      normalizedNextCheckedIn
+        ? 'Bạn đã Check-in. Đơn mới sẽ hiển thị trên giao diện.'
+        : 'Bạn đã Check-out. Đơn mới sẽ không hiển thị.',
+      normalizedNextCheckedIn ? 'success' : 'info',
+      2400,
+    );
+  };
 
   useEffect(() => {
     const accountId = String(authenticatedUser?.id ?? '').trim();
@@ -2200,14 +2526,14 @@ export default function HomePage() {
     setRememberLogin(false);
   }, [loginModalOpen, loginEmail]);
 
-  const showMiniToast = (message, type = 'success', durationMs = 1600) => {
+  function showMiniToast(message, type = 'success', durationMs = 1600) {
     setMiniToast({
       id: Date.now(),
       message,
       type,
       durationMs,
     });
-  };
+  }
 
   const openDriverFeatureLockModal = (message = '') => {
     const normalizedMessage = String(message ?? '').trim();
@@ -2286,6 +2612,9 @@ export default function HomePage() {
       return;
     }
 
+    const manualPromotionCode = bookingPendingManualCode || bookingPromoSearchValue.trim().toUpperCase();
+    const promotionCodeToSubmit = String(selectedBookingPromotion?.code ?? '').trim() || manualPromotionCode;
+
     setBookingLoading(true);
     setBookingError('');
     setBookingSuccess(null);
@@ -2304,11 +2633,16 @@ export default function HomePage() {
             ? normalizeBookingPaymentProvider(bookingPaymentProvider)
             : '',
         promotionId: selectedBookingPromotion?.id ?? '',
-        promotionCode: selectedBookingPromotion?.code ?? '',
+        promotionCode: promotionCodeToSubmit,
         promotionTitle: selectedBookingPromotion?.title ?? '',
+        promotionDiscountType: selectedBookingPromotion?.discountType ?? 'percent',
         promotionDiscountPercent: selectedBookingPromotion?.discountPercent ?? 0,
+        promotionDiscountAmount: selectedBookingPromotion?.discountAmount ?? 0,
         promotionMaxAmount: selectedBookingPromotion?.maxAmount ?? 0,
+        promotionMinOrderAmount: selectedBookingPromotion?.minOrderAmount ?? 0,
         promotionScope: selectedBookingPromotion?.scope ?? '',
+        promotionVisibility: selectedBookingPromotion?.visibility ?? 'public',
+        promotionStartsAt: selectedBookingPromotion?.startsAt ?? '',
         promotionExpiresAt: selectedBookingPromotion?.expiresAt ?? '',
         customerName: authenticatedUser?.name ?? authenticatedUser?.fullName ?? authenticatedUser?.email ?? 'Khách hàng SmartRide',
         customerPhone: authenticatedUser?.phone ?? '',
@@ -2322,6 +2656,7 @@ export default function HomePage() {
       setBookingSuccess(nextBooking);
 
       if (nextBooking) {
+        dismissedCustomerTrackingBookingCodeRef.current = '';
         if (!nextBooking.driverRequestNotificationId) {
           enqueueDriverRideRequest(nextBooking, { accountId: authenticatedUser?.id ?? '' });
         }
@@ -2365,9 +2700,9 @@ export default function HomePage() {
   const handleBookingPromoApply = () => {
     const normalizedPromoCode = bookingPromoSearchValue.trim();
 
-    setBookingPromoFilterValue(normalizedPromoCode);
-
     if (!normalizedPromoCode) {
+      setBookingPromoFilterValue('');
+      setBookingPendingManualCode('');
       return;
     }
 
@@ -2378,7 +2713,16 @@ export default function HomePage() {
     });
 
     if (matchedPromo) {
+      setBookingPromoFilterValue('');
+      setBookingPendingManualCode('');
       setBookingSelectedPromoId(matchedPromo.id);
+      showMiniToast(`Đã áp dụng ưu đãi ${matchedPromo.code || matchedPromo.title}.`, 'success', 1800);
+    } else {
+      // Code not in public list — keep as pending manual code (may be hidden promo)
+      setBookingPromoFilterValue('');
+      setBookingSelectedPromoId('');
+      setBookingPendingManualCode(normalizedPromoCode.toUpperCase());
+      showMiniToast(`Mã ${normalizedPromoCode.toUpperCase()} sẽ được xác minh khi đặt xe.`, 'info', 2500);
     }
   };
 
@@ -2390,9 +2734,15 @@ export default function HomePage() {
     }
 
     setBookingPromoSearchValue(promoLabel);
-    setBookingPromoFilterValue(promoLabel);
+    setBookingPromoFilterValue('');
+    setBookingPendingManualCode('');
+    setBookingHighlightedPromoId('');
     setBookingSelectedPromoId(String(card?.id ?? ''));
     showMiniToast(`Đã chọn ưu đãi ${promoLabel}.`, 'success', 1800);
+  };
+
+  const handleHighlightPromoCard = (cardId) => {
+    setBookingHighlightedPromoId((prev) => (prev === cardId ? '' : cardId));
   };
 
   const handleVehicleTabChange = (vehicleId) => {
@@ -2420,6 +2770,7 @@ export default function HomePage() {
           title: item.title,
           subtitle: item.note || item.driver || '',
           price: item.priceFormatted,
+          priceRaw: Number(item.price ?? 0),
           icon: activeVehicle === 'motorbike' ? motorbikeIcon : useBusIcon ? busIcon : carIcon,
         };
       });
@@ -2489,7 +2840,7 @@ export default function HomePage() {
     const refreshBookingPromotions = async () => {
       try {
         const response = await promotionService.listPromotions(
-          { status: 'active' },
+          { status: 'active', visibility: 'public', audience: 'customer' },
           { signal: controller.signal },
         );
         const livePromotions = extractPromotionList(response).map(normalizeBookingPromoCard);
@@ -2547,7 +2898,7 @@ export default function HomePage() {
     return bookingPromoCards.find((card) => card.id === bookingSelectedPromoId) ?? null;
   }, [bookingPromoCards, bookingSelectedPromoId]);
   const visiblePromoCards = useMemo(() => {
-    const normalizedSearch = normalizePromoSearchValue(bookingPromoFilterValue);
+    const normalizedSearch = normalizePromoSearchValue(bookingPromoSearchValue);
     const promoSource = Array.isArray(bookingPromoCards) ? bookingPromoCards : [];
 
     if (!normalizedSearch) {
@@ -2560,7 +2911,7 @@ export default function HomePage() {
       );
       return searchableText.includes(normalizedSearch);
     });
-  }, [bookingPromoCards, bookingPromoFilterValue]);
+  }, [bookingPromoCards, bookingPromoSearchValue]);
 
   const activeRoutePreset = MOCKUP_ROUTE_PRESETS[activeVehicle] ?? MOCKUP_ROUTE_PRESETS.motorbike;
   const mockupPickupLabel =
@@ -3031,6 +3382,8 @@ export default function HomePage() {
     setBookingPromoPanelOpen(false);
     setBookingPromoSearchValue('');
     setBookingPromoFilterValue('');
+    setBookingPendingManualCode('');
+    setBookingHighlightedPromoId('');
     setBookingSelectedPromoId('');
     setPreviewModalOpen(false);
   };
@@ -3061,12 +3414,18 @@ export default function HomePage() {
       return;
     }
 
+    if (currentBookingCode) {
+      dismissedCustomerTrackingBookingCodeRef.current = currentBookingCode;
+    }
+
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(false);
   };
 
   const closeCompletedBookingFlow = (bookingCode = '') => {
     const normalizedBookingCode = String(bookingCode ?? bookingSuccess?.bookingCode ?? '').trim();
+
+    dismissedCustomerTrackingBookingCodeRef.current = '';
 
     if (normalizedBookingCode) {
       bookingRatingPromptedBookingCodeRef.current = normalizedBookingCode;
@@ -3102,6 +3461,12 @@ export default function HomePage() {
     if (!bookingSuccess) {
       setBookingTrackingBubbleOpen(false);
       return;
+    }
+
+    const currentBookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
+
+    if (currentBookingCode) {
+      dismissedCustomerTrackingBookingCodeRef.current = '';
     }
 
     setBookingTrackingBubbleOpen(false);
@@ -6142,6 +6507,10 @@ export default function HomePage() {
         onChangePassword={openChangePasswordModal}
         onLogout={handleLogout}
         onLogin={openLoginModal}
+        onNotify={showMiniToast}
+        driverCheckedIn={isDriverCheckedIn}
+        driverAutoReceiveEnabled={isDriverAutoReceiveEnabled}
+        onDriverCheckedInChange={handleDriverCheckedInChange}
       />
 
       <main>
@@ -6333,6 +6702,8 @@ export default function HomePage() {
             </section>
           </div>
         </section>
+
+        {normalizedUserRoleCode === 'Q1' ? <AdminDashboardSection /> : null}
 
         <section className="content-section">
           <div className="container">
@@ -8579,7 +8950,12 @@ export default function HomePage() {
                               <input
                                 type="text"
                                 value={bookingPromoSearchValue}
-                                onChange={(event) => setBookingPromoSearchValue(event.target.value)}
+                                onChange={(event) => {
+                                  setBookingPromoSearchValue(event.target.value);
+                                  if (bookingPendingManualCode && event.target.value.trim().toUpperCase() !== bookingPendingManualCode) {
+                                    setBookingPendingManualCode('');
+                                  }
+                                }}
                                 placeholder="Nhập mã giảm giá"
                               />
                             </label>
@@ -8589,29 +8965,73 @@ export default function HomePage() {
                             </button>
                           </div>
 
+                          {bookingPendingManualCode ? (
+                            <div className="booking-promo-panel__manual-code-notice">
+                              <span>🏷️ Mã <strong>{bookingPendingManualCode}</strong> sẽ được xác minh khi đặt xe.</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBookingPendingManualCode('');
+                                  setBookingPromoSearchValue('');
+                                }}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : null}
+
                           <div className="booking-promo-panel__list">
                             {visiblePromoCards.length > 0 ? (
-                              visiblePromoCards.map((card) => (
-                                <article
-                                  className={`booking-promo-panel__item${bookingSelectedPromoId === card.id ? ' is-active' : ''}`}
-                                  key={card.id}
-                                >
-                                  <div className="booking-promo-panel__coupon">
-                                    <strong>{card.badge}</strong>
-                                    <span>tối đa cho chuyến đi</span>
-                                  </div>
+                              visiblePromoCards.map((card) => {
+                                const isSelected = bookingSelectedPromoId === card.id;
+                                const isHighlighted = bookingHighlightedPromoId === card.id;
+                                const selectedRideRaw = displayedRideOptions.find((r) => r.id === previewSelectedRideId)?.priceRaw ?? 0;
+                                const savings = isHighlighted ? computePromoSavings(selectedRideRaw, card) : null;
 
-                                  <div className="booking-promo-panel__body">
-                                    <strong>{card.title}</strong>
-                                    <p>{card.description}</p>
-                                    <span>HSD: {card.validUntil ?? '--'}</span>
-                                  </div>
+                                return (
+                                  <article
+                                    className={`booking-promo-panel__item${isSelected ? ' is-active' : ''}${isHighlighted ? ' is-highlighted' : ''}`}
+                                    key={card.id}
+                                    onClick={() => handleHighlightPromoCard(card.id)}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    <div className="booking-promo-panel__coupon">
+                                      <strong>{card.badge}</strong>
+                                      <span>tối đa cho chuyến đi</span>
+                                    </div>
 
-                                  <button className="booking-promo-panel__use" type="button" onClick={() => handleUsePromoCard(card)}>
-                                    Dùng ngay
-                                  </button>
-                                </article>
-                              ))
+                                    <div className="booking-promo-panel__body">
+                                      <strong>{card.title}</strong>
+                                      <p>{card.description}</p>
+                                      <span>HSD: {card.validUntil ?? '--'}</span>
+                                      {isHighlighted && savings != null ? (
+                                        <span className="booking-promo-panel__savings">
+                                          🎉 Tiết kiệm {savings.toLocaleString('vi-VN')}đ cho chuyến này
+                                        </span>
+                                      ) : isHighlighted && selectedRideRaw > 0 ? (
+                                        <span className="booking-promo-panel__savings booking-promo-panel__savings--none">
+                                          ⚠️ Không đủ điều kiện áp dụng cho chuyến này
+                                        </span>
+                                      ) : isHighlighted ? (
+                                        <span className="booking-promo-panel__savings booking-promo-panel__savings--hint">
+                                          Chọn chuyến đi để xem mức tiết kiệm
+                                        </span>
+                                      ) : null}
+                                    </div>
+
+                                    <button
+                                      className="booking-promo-panel__use"
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUsePromoCard(card);
+                                      }}
+                                    >
+                                      Dùng ngay
+                                    </button>
+                                  </article>
+                                );
+                              })
                             ) : (
                               <p className="booking-promo-panel__empty">Không tìm thấy ưu đãi phù hợp.</p>
                             )}

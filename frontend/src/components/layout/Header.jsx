@@ -6,9 +6,17 @@ import AdminNotificationManagementModal from '../admin/AdminNotificationManageme
 import AdminUserManagementModal from '../admin/AdminUserManagementModal';
 import AdminDriverManagementModal from '../admin/AdminDriverManagementModal';
 import AdminPromotionManagementModal from '../admin/AdminPromotionManagementModal';
+import AdminTripManagementModal from '../admin/AdminTripManagementModal';
+import AdminVehicleChangeRequestModal from '../admin/AdminVehicleChangeRequestModal';
 import TripHistoryModal from '../ui/TripHistoryModal';
 import DriverReviewModal from '../ui/DriverReviewModal';
+import DriverWalletModal from '../ui/DriverWalletModal';
+import DriverPersonalInfoModal from '../ui/DriverPersonalInfoModal';
+import DriverIncomeReportModal from '../ui/DriverIncomeReportModal';
+import DriverRideReceiveSettingsModal from '../ui/DriverRideReceiveSettingsModal';
 import { notificationService } from '../../services/notificationService';
+import { driverVehicleRequestService } from '../../services/driverVehicleRequestService';
+import { connectRideEventStream } from '../../services/rideRealtimeService';
 
 const ROLE_LABELS = {
   Q1: 'Quản trị viên',
@@ -23,17 +31,17 @@ const ROLE_MENUS = {
         [
           { id: 'admin-users', label: 'Quản lý người dùng' },
           { id: 'admin-payments', label: 'Quản lý thanh toán' },
+          { id: 'admin-notifications', label: 'Quản lý thông báo' },
+        ],
+        [
+          { id: 'admin-drivers', label: 'Quản lý tài xế' },
+          { id: 'admin-complaints', label: 'Xử lý khiếu nại' },
           { id: 'admin-promotions', label: 'Quản lý ưu đãi' },
         ],
         [
-          { id: 'admin-notifications', label: 'Quản lý thông báo' },
-          { id: 'admin-drivers', label: 'Quản lý tài xế' },
-          { id: 'admin-complaints', label: 'Xử lý khiếu nại' },
-        ],
-        [
-          { id: 'admin-revenue', label: 'Xuất báo cáo doanh thu' },
           { id: 'admin-trips', label: 'Quản lý chuyến đi' },
           { id: 'admin-driver-violations', label: 'Xử lý vi phạm tài xế' },
+          { id: 'admin-revenue', label: 'Xuất báo cáo doanh thu' },
         ],
       ],
     },
@@ -50,12 +58,12 @@ const ROLE_MENUS = {
       columns: 2,
       rows: [
         [
-          { id: 'driver-income', label: 'Quản lý thu nhập' },
-          { id: 'driver-support', label: 'Hỗ trợ và an toàn' },
+          { id: 'driver-wallet', label: 'Ví' },
+          { id: 'driver-dispatch-settings', label: 'Cài đặt nhận chuyến' },
         ],
         [
           { id: 'driver-reviews', label: 'Xem đánh giá' },
-          { id: 'driver-settings', label: 'Cài đặt nhận chuyến' },
+          { id: 'driver-income-report', label: 'Quản lý thu nhập' },
         ],
         [{ id: 'driver-trips', label: 'Quản lý chuyến đi' }, null],
       ],
@@ -285,6 +293,10 @@ export default function Header({
   onChangePassword,
   onLogout,
   onLogin,
+  onNotify,
+  driverCheckedIn = false,
+  driverAutoReceiveEnabled = true,
+  onDriverCheckedInChange,
 }) {
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -293,6 +305,19 @@ export default function Header({
   const [adminPaymentModalOpen, setAdminPaymentModalOpen] = useState(false);
   const [adminNotificationModalOpen, setAdminNotificationModalOpen] = useState(false);
   const [adminPromotionModalOpen, setAdminPromotionModalOpen] = useState(false);
+  const [adminTripModalOpen, setAdminTripModalOpen] = useState(false);
+  const [driverWalletModalOpen, setDriverWalletModalOpen] = useState(false);
+  const [driverProfileModalOpen, setDriverProfileModalOpen] = useState(false);
+  const [driverIncomeModalOpen, setDriverIncomeModalOpen] = useState(false);
+  const [driverDispatchModalOpen, setDriverDispatchModalOpen] = useState(false);
+  const [driverResolutionPopup, setDriverResolutionPopup] = useState(null);
+  const [pendingVehicleRequests, setPendingVehicleRequests] = useState([]);
+  const [adminVehicleModalOpen, setAdminVehicleModalOpen] = useState(false);
+  const [adminVehicleViewMode, setAdminVehicleViewMode] = useState('summary');
+  const [adminVehicleDetail, setAdminVehicleDetail] = useState(null);
+  const [adminVehicleLoading, setAdminVehicleLoading] = useState(false);
+  const [adminVehicleActionLoading, setAdminVehicleActionLoading] = useState(false);
+  const [adminVehicleRejectNote, setAdminVehicleRejectNote] = useState('');
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationItems, setNotificationItems] = useState([]);
   const [notificationLoading, setNotificationLoading] = useState(false);
@@ -361,6 +386,38 @@ export default function Header({
       setAdminPromotionModalOpen(false);
     }
 
+    if (normalizedRoleCode !== 'Q1' && adminTripModalOpen) {
+      setAdminTripModalOpen(false);
+    }
+
+    if (normalizedRoleCode !== 'Q3' && driverWalletModalOpen) {
+      setDriverWalletModalOpen(false);
+    }
+
+    if (normalizedRoleCode !== 'Q3' && driverProfileModalOpen) {
+      setDriverProfileModalOpen(false);
+    }
+
+    if (normalizedRoleCode !== 'Q3' && driverIncomeModalOpen) {
+      setDriverIncomeModalOpen(false);
+    }
+
+    if (normalizedRoleCode !== 'Q3' && driverDispatchModalOpen) {
+      setDriverDispatchModalOpen(false);
+    }
+
+    if (normalizedRoleCode !== 'Q3' && driverResolutionPopup) {
+      setDriverResolutionPopup(null);
+    }
+
+    if (normalizedRoleCode !== 'Q1' && adminVehicleModalOpen) {
+      setAdminVehicleModalOpen(false);
+      setAdminVehicleViewMode('summary');
+      setAdminVehicleDetail(null);
+      setAdminVehicleRejectNote('');
+      setPendingVehicleRequests([]);
+    }
+
     if (!canViewNotifications && notificationMenuOpen) {
       setNotificationMenuOpen(false);
     }
@@ -373,6 +430,12 @@ export default function Header({
     adminUserModalOpen,
     activeTripHistoryItemId,
     canViewNotifications,
+    driverProfileModalOpen,
+    driverIncomeModalOpen,
+    driverDispatchModalOpen,
+    driverResolutionPopup,
+    driverWalletModalOpen,
+    adminVehicleModalOpen,
     notificationMenuOpen,
     normalizedRoleCode,
     selectedRoleItemId,
@@ -388,6 +451,11 @@ export default function Header({
       !adminPaymentModalOpen &&
       !adminNotificationModalOpen &&
       !adminPromotionModalOpen &&
+      !driverWalletModalOpen &&
+      !driverProfileModalOpen &&
+      !driverIncomeModalOpen &&
+      !driverDispatchModalOpen &&
+      !adminVehicleModalOpen &&
       !adminUserModalOpen
     ) {
       return undefined;
@@ -418,6 +486,12 @@ export default function Header({
       setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       setAdminPromotionModalOpen(false);
+      setDriverWalletModalOpen(false);
+      setDriverProfileModalOpen(false);
+      setDriverIncomeModalOpen(false);
+      setDriverDispatchModalOpen(false);
+      setAdminVehicleModalOpen(false);
+      setDriverResolutionPopup(null);
       setActiveTripHistoryItemId('');
       setRoleMenuOpen(false);
       setAccountMenuOpen(false);
@@ -431,7 +505,22 @@ export default function Header({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [accountMenuOpen, roleMenuOpen, notificationMenuOpen, activeRolePopupItem, adminDriverModalOpen, adminNotificationModalOpen, adminPaymentModalOpen, adminPromotionModalOpen, adminUserModalOpen]);
+  }, [
+    accountMenuOpen,
+    roleMenuOpen,
+    notificationMenuOpen,
+    activeRolePopupItem,
+    adminDriverModalOpen,
+    adminNotificationModalOpen,
+    adminPaymentModalOpen,
+    adminPromotionModalOpen,
+    driverWalletModalOpen,
+    driverProfileModalOpen,
+    driverIncomeModalOpen,
+    driverDispatchModalOpen,
+    adminVehicleModalOpen,
+    adminUserModalOpen,
+  ]);
 
   useEffect(() => {
     if (!canViewNotifications) {
@@ -513,6 +602,139 @@ export default function Header({
       abortController.abort();
     };
   }, [canViewNotifications, notificationMenuOpen, notificationRecipient, notificationStorageKey]);
+
+  useEffect(() => {
+    if (!isAuthenticated || normalizedRoleCode !== 'Q1') {
+      setPendingVehicleRequests([]);
+      return undefined;
+    }
+
+    let isActive = true;
+
+    const loadPendingRequests = async () => {
+      try {
+        const response = await driverVehicleRequestService.listPendingRequests();
+
+        if (!isActive) {
+          return;
+        }
+
+        const nextRequests = Array.isArray(response?.requests) ? response.requests : [];
+        setPendingVehicleRequests(nextRequests);
+
+        if (nextRequests.length > 0) {
+          setAdminVehicleModalOpen(true);
+        }
+
+        if (nextRequests.length === 0) {
+          setAdminVehicleModalOpen(false);
+          setAdminVehicleViewMode('summary');
+          setAdminVehicleDetail(null);
+          setAdminVehicleRejectNote('');
+        }
+      } catch {
+        if (!isActive) {
+          return;
+        }
+
+        setPendingVehicleRequests([]);
+      }
+    };
+
+    void loadPendingRequests();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isAuthenticated, normalizedRoleCode]);
+
+  useEffect(() => {
+    if (!isAuthenticated || normalizedRoleCode !== 'Q3' || !accountId) {
+      setDriverResolutionPopup(null);
+      return undefined;
+    }
+
+    let isActive = true;
+
+    const loadDriverResolutions = async () => {
+      try {
+        const response = await driverVehicleRequestService.listDriverResolutions(accountId, { unseenOnly: true });
+
+        if (!isActive) {
+          return;
+        }
+
+        const nextRequests = Array.isArray(response?.requests) ? response.requests : [];
+
+        if (nextRequests.length > 0) {
+          setDriverResolutionPopup(nextRequests[0]);
+        }
+      } catch {
+        // Skip transient initialization errors.
+      }
+    };
+
+    void loadDriverResolutions();
+
+    return () => {
+      isActive = false;
+    };
+  }, [accountId, isAuthenticated, normalizedRoleCode]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !accountId || (normalizedRoleCode !== 'Q1' && normalizedRoleCode !== 'Q3')) {
+      return undefined;
+    }
+
+    const disconnectRideEventStream = connectRideEventStream({
+      accountId,
+      roleCode: normalizedRoleCode,
+      onEvent: (eventPayload) => {
+        const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
+
+        if (eventType !== 'admin.driver.vehicle-change') {
+          return;
+        }
+
+        const request = eventPayload?.request ?? null;
+        const action = String(eventPayload?.action ?? '').trim().toLowerCase();
+
+        if (normalizedRoleCode === 'Q1') {
+          void reloadPendingVehicleRequests();
+
+          if (action === 'requested') {
+            setAdminVehicleModalOpen(true);
+            onNotify?.('Có yêu cầu thay đổi thông tin xe mới cần xử lý.', 'info', 2600);
+          }
+
+          return;
+        }
+
+        if (normalizedRoleCode === 'Q3' && action === 'resolved') {
+          const eventDriverId = String(request?.driverId ?? request?.MaTK ?? '').trim();
+
+          if (!eventDriverId || eventDriverId !== String(accountId).trim()) {
+            return;
+          }
+
+          setDriverResolutionPopup(request);
+
+          const isApproved = String(request?.status ?? '').trim().toLowerCase() === 'approved';
+          onNotify?.(
+            isApproved
+              ? 'Yêu cầu thay đổi thông tin xe của bạn đã được duyệt.'
+              : 'Yêu cầu thay đổi thông tin xe của bạn đã bị từ chối.',
+            isApproved ? 'success' : 'error',
+            2800,
+          );
+        }
+      },
+    });
+
+    return () => {
+      disconnectRideEventStream();
+    };
+  }, [accountId, isAuthenticated, normalizedRoleCode, onNotify]);
 
   const markNotificationAsRead = (notificationId) => {
     const normalizedNotificationId = Number(notificationId);
@@ -650,7 +872,76 @@ export default function Header({
       setAdminDriverModalOpen(false);
       setAdminPaymentModalOpen(false);
       setAdminPromotionModalOpen(false);
+      setAdminTripModalOpen(false);
       setAdminNotificationModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q1' && item.id === 'admin-trips') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminTripModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q3' && item.id === 'driver-wallet') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setDriverProfileModalOpen(false);
+      setDriverIncomeModalOpen(false);
+      setActiveTripHistoryItemId('');
+      setDriverWalletModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q3' && item.id === 'driver-income-report') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setDriverProfileModalOpen(false);
+      setDriverWalletModalOpen(false);
+      setDriverDispatchModalOpen(false);
+      setActiveTripHistoryItemId('');
+      setDriverIncomeModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q3' && item.id === 'driver-dispatch-settings') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setDriverProfileModalOpen(false);
+      setDriverWalletModalOpen(false);
+      setDriverIncomeModalOpen(false);
+      setActiveTripHistoryItemId('');
+      setDriverDispatchModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q3' && item.id === 'driver-profile') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setDriverWalletModalOpen(false);
+      setActiveTripHistoryItemId('');
+      setDriverProfileModalOpen(true);
       return;
     }
 
@@ -692,6 +983,10 @@ export default function Header({
     setAdminPaymentModalOpen(false);
     setAdminNotificationModalOpen(false);
     setAdminPromotionModalOpen(false);
+    setDriverWalletModalOpen(false);
+    setDriverProfileModalOpen(false);
+    setDriverIncomeModalOpen(false);
+    setDriverDispatchModalOpen(false);
     setActiveTripHistoryItemId('');
     setActiveRolePopupItem(buildRoleFeaturePopup(item, normalizedRoleCode, activeRoleLabel));
   };
@@ -742,6 +1037,99 @@ export default function Header({
     }
 
     toggleNotificationMenu();
+  };
+
+  const activeAdminVehicleRequest = pendingVehicleRequests[0] ?? null;
+
+  const fetchAdminRequestDetail = async () => {
+    if (!activeAdminVehicleRequest?.id) {
+      return;
+    }
+
+    setAdminVehicleLoading(true);
+
+    try {
+      const response = await driverVehicleRequestService.getRequestDetail(activeAdminVehicleRequest.id);
+      setAdminVehicleDetail(response ?? null);
+    } catch (error) {
+      onNotify?.(error?.message || 'Không thể tải chi tiết hồ sơ tài xế.', 'error', 2800);
+    } finally {
+      setAdminVehicleLoading(false);
+    }
+  };
+
+  const reloadPendingVehicleRequests = async () => {
+    try {
+      const response = await driverVehicleRequestService.listPendingRequests();
+      const nextRequests = Array.isArray(response?.requests) ? response.requests : [];
+      setPendingVehicleRequests(nextRequests);
+
+      if (nextRequests.length === 0) {
+        setAdminVehicleModalOpen(false);
+        setAdminVehicleViewMode('summary');
+        setAdminVehicleDetail(null);
+        setAdminVehicleRejectNote('');
+      }
+    } catch {
+      setPendingVehicleRequests([]);
+      setAdminVehicleModalOpen(false);
+    }
+  };
+
+  const handleApproveVehicleRequest = async () => {
+    if (!activeAdminVehicleRequest?.id || adminVehicleActionLoading) {
+      return;
+    }
+
+    setAdminVehicleActionLoading(true);
+
+    try {
+      const response = await driverVehicleRequestService.approveRequest(activeAdminVehicleRequest.id, {
+        approvedByAccountId: accountId,
+      });
+      onNotify?.(response?.message || 'Đã đồng ý yêu cầu thay đổi thông tin xe.', 'success', 2200);
+      await reloadPendingVehicleRequests();
+    } catch (error) {
+      onNotify?.(error?.message || 'Không thể duyệt yêu cầu lúc này.', 'error', 2800);
+    } finally {
+      setAdminVehicleActionLoading(false);
+    }
+  };
+
+  const handleRejectVehicleRequest = async () => {
+    if (!activeAdminVehicleRequest?.id || adminVehicleActionLoading) {
+      return;
+    }
+
+    setAdminVehicleActionLoading(true);
+
+    try {
+      const response = await driverVehicleRequestService.rejectRequest(activeAdminVehicleRequest.id, {
+        approvedByAccountId: accountId,
+        note: adminVehicleRejectNote,
+      });
+      onNotify?.(response?.message || 'Đã từ chối yêu cầu thay đổi thông tin xe.', 'success', 2200);
+      await reloadPendingVehicleRequests();
+    } catch (error) {
+      onNotify?.(error?.message || 'Không thể từ chối yêu cầu lúc này.', 'error', 2800);
+    } finally {
+      setAdminVehicleActionLoading(false);
+    }
+  };
+
+  const handleAcknowledgeDriverResolution = async () => {
+    if (!driverResolutionPopup?.id || !accountId) {
+      setDriverResolutionPopup(null);
+      return;
+    }
+
+    try {
+      await driverVehicleRequestService.acknowledgeResolution(accountId, driverResolutionPopup.id);
+    } catch {
+      // Skip ack errors to avoid blocking UI close.
+    } finally {
+      setDriverResolutionPopup(null);
+    }
   };
 
   return (
@@ -907,7 +1295,25 @@ export default function Header({
 
                 {isAuthenticated ? (
                   <>
-                    <button className="account-menu__item" type="button" role="menuitem" onClick={() => runAccountAction(onProfile)}>
+                    <button
+                      className="account-menu__item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() =>
+                        runAccountAction(() => {
+                          if (normalizedRoleCode === 'Q3') {
+                            setActiveRolePopupItem(null);
+                            setActiveTripHistoryItemId('');
+                            setDriverIncomeModalOpen(false);
+                            setDriverWalletModalOpen(false);
+                            setDriverProfileModalOpen(true);
+                            return;
+                          }
+
+                          onProfile?.();
+                        })
+                      }
+                    >
                       Thông tin cá nhân
                     </button>
                     <button className="account-menu__item" type="button" role="menuitem" onClick={() => runAccountAction(onChangePassword)}>
@@ -1028,6 +1434,109 @@ export default function Header({
         open={adminPromotionModalOpen}
         onClose={() => setAdminPromotionModalOpen(false)}
       />
+
+      <AdminTripManagementModal
+        open={adminTripModalOpen}
+        onClose={() => setAdminTripModalOpen(false)}
+        accountId={accountId}
+      />
+
+      <DriverWalletModal
+        open={driverWalletModalOpen}
+        onClose={() => setDriverWalletModalOpen(false)}
+        driverId={accountId}
+        driverName={accountDisplayName}
+        onNotify={onNotify}
+        onOpenIncomeReport={() => {
+          setDriverWalletModalOpen(false);
+          setDriverIncomeModalOpen(true);
+        }}
+      />
+
+      <DriverPersonalInfoModal
+        open={driverProfileModalOpen}
+        onClose={() => setDriverProfileModalOpen(false)}
+        driverId={accountId}
+        onNotify={onNotify}
+        onRequestSubmitted={() => {
+          if (normalizedRoleCode === 'Q1') {
+            setAdminVehicleModalOpen(true);
+          }
+        }}
+      />
+
+      <DriverIncomeReportModal
+        open={driverIncomeModalOpen}
+        onClose={() => setDriverIncomeModalOpen(false)}
+        accountId={accountId}
+        accountIdentifier={accountIdentifier}
+        onNotify={onNotify}
+      />
+
+      <DriverRideReceiveSettingsModal
+        open={driverDispatchModalOpen}
+        onClose={() => setDriverDispatchModalOpen(false)}
+        checkedIn={driverCheckedIn}
+        autoReceiveEnabled={driverAutoReceiveEnabled}
+        onCheckedInChange={(nextValue) => {
+          onDriverCheckedInChange?.(nextValue);
+        }}
+      />
+
+      <AdminVehicleChangeRequestModal
+        open={adminVehicleModalOpen && normalizedRoleCode === 'Q1'}
+        requestItem={activeAdminVehicleRequest}
+        requestDetail={adminVehicleDetail}
+        loading={adminVehicleLoading}
+        actionLoading={adminVehicleActionLoading}
+        viewMode={adminVehicleViewMode}
+        rejectNote={adminVehicleRejectNote}
+        onRejectNoteChange={setAdminVehicleRejectNote}
+        onClose={() => setAdminVehicleModalOpen(false)}
+        onViewProfile={() => {
+          setAdminVehicleViewMode('profile');
+          void fetchAdminRequestDetail();
+        }}
+        onBackToSummary={() => setAdminVehicleViewMode('summary')}
+        onApprove={() => {
+          void handleApproveVehicleRequest();
+        }}
+        onReject={() => {
+          void handleRejectVehicleRequest();
+        }}
+      />
+
+      {driverResolutionPopup && normalizedRoleCode === 'Q3'
+        ? createPortal(
+            <div className="role-feature-modal" role="dialog" aria-modal="true" aria-label="Kết quả yêu cầu thay đổi thông tin xe">
+              <div className="role-feature-modal__backdrop" onClick={handleAcknowledgeDriverResolution} aria-hidden="true" />
+
+              <div className="role-feature-modal__window role-feature-modal__window--driver-resolution">
+                <h3 className="role-feature-modal__title">Thông báo từ Quản trị viên</h3>
+                <p className="role-feature-modal__summary">
+                  {driverResolutionPopup.status === 'approved'
+                    ? 'Yêu cầu thay đổi thông tin xe của bạn đã được chấp nhận.'
+                    : 'Yêu cầu thay đổi thông tin xe của bạn đã bị từ chối.'}
+                </p>
+
+                {driverResolutionPopup.status !== 'approved' && driverResolutionPopup.rejectReason ? (
+                  <p className="role-feature-modal__auth-note">Lý do: {driverResolutionPopup.rejectReason}</p>
+                ) : null}
+
+                <div className="role-feature-modal__actions">
+                  <button
+                    className="role-feature-modal__action role-feature-modal__action--primary"
+                    type="button"
+                    onClick={handleAcknowledgeDriverResolution}
+                  >
+                    Đã hiểu
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </header>
   );
 }

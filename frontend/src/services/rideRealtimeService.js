@@ -63,7 +63,15 @@ export function createRideSocketConnection({ accountId = '', roleCode = '', onEv
   });
 
   socket.onAny((eventName, payload) => {
-    if (!String(eventName ?? '').startsWith('ride.')) {
+    const name = String(eventName ?? '');
+
+    if (name.startsWith('admin.')) {
+      // admin.event carries { type, ...data } — forward the inner payload directly
+      onEvent?.(payload ?? {});
+      return;
+    }
+
+    if (!name.startsWith('ride.')) {
       return;
     }
 

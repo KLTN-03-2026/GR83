@@ -28,3 +28,12 @@ export function acquireBodyScrollLock() {
     }
   };
 }
+
+  export function resetBodyScrollLock() {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    lockCount = 0;
+    document.body.style.overflow = previousOverflow || '';
+  }

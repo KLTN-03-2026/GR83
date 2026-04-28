@@ -16,6 +16,8 @@ const phoneNumberPattern = /^\d{8,15}$/;
 const cccdPattern = /^\d{12}$/;
 const vehicleLicensePlatePattern = /^\d{2}[A-Z]{1,2}-\d{3,5}(?:\.\d{2})?$/i;
 const emergencyContactSeparator = '||';
+const driverWalletTransactionTypes = new Set(['topup', 'transfer', 'receive', 'adjustment']);
+const vehicleChangeRequestStatuses = new Set(['pending', 'approved', 'rejected']);
 let smtpTransporter = null;
 
 function createHttpError(statusCode, message, details = null) {
@@ -35,6 +37,83 @@ function isSqlUniqueConstraintError(error) {
 
 function normalizeText(value) {
   return String(value ?? '').trim();
+}
+
+function normalizeNullableText(value) {
+  const normalizedValue = normalizeText(value);
+  return normalizedValue || null;
+}
+
+function normalizeCurrencyAmount(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return 0;
+  }
+
+  return Math.round(numericValue);
+}
+
+function normalizeWalletTransactionType(value, fallbackValue = 'adjustment') {
+  const normalizedValue = normalizeText(value).toLowerCase();
+
+  if (driverWalletTransactionTypes.has(normalizedValue)) {
+    return normalizedValue;
+  }
+
+  return fallbackValue;
+}
+
+function normalizeVehicleChangeRequestStatus(value, fallbackValue = 'pending') {
+  const normalizedValue = normalizeText(value).toLowerCase();
+
+  if (vehicleChangeRequestStatuses.has(normalizedValue)) {
+    return normalizedValue;
+  }
+
+  return fallbackValue;
+}
+
+function mapWalletTransactionRow(row = {}) {
+  const amount = normalizeCurrencyAmount(row.SoTien);
+
+  return {
+    id: Number(row.MaGD ?? 0) || 0,
+    driverId: normalizeText(row.MaTK),
+    type: normalizeWalletTransactionType(row.LoaiGiaoDich),
+    amount,
+    amountFormatted: `${amount >= 0 ? '+' : '-'}${new Intl.NumberFormat('vi-VN').format(Math.abs(amount))} đ`,
+    balanceBefore: normalizeCurrencyAmount(row.SoDuTruoc),
+    balanceAfter: normalizeCurrencyAmount(row.SoDuSau),
+    description: normalizeText(row.MoTa),
+    recipientPhone: normalizeText(row.SoDTNguoiNhan),
+    senderPhone: normalizeText(row.SoDTNguoiGui),
+    referenceCode: normalizeText(row.MaThamChieu),
+    status: normalizeText(row.TrangThai).toLowerCase() || 'completed',
+    createdAt: row.NgayTao ?? null,
+  };
+}
+
+function mapVehicleChangeRequestRow(row = {}) {
+  return {
+    id: Number(row.MaYC ?? 0) || 0,
+    driverId: normalizeText(row.MaTK),
+    oldVehicleName: normalizeText(row.LoaiXeCu),
+    oldLicensePlate: normalizeText(row.BienSoCu),
+    newVehicleName: normalizeText(row.LoaiXeMoi),
+    newLicensePlate: normalizeText(row.BienSoMoi),
+    status: normalizeVehicleChangeRequestStatus(row.TrangThai),
+    rejectReason: normalizeText(row.GhiChuTuChoi),
+    approvedByAccountId: normalizeText(row.NguoiDuyetMaTK),
+    driverSeen: Boolean(row.TaiXeDaXem),
+    createdAt: row.NgayTao ?? null,
+    updatedAt: row.NgayCapNhat ?? null,
+    resolvedAt: row.NgayXuLy ?? null,
+    notifiedAt: row.NgayThongBaoTaiXe ?? null,
+    driverName: normalizeText(row.Ten),
+    driverPhone: normalizeText(row.SDT),
+    driverEmail: normalizeText(row.Email),
+  };
 }
 
 function normalizeSearchKeyword(value) {
@@ -405,6 +484,8 @@ function mapDriverRowToResponse(row = {}) {
     phone: normalizeText(row.SDT),
     email: normalizeText(row.Email),
     username: normalizeText(row.TaiKhoan),
+    birthDate: row.NgaySinh ?? null,
+    gender: normalizeText(row.GioiTinh),
     avatar: normalizeDriverAssetPath(row.AvatarTaiXe || row.AvatarTaiKhoan),
     address: normalizeText(row.DiaChiTaiXe || row.DiaChiTaiKhoan),
     cccd: normalizeText(row.CCCD),
@@ -610,6 +691,8 @@ function buildListDriversSql() {
       tk.SDT,
       tk.Email,
       tk.TaiKhoan,
+      tk.NgaySinh,
+      tk.GioiTinh,
       tk.Avatar AS AvatarTaiKhoan,
       tk.DiaChi AS DiaChiTaiKhoan,
       tk.TrangThai AS TrangThaiTaiKhoan,
@@ -690,6 +773,8 @@ async function getDriverRowById(driverId, transaction = null) {
         tk.SDT,
         tk.Email,
         tk.TaiKhoan,
+        tk.NgaySinh,
+        tk.GioiTinh,
         tk.Avatar AS AvatarTaiKhoan,
         tk.DiaChi AS DiaChiTaiKhoan,
         tk.TrangThai AS TrangThaiTaiKhoan,
@@ -788,6 +873,216 @@ async function getDriverRowOrThrow(driverId, transaction = null) {
   }
 
   return driverRow;
+}
+
+async function ensureDriverWalletRow(driverId, transaction = null) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  const request = transaction
+    ? new sql.Request(transaction)
+    : (await getSqlServerPool()).request();
+
+  const queryResult = await request
+    .input('driverId', sql.VarChar(20), normalizedDriverId)
+    .query(`
+      IF NOT EXISTS (SELECT 1 FROM dbo.TaiXeVi WHERE MaTK = @driverId)
+      BEGIN
+        INSERT INTO dbo.TaiXeVi (MaTK, SoDu)
+        VALUES (@driverId, 0);
+      END
+
+      SELECT TOP 1 MaVi, MaTK, SoDu, NgayTao, NgayCapNhat
+      FROM dbo.TaiXeVi
+      WHERE MaTK = @driverId;
+    `);
+
+  return queryResult.recordset?.[0] ?? null;
+}
+
+async function appendWalletTransaction(transaction, payload = {}) {
+  const normalizedDriverId = normalizeText(payload.driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Thiếu mã tài xế để ghi nhận giao dịch ví.');
+  }
+
+  const normalizedAmount = normalizeCurrencyAmount(payload.amount);
+
+  if (!normalizedAmount) {
+    throw createHttpError(400, 'Số tiền giao dịch phải khác 0.');
+  }
+
+  const transactionType = normalizeWalletTransactionType(payload.type);
+
+  const insertedResult = await new sql.Request(transaction)
+    .input('driverId', sql.VarChar(20), normalizedDriverId)
+    .input('type', sql.VarChar(20), transactionType)
+    .input('amount', sql.Int, normalizedAmount)
+    .input('description', sql.NVarChar(255), normalizeNullableText(payload.description))
+    .input('recipientPhone', sql.VarChar(20), normalizeNullableText(payload.recipientPhone))
+    .input('senderPhone', sql.VarChar(20), normalizeNullableText(payload.senderPhone))
+    .input('referenceCode', sql.VarChar(40), normalizeNullableText(payload.referenceCode))
+    .input('status', sql.VarChar(20), normalizeText(payload.status).toLowerCase() || 'completed')
+    .query(`
+      DECLARE @walletBefore INT;
+      DECLARE @walletAfter INT;
+
+      SELECT @walletBefore = SoDu
+      FROM dbo.TaiXeVi
+      WHERE MaTK = @driverId;
+
+      UPDATE dbo.TaiXeVi
+      SET SoDu = SoDu + @amount,
+          NgayCapNhat = SYSDATETIME()
+      WHERE MaTK = @driverId;
+
+      SELECT @walletAfter = SoDu
+      FROM dbo.TaiXeVi
+      WHERE MaTK = @driverId;
+
+      INSERT INTO dbo.TaiXeGiaoDichVi
+      (
+        MaTK,
+        LoaiGiaoDich,
+        SoTien,
+        SoDuTruoc,
+        SoDuSau,
+        MoTa,
+        SoDTNguoiNhan,
+        SoDTNguoiGui,
+        MaThamChieu,
+        TrangThai
+      )
+      OUTPUT INSERTED.*
+      VALUES
+      (
+        @driverId,
+        @type,
+        @amount,
+        @walletBefore,
+        @walletAfter,
+        @description,
+        @recipientPhone,
+        @senderPhone,
+        @referenceCode,
+        @status
+      );
+    `);
+
+  return insertedResult.recordset?.[0] ?? null;
+}
+
+async function getDriverWalletSnapshot(driverId) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  const driverRow = await getDriverRowOrThrow(normalizedDriverId);
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+
+  await transaction.begin();
+
+  try {
+    const walletRow = await ensureDriverWalletRow(normalizedDriverId, transaction);
+
+    const transactionsResult = await new sql.Request(transaction)
+      .input('driverId', sql.VarChar(20), normalizedDriverId)
+      .query(`
+        SELECT TOP 30 *
+        FROM dbo.TaiXeGiaoDichVi
+        WHERE MaTK = @driverId
+        ORDER BY NgayTao DESC, MaGD DESC;
+      `);
+
+    await transaction.commit();
+
+    return {
+      success: true,
+      message: 'Lấy thông tin ví tài xế thành công.',
+      wallet: {
+        id: Number(walletRow?.MaVi ?? 0) || 0,
+        driverId: normalizedDriverId,
+        balance: normalizeCurrencyAmount(walletRow?.SoDu),
+        balanceFormatted: `${new Intl.NumberFormat('vi-VN').format(normalizeCurrencyAmount(walletRow?.SoDu))} đ`,
+        updatedAt: walletRow?.NgayCapNhat ?? null,
+      },
+      driver: mapDriverRowToResponse(driverRow),
+      transactions: (transactionsResult.recordset ?? []).map(mapWalletTransactionRow),
+    };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
+function parseWalletTopupPayload(payload = {}) {
+  const amount = normalizeCurrencyAmount(payload.amount ?? payload.soTien);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw createHttpError(400, 'Số tiền nạp phải lớn hơn 0.');
+  }
+
+  const method = normalizeText(payload.method ?? payload.phuongThuc).toLowerCase() || 'momo';
+  const referenceCode = normalizeText(payload.referenceCode ?? payload.maThamChieu);
+
+  return {
+    amount,
+    method,
+    referenceCode,
+    description: normalizeText(payload.description ?? payload.noiDung) || `Nạp tiền vào ví qua ${method.toUpperCase()}`,
+  };
+}
+
+function parseWalletTransferPayload(payload = {}) {
+  const recipientPhone = normalizeText(payload.recipientPhone ?? payload.soDienThoaiNguoiNhan ?? payload.phone);
+  const amount = normalizeCurrencyAmount(payload.amount ?? payload.soTien);
+  const description = normalizeText(payload.description ?? payload.noiDung) || 'Chuyển tiền ví tài xế';
+
+  if (!recipientPhone || !phoneNumberPattern.test(recipientPhone)) {
+    throw createHttpError(400, 'Số điện thoại người nhận không hợp lệ (8-15 chữ số).');
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw createHttpError(400, 'Số tiền chuyển phải lớn hơn 0.');
+  }
+
+  return {
+    recipientPhone,
+    amount,
+    description,
+  };
+}
+
+function parseVehicleChangePayload(payload = {}) {
+  const newVehicleName = normalizeText(payload.vehicleName ?? payload.loaiXeMoi ?? payload.newVehicleName);
+  const newLicensePlate = normalizeText(payload.licensePlate ?? payload.bienSoMoi ?? payload.newLicensePlate).toUpperCase();
+
+  if (!newVehicleName) {
+    throw createHttpError(400, 'Vui lòng nhập loại xe mới.');
+  }
+
+  if (!newLicensePlate || !vehicleLicensePlatePattern.test(newLicensePlate)) {
+    throw createHttpError(400, 'Biển số xe mới không đúng định dạng. Ví dụ hợp lệ: 43A-12345 hoặc 43A-123.45');
+  }
+
+  return {
+    newVehicleName,
+    newLicensePlate,
+  };
+}
+
+function parseVehicleChangeDecisionPayload(payload = {}) {
+  const note = normalizeText(payload.note ?? payload.reason ?? payload.ghiChu);
+  return {
+    note,
+  };
 }
 
 async function getNextAccountId(transaction) {
@@ -1384,5 +1679,831 @@ export async function unlockDriver(driverId) {
     success: true,
     message: 'Đã mở lại chức năng Tài xế. Tài khoản vẫn giữ trạng thái hiện tại.',
     driver: updatedDriver,
+  };
+}
+
+export async function ensureDriverSchema() {
+  const pool = await getSqlServerPool();
+
+  await pool.request().query(`
+    IF OBJECT_ID(N'dbo.TaiXeVi', N'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.TaiXeVi
+      (
+        MaVi         INT           IDENTITY(1,1) NOT NULL,
+        MaTK         VARCHAR(20)   NOT NULL,
+        SoDu         INT           NOT NULL CONSTRAINT DF_TaiXeVi_SoDu DEFAULT 0,
+        NgayTao      DATETIME2(0)  NOT NULL CONSTRAINT DF_TaiXeVi_NgayTao DEFAULT SYSDATETIME(),
+        NgayCapNhat  DATETIME2(0)  NOT NULL CONSTRAINT DF_TaiXeVi_NgayCapNhat DEFAULT SYSDATETIME(),
+        CONSTRAINT PK_TaiXeVi PRIMARY KEY (MaVi),
+        CONSTRAINT UQ_TaiXeVi_MaTK UNIQUE (MaTK),
+        CONSTRAINT FK_TaiXeVi_TaiKhoan FOREIGN KEY (MaTK)
+          REFERENCES dbo.TaiKhoan(MaTK)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE,
+        CONSTRAINT CK_TaiXeVi_SoDu CHECK (SoDu >= 0)
+      );
+    END;
+
+    IF OBJECT_ID(N'dbo.TaiXeGiaoDichVi', N'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.TaiXeGiaoDichVi
+      (
+        MaGD            INT            IDENTITY(1,1) NOT NULL,
+        MaTK            VARCHAR(20)    NOT NULL,
+        LoaiGiaoDich    VARCHAR(20)    NOT NULL,
+        SoTien          INT            NOT NULL,
+        SoDuTruoc       INT            NOT NULL,
+        SoDuSau         INT            NOT NULL,
+        MoTa            NVARCHAR(255)  NULL,
+        SoDTNguoiNhan   VARCHAR(20)    NULL,
+        SoDTNguoiGui    VARCHAR(20)    NULL,
+        MaThamChieu     VARCHAR(40)    NULL,
+        TrangThai       VARCHAR(20)    NOT NULL CONSTRAINT DF_TaiXeGiaoDichVi_TrangThai DEFAULT 'completed',
+        NgayTao         DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeGiaoDichVi_NgayTao DEFAULT SYSDATETIME(),
+        CONSTRAINT PK_TaiXeGiaoDichVi PRIMARY KEY (MaGD),
+        CONSTRAINT FK_TaiXeGiaoDichVi_TaiKhoan FOREIGN KEY (MaTK)
+          REFERENCES dbo.TaiKhoan(MaTK)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE,
+        CONSTRAINT CK_TaiXeGiaoDichVi_Loai CHECK (LoaiGiaoDich IN ('topup', 'transfer', 'receive', 'adjustment')),
+        CONSTRAINT CK_TaiXeGiaoDichVi_TrangThai CHECK (TrangThai IN ('completed', 'pending', 'failed')),
+        CONSTRAINT CK_TaiXeGiaoDichVi_SoTien CHECK (SoTien <> 0),
+        CONSTRAINT CK_TaiXeGiaoDichVi_SoDuTruoc CHECK (SoDuTruoc >= 0),
+        CONSTRAINT CK_TaiXeGiaoDichVi_SoDuSau CHECK (SoDuSau >= 0)
+      );
+    END;
+
+    INSERT INTO dbo.TaiXeVi (MaTK, SoDu)
+    SELECT tk.MaTK, 0
+    FROM dbo.TaiKhoan AS tk
+    WHERE tk.MaQuyen = 'Q3'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.TaiXeVi AS tv
+        WHERE tv.MaTK = tk.MaTK
+      );
+
+    IF OBJECT_ID(N'dbo.TaiXeYeuCauDoiThongTinXe', N'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.TaiXeYeuCauDoiThongTinXe
+      (
+        MaYC              INT            IDENTITY(1,1) NOT NULL,
+        MaTK              VARCHAR(20)    NOT NULL,
+        LoaiXeCu          NVARCHAR(120)  NOT NULL,
+        BienSoCu          VARCHAR(20)    NOT NULL,
+        LoaiXeMoi         NVARCHAR(120)  NOT NULL,
+        BienSoMoi         VARCHAR(20)    NOT NULL,
+        TrangThai         VARCHAR(20)    NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_TrangThai DEFAULT 'pending',
+        GhiChuTuChoi      NVARCHAR(500)  NULL,
+        NguoiDuyetMaTK    VARCHAR(20)    NULL,
+        TaiXeDaXem        BIT            NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_TaiXeDaXem DEFAULT 0,
+        NgayTao           DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_NgayTao DEFAULT SYSDATETIME(),
+        NgayCapNhat       DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeYeuCauDoiThongTinXe_NgayCapNhat DEFAULT SYSDATETIME(),
+        NgayXuLy          DATETIME2(0)   NULL,
+        NgayThongBaoTaiXe DATETIME2(0)   NULL,
+        CONSTRAINT PK_TaiXeYeuCauDoiThongTinXe PRIMARY KEY (MaYC),
+        CONSTRAINT FK_TaiXeYeuCauDoiThongTinXe_TaiKhoan FOREIGN KEY (MaTK)
+          REFERENCES dbo.TaiKhoan(MaTK)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE,
+        CONSTRAINT FK_TaiXeYeuCauDoiThongTinXe_NguoiDuyet FOREIGN KEY (NguoiDuyetMaTK)
+          REFERENCES dbo.TaiKhoan(MaTK)
+          ON UPDATE NO ACTION
+          ON DELETE NO ACTION,
+        CONSTRAINT CK_TaiXeYeuCauDoiThongTinXe_TrangThai CHECK (TrangThai IN ('pending', 'approved', 'rejected'))
+      );
+    END;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE name = N'IX_TaiXeGiaoDichVi_MaTK_NgayTao'
+        AND object_id = OBJECT_ID(N'dbo.TaiXeGiaoDichVi')
+    )
+    BEGIN
+      CREATE INDEX IX_TaiXeGiaoDichVi_MaTK_NgayTao
+      ON dbo.TaiXeGiaoDichVi (MaTK, NgayTao DESC, MaGD DESC);
+    END;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE name = N'IX_TaiXeYeuCauDoiThongTinXe_TrangThai_NgayTao'
+        AND object_id = OBJECT_ID(N'dbo.TaiXeYeuCauDoiThongTinXe')
+    )
+    BEGIN
+      CREATE INDEX IX_TaiXeYeuCauDoiThongTinXe_TrangThai_NgayTao
+      ON dbo.TaiXeYeuCauDoiThongTinXe (TrangThai, NgayTao DESC, MaYC DESC);
+    END;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE name = N'UX_TaiXeYeuCauDoiThongTinXe_Pending'
+        AND object_id = OBJECT_ID(N'dbo.TaiXeYeuCauDoiThongTinXe')
+    )
+    BEGIN
+      CREATE UNIQUE INDEX UX_TaiXeYeuCauDoiThongTinXe_Pending
+      ON dbo.TaiXeYeuCauDoiThongTinXe (MaTK)
+      WHERE TrangThai = 'pending';
+    END;
+
+    IF OBJECT_ID(N'dbo.TR_TaiXeVi_SetNgayCapNhat', N'TR') IS NULL
+    BEGIN
+      EXEC('CREATE TRIGGER dbo.TR_TaiXeVi_SetNgayCapNhat
+      ON dbo.TaiXeVi
+      AFTER UPDATE
+      AS
+      BEGIN
+        SET NOCOUNT ON;
+        UPDATE target
+        SET target.NgayCapNhat = SYSDATETIME()
+        FROM dbo.TaiXeVi AS target
+        INNER JOIN inserted AS i ON i.MaVi = target.MaVi;
+      END');
+    END;
+
+    IF OBJECT_ID(N'dbo.TR_TaiXeYeuCauDoiThongTinXe_SetNgayCapNhat', N'TR') IS NULL
+    BEGIN
+      EXEC('CREATE TRIGGER dbo.TR_TaiXeYeuCauDoiThongTinXe_SetNgayCapNhat
+      ON dbo.TaiXeYeuCauDoiThongTinXe
+      AFTER UPDATE
+      AS
+      BEGIN
+        SET NOCOUNT ON;
+        UPDATE target
+        SET target.NgayCapNhat = SYSDATETIME()
+        FROM dbo.TaiXeYeuCauDoiThongTinXe AS target
+        INNER JOIN inserted AS i ON i.MaYC = target.MaYC;
+      END');
+    END;
+  `);
+}
+
+export async function getDriverWallet(driverId) {
+  return getDriverWalletSnapshot(driverId);
+}
+
+export async function listDriverWalletTransactions(driverId, filters = {}) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  await getDriverRowOrThrow(normalizedDriverId);
+
+  const request = (await getSqlServerPool())
+    .request()
+    .input('driverId', sql.VarChar(20), normalizedDriverId);
+
+  const whereConditions = ['MaTK = @driverId'];
+
+  const typeFilter = normalizeText(filters.type).toLowerCase();
+  if (driverWalletTransactionTypes.has(typeFilter)) {
+    whereConditions.push('LoaiGiaoDich = @typeFilter');
+    request.input('typeFilter', sql.VarChar(20), typeFilter);
+  }
+
+  const queryResult = await request.query(`
+    SELECT TOP 100 *
+    FROM dbo.TaiXeGiaoDichVi
+    WHERE ${whereConditions.join(' AND ')}
+    ORDER BY NgayTao DESC, MaGD DESC;
+  `);
+
+  return {
+    success: true,
+    message: 'Lấy lịch sử giao dịch ví thành công.',
+    transactions: (queryResult.recordset ?? []).map(mapWalletTransactionRow),
+  };
+}
+
+export async function topupDriverWallet(driverId, payload = {}) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  const parsedPayload = parseWalletTopupPayload(payload);
+  await getDriverRowOrThrow(normalizedDriverId);
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+
+  try {
+    await ensureDriverWalletRow(normalizedDriverId, transaction);
+
+    const transactionRow = await appendWalletTransaction(transaction, {
+      driverId: normalizedDriverId,
+      type: 'topup',
+      amount: parsedPayload.amount,
+      description: parsedPayload.description,
+      referenceCode: parsedPayload.referenceCode || `${parsedPayload.method.toUpperCase()}-${Date.now()}`,
+    });
+
+    const walletRow = await ensureDriverWalletRow(normalizedDriverId, transaction);
+
+    await transaction.commit();
+
+    return {
+      success: true,
+      message: 'Nạp tiền vào ví thành công.',
+      wallet: {
+        id: Number(walletRow?.MaVi ?? 0) || 0,
+        driverId: normalizedDriverId,
+        balance: normalizeCurrencyAmount(walletRow?.SoDu),
+        balanceFormatted: `${new Intl.NumberFormat('vi-VN').format(normalizeCurrencyAmount(walletRow?.SoDu))} đ`,
+        updatedAt: walletRow?.NgayCapNhat ?? null,
+      },
+      transaction: mapWalletTransactionRow(transactionRow),
+    };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
+export async function transferDriverWallet(driverId, payload = {}) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  const parsedPayload = parseWalletTransferPayload(payload);
+  const senderDriver = await getDriverRowOrThrow(normalizedDriverId);
+
+  const recipientResult = await (await getSqlServerPool())
+    .request()
+    .input('recipientPhone', sql.VarChar(15), parsedPayload.recipientPhone)
+    .query(`
+      SELECT TOP 1 MaTK, SDT, Ten
+      FROM dbo.TaiKhoan
+      WHERE SDT = @recipientPhone;
+    `);
+
+  const recipientRow = recipientResult.recordset?.[0] ?? null;
+
+  if (!recipientRow?.MaTK) {
+    throw createHttpError(404, 'Không tìm thấy tài khoản người nhận theo số điện thoại đã nhập.');
+  }
+
+  if (normalizeText(recipientRow.MaTK) === normalizedDriverId) {
+    throw createHttpError(400, 'Không thể chuyển tiền cho chính tài khoản của bạn.');
+  }
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+
+  try {
+    const senderWalletRow = await ensureDriverWalletRow(normalizedDriverId, transaction);
+    await ensureDriverWalletRow(recipientRow.MaTK, transaction);
+
+    const currentBalance = normalizeCurrencyAmount(senderWalletRow?.SoDu);
+
+    if (parsedPayload.amount > currentBalance) {
+      throw createHttpError(400, 'Số dư không đủ để thực hiện giao dịch chuyển tiền.');
+    }
+
+    const transferReferenceCode = `TRF-${Date.now()}`;
+
+    const debitTransaction = await appendWalletTransaction(transaction, {
+      driverId: normalizedDriverId,
+      type: 'transfer',
+      amount: -Math.abs(parsedPayload.amount),
+      description: parsedPayload.description,
+      recipientPhone: parsedPayload.recipientPhone,
+      senderPhone: normalizeText(senderDriver.SDT),
+      referenceCode: transferReferenceCode,
+    });
+
+    await appendWalletTransaction(transaction, {
+      driverId: recipientRow.MaTK,
+      type: 'receive',
+      amount: Math.abs(parsedPayload.amount),
+      description: `Nhận tiền từ ${normalizeText(senderDriver.Ten) || normalizeText(senderDriver.SDT) || normalizedDriverId}`,
+      recipientPhone: parsedPayload.recipientPhone,
+      senderPhone: normalizeText(senderDriver.SDT),
+      referenceCode: transferReferenceCode,
+    });
+
+    const latestWalletRow = await ensureDriverWalletRow(normalizedDriverId, transaction);
+
+    await transaction.commit();
+
+    return {
+      success: true,
+      message: 'Chuyển tiền thành công.',
+      wallet: {
+        id: Number(latestWalletRow?.MaVi ?? 0) || 0,
+        driverId: normalizedDriverId,
+        balance: normalizeCurrencyAmount(latestWalletRow?.SoDu),
+        balanceFormatted: `${new Intl.NumberFormat('vi-VN').format(normalizeCurrencyAmount(latestWalletRow?.SoDu))} đ`,
+        updatedAt: latestWalletRow?.NgayCapNhat ?? null,
+      },
+      transaction: mapWalletTransactionRow(debitTransaction),
+      recipient: {
+        accountId: normalizeText(recipientRow.MaTK),
+        phone: normalizeText(recipientRow.SDT),
+        name: normalizeText(recipientRow.Ten),
+      },
+    };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
+export async function getDriverProfile(driverId) {
+  const driverRow = await getDriverRowOrThrow(driverId);
+
+  return {
+    success: true,
+    message: 'Lấy hồ sơ tài xế thành công.',
+    driver: mapDriverRowToResponse(driverRow),
+  };
+}
+
+export async function createVehicleChangeRequest(driverId, payload = {}) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  const parsedPayload = parseVehicleChangePayload(payload);
+  const existingDriver = await getDriverRowOrThrow(normalizedDriverId);
+  const normalizedDriverStatus = normalizeText(existingDriver.TrangThaiTaiXe).toLowerCase();
+
+  if (normalizedDriverStatus !== driverCompletedStatus.toLowerCase()) {
+    throw createHttpError(403, 'Chỉ tài xế đã được duyệt mới có thể gửi yêu cầu đổi thông tin xe.');
+  }
+
+  const vehicleInfo = safeJsonParse(existingDriver.ThongTinXe, {});
+  const oldVehicleName = normalizeText(vehicleInfo.name ?? vehicleInfo.vehicleName ?? '');
+  const oldLicensePlate = normalizeText(vehicleInfo.licensePlate ?? vehicleInfo.bienSoXe ?? '').toUpperCase();
+
+  if (
+    parsedPayload.newVehicleName.toLowerCase() === oldVehicleName.toLowerCase() &&
+    parsedPayload.newLicensePlate.toLowerCase() === oldLicensePlate.toLowerCase()
+  ) {
+    throw createHttpError(400, 'Thông tin xe mới trùng với thông tin hiện tại.');
+  }
+
+  try {
+    const insertResult = await (await getSqlServerPool())
+      .request()
+      .input('driverId', sql.VarChar(20), normalizedDriverId)
+      .input('oldVehicleName', sql.NVarChar(120), oldVehicleName)
+      .input('oldLicensePlate', sql.VarChar(20), oldLicensePlate)
+      .input('newVehicleName', sql.NVarChar(120), parsedPayload.newVehicleName)
+      .input('newLicensePlate', sql.VarChar(20), parsedPayload.newLicensePlate)
+      .query(`
+        DECLARE @CreatedRequests TABLE
+        (
+          MaYC INT,
+          MaTK VARCHAR(20),
+          LoaiXeCu NVARCHAR(120),
+          BienSoCu VARCHAR(20),
+          LoaiXeMoi NVARCHAR(120),
+          BienSoMoi VARCHAR(20),
+          TrangThai VARCHAR(20),
+          GhiChuTuChoi NVARCHAR(500),
+          NguoiDuyetMaTK VARCHAR(20),
+          TaiXeDaXem BIT,
+          NgayTao DATETIME2(0),
+          NgayCapNhat DATETIME2(0),
+          NgayXuLy DATETIME2(0),
+          NgayThongBaoTaiXe DATETIME2(0)
+        );
+
+        INSERT INTO dbo.TaiXeYeuCauDoiThongTinXe
+        (
+          MaTK,
+          LoaiXeCu,
+          BienSoCu,
+          LoaiXeMoi,
+          BienSoMoi,
+          TrangThai,
+          TaiXeDaXem
+        )
+        OUTPUT
+          INSERTED.MaYC,
+          INSERTED.MaTK,
+          INSERTED.LoaiXeCu,
+          INSERTED.BienSoCu,
+          INSERTED.LoaiXeMoi,
+          INSERTED.BienSoMoi,
+          INSERTED.TrangThai,
+          INSERTED.GhiChuTuChoi,
+          INSERTED.NguoiDuyetMaTK,
+          INSERTED.TaiXeDaXem,
+          INSERTED.NgayTao,
+          INSERTED.NgayCapNhat,
+          INSERTED.NgayXuLy,
+          INSERTED.NgayThongBaoTaiXe
+        INTO @CreatedRequests
+        VALUES
+        (
+          @driverId,
+          @oldVehicleName,
+          @oldLicensePlate,
+          @newVehicleName,
+          @newLicensePlate,
+          'pending',
+          0
+        );
+
+        SELECT *
+        FROM @CreatedRequests;
+      `);
+
+    const createdRequest = insertResult.recordset?.[0] ?? null;
+
+    return {
+      success: true,
+      message: 'Đã gửi yêu cầu thay đổi thông tin xe. Vui lòng chờ quản trị viên duyệt.',
+      request: mapVehicleChangeRequestRow(createdRequest),
+    };
+  } catch (error) {
+    if (isSqlUniqueConstraintError(error)) {
+      throw createHttpError(409, 'Bạn đang có yêu cầu thay đổi thông tin xe chờ duyệt.');
+    }
+
+    throw error;
+  }
+}
+
+export async function listPendingVehicleChangeRequests() {
+  const queryResult = await (await getSqlServerPool())
+    .request()
+    .query(`
+      SELECT
+        yc.*,
+        tk.Ten,
+        tk.SDT,
+        tk.Email
+      FROM dbo.TaiXeYeuCauDoiThongTinXe yc
+      INNER JOIN dbo.TaiKhoan tk ON tk.MaTK = yc.MaTK
+      WHERE yc.TrangThai = 'pending'
+      ORDER BY yc.NgayTao ASC, yc.MaYC ASC;
+    `);
+
+  return {
+    success: true,
+    message: 'Lấy danh sách yêu cầu đổi thông tin xe đang chờ duyệt thành công.',
+    requests: (queryResult.recordset ?? []).map(mapVehicleChangeRequestRow),
+  };
+}
+
+export async function getVehicleChangeRequestDetail(requestId) {
+  const normalizedRequestId = Number(requestId);
+
+  if (!Number.isInteger(normalizedRequestId) || normalizedRequestId <= 0) {
+    throw createHttpError(400, 'Mã yêu cầu thay đổi thông tin xe không hợp lệ.');
+  }
+
+  const queryResult = await (await getSqlServerPool())
+    .request()
+    .input('requestId', sql.Int, normalizedRequestId)
+    .query(`
+      SELECT
+        yc.*,
+        tk.Ten,
+        tk.SDT,
+        tk.Email
+      FROM dbo.TaiXeYeuCauDoiThongTinXe yc
+      INNER JOIN dbo.TaiKhoan tk ON tk.MaTK = yc.MaTK
+      WHERE yc.MaYC = @requestId;
+    `);
+
+  const requestRow = queryResult.recordset?.[0] ?? null;
+
+  if (!requestRow) {
+    throw createHttpError(404, 'Không tìm thấy yêu cầu thay đổi thông tin xe.');
+  }
+
+  const driverProfile = await getDriverProfile(requestRow.MaTK);
+
+  return {
+    success: true,
+    message: 'Lấy chi tiết yêu cầu thành công.',
+    request: mapVehicleChangeRequestRow(requestRow),
+    driver: driverProfile.driver,
+  };
+}
+
+export async function approveVehicleChangeRequest(requestId, payload = {}) {
+  const normalizedRequestId = Number(requestId);
+  const approvedByAccountId = normalizeText(payload.approvedByAccountId ?? payload.adminAccountId);
+
+  if (!Number.isInteger(normalizedRequestId) || normalizedRequestId <= 0) {
+    throw createHttpError(400, 'Mã yêu cầu thay đổi thông tin xe không hợp lệ.');
+  }
+
+  if (!approvedByAccountId) {
+    throw createHttpError(400, 'Thiếu thông tin tài khoản quản trị viên duyệt yêu cầu.');
+  }
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+
+  try {
+    const detailResult = await new sql.Request(transaction)
+      .input('requestId', sql.Int, normalizedRequestId)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.TaiXeYeuCauDoiThongTinXe
+        WHERE MaYC = @requestId;
+      `);
+
+    const currentRequest = detailResult.recordset?.[0] ?? null;
+
+    if (!currentRequest) {
+      throw createHttpError(404, 'Không tìm thấy yêu cầu thay đổi thông tin xe.');
+    }
+
+    if (normalizeVehicleChangeRequestStatus(currentRequest.TrangThai) !== 'pending') {
+      throw createHttpError(400, 'Yêu cầu này đã được xử lý trước đó.');
+    }
+
+    const driverRow = await getDriverRowOrThrow(currentRequest.MaTK, transaction);
+    const vehicleInfo = safeJsonParse(driverRow.ThongTinXe, {});
+
+    const nextVehicleInfo = {
+      ...vehicleInfo,
+      name: normalizeText(currentRequest.LoaiXeMoi),
+      vehicleName: normalizeText(currentRequest.LoaiXeMoi),
+      licensePlate: normalizeText(currentRequest.BienSoMoi).toUpperCase(),
+      bienSoXe: normalizeText(currentRequest.BienSoMoi).toUpperCase(),
+    };
+
+    await new sql.Request(transaction)
+      .input('driverId', sql.VarChar(20), normalizeText(currentRequest.MaTK))
+      .input('vehicleInfo', sql.NVarChar(sql.MAX), JSON.stringify(nextVehicleInfo))
+      .query(`
+        UPDATE dbo.TaiXe
+        SET ThongTinXe = @vehicleInfo,
+            NgayCapNhat = SYSDATETIME()
+        WHERE MaTK = @driverId;
+      `);
+
+    const updatedRequestResult = await new sql.Request(transaction)
+      .input('requestId', sql.Int, normalizedRequestId)
+      .input('approvedByAccountId', sql.VarChar(20), approvedByAccountId)
+      .query(`
+        DECLARE @UpdatedRequests TABLE
+        (
+          MaYC INT,
+          MaTK VARCHAR(20),
+          LoaiXeCu NVARCHAR(120),
+          BienSoCu VARCHAR(20),
+          LoaiXeMoi NVARCHAR(120),
+          BienSoMoi VARCHAR(20),
+          TrangThai VARCHAR(20),
+          GhiChuTuChoi NVARCHAR(500),
+          NguoiDuyetMaTK VARCHAR(20),
+          TaiXeDaXem BIT,
+          NgayTao DATETIME2(0),
+          NgayCapNhat DATETIME2(0),
+          NgayXuLy DATETIME2(0),
+          NgayThongBaoTaiXe DATETIME2(0)
+        );
+
+        UPDATE dbo.TaiXeYeuCauDoiThongTinXe
+        SET TrangThai = 'approved',
+            NguoiDuyetMaTK = @approvedByAccountId,
+            TaiXeDaXem = 0,
+            NgayXuLy = SYSDATETIME(),
+            NgayThongBaoTaiXe = SYSDATETIME(),
+            GhiChuTuChoi = NULL
+        OUTPUT
+          INSERTED.MaYC,
+          INSERTED.MaTK,
+          INSERTED.LoaiXeCu,
+          INSERTED.BienSoCu,
+          INSERTED.LoaiXeMoi,
+          INSERTED.BienSoMoi,
+          INSERTED.TrangThai,
+          INSERTED.GhiChuTuChoi,
+          INSERTED.NguoiDuyetMaTK,
+          INSERTED.TaiXeDaXem,
+          INSERTED.NgayTao,
+          INSERTED.NgayCapNhat,
+          INSERTED.NgayXuLy,
+          INSERTED.NgayThongBaoTaiXe
+        INTO @UpdatedRequests
+        WHERE MaYC = @requestId;
+
+        SELECT *
+        FROM @UpdatedRequests;
+      `);
+
+    await transaction.commit();
+
+    return {
+      success: true,
+      message: 'Đã duyệt yêu cầu thay đổi thông tin xe.',
+      request: mapVehicleChangeRequestRow(updatedRequestResult.recordset?.[0] ?? null),
+    };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
+export async function rejectVehicleChangeRequest(requestId, payload = {}) {
+  const normalizedRequestId = Number(requestId);
+  const approvedByAccountId = normalizeText(payload.approvedByAccountId ?? payload.adminAccountId);
+  const parsedDecisionPayload = parseVehicleChangeDecisionPayload(payload);
+
+  if (!Number.isInteger(normalizedRequestId) || normalizedRequestId <= 0) {
+    throw createHttpError(400, 'Mã yêu cầu thay đổi thông tin xe không hợp lệ.');
+  }
+
+  if (!approvedByAccountId) {
+    throw createHttpError(400, 'Thiếu thông tin tài khoản quản trị viên xử lý yêu cầu.');
+  }
+
+  const updatedResult = await (await getSqlServerPool())
+    .request()
+    .input('requestId', sql.Int, normalizedRequestId)
+    .input('approvedByAccountId', sql.VarChar(20), approvedByAccountId)
+    .input('rejectNote', sql.NVarChar(500), normalizeNullableText(parsedDecisionPayload.note))
+    .query(`
+      DECLARE @UpdatedRequests TABLE
+      (
+        MaYC INT,
+        MaTK VARCHAR(20),
+        LoaiXeCu NVARCHAR(120),
+        BienSoCu VARCHAR(20),
+        LoaiXeMoi NVARCHAR(120),
+        BienSoMoi VARCHAR(20),
+        TrangThai VARCHAR(20),
+        GhiChuTuChoi NVARCHAR(500),
+        NguoiDuyetMaTK VARCHAR(20),
+        TaiXeDaXem BIT,
+        NgayTao DATETIME2(0),
+        NgayCapNhat DATETIME2(0),
+        NgayXuLy DATETIME2(0),
+        NgayThongBaoTaiXe DATETIME2(0)
+      );
+
+      UPDATE dbo.TaiXeYeuCauDoiThongTinXe
+      SET TrangThai = 'rejected',
+          NguoiDuyetMaTK = @approvedByAccountId,
+          TaiXeDaXem = 0,
+          NgayXuLy = SYSDATETIME(),
+          NgayThongBaoTaiXe = SYSDATETIME(),
+          GhiChuTuChoi = @rejectNote
+      OUTPUT
+        INSERTED.MaYC,
+        INSERTED.MaTK,
+        INSERTED.LoaiXeCu,
+        INSERTED.BienSoCu,
+        INSERTED.LoaiXeMoi,
+        INSERTED.BienSoMoi,
+        INSERTED.TrangThai,
+        INSERTED.GhiChuTuChoi,
+        INSERTED.NguoiDuyetMaTK,
+        INSERTED.TaiXeDaXem,
+        INSERTED.NgayTao,
+        INSERTED.NgayCapNhat,
+        INSERTED.NgayXuLy,
+        INSERTED.NgayThongBaoTaiXe
+      INTO @UpdatedRequests
+      WHERE MaYC = @requestId AND TrangThai = 'pending';
+
+      SELECT *
+      FROM @UpdatedRequests;
+    `);
+
+  const requestRow = updatedResult.recordset?.[0] ?? null;
+
+  if (!requestRow) {
+    throw createHttpError(400, 'Yêu cầu không tồn tại hoặc đã được xử lý trước đó.');
+  }
+
+  return {
+    success: true,
+    message: 'Đã từ chối yêu cầu thay đổi thông tin xe.',
+    request: mapVehicleChangeRequestRow(requestRow),
+  };
+}
+
+export async function listDriverVehicleChangeResolutions(driverId, filters = {}) {
+  const normalizedDriverId = normalizeText(driverId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  await getDriverRowOrThrow(normalizedDriverId);
+
+  const request = (await getSqlServerPool())
+    .request()
+    .input('driverId', sql.VarChar(20), normalizedDriverId);
+
+  const whereConditions = [
+    'MaTK = @driverId',
+    "TrangThai IN ('approved', 'rejected')",
+  ];
+
+  if (String(filters.unseenOnly ?? '').trim().toLowerCase() === 'true') {
+    whereConditions.push('TaiXeDaXem = 0');
+  }
+
+  const queryResult = await request.query(`
+    SELECT TOP 20 *
+    FROM dbo.TaiXeYeuCauDoiThongTinXe
+    WHERE ${whereConditions.join(' AND ')}
+    ORDER BY NgayXuLy DESC, MaYC DESC;
+  `);
+
+  return {
+    success: true,
+    message: 'Lấy kết quả yêu cầu thay đổi thông tin xe thành công.',
+    requests: (queryResult.recordset ?? []).map(mapVehicleChangeRequestRow),
+  };
+}
+
+export async function acknowledgeDriverVehicleChangeResolution(driverId, requestId) {
+  const normalizedDriverId = normalizeText(driverId);
+  const normalizedRequestId = Number(requestId);
+
+  if (!normalizedDriverId) {
+    throw createHttpError(400, 'Mã tài xế không hợp lệ.');
+  }
+
+  if (!Number.isInteger(normalizedRequestId) || normalizedRequestId <= 0) {
+    throw createHttpError(400, 'Mã yêu cầu không hợp lệ.');
+  }
+
+  const updateResult = await (await getSqlServerPool())
+    .request()
+    .input('driverId', sql.VarChar(20), normalizedDriverId)
+    .input('requestId', sql.Int, normalizedRequestId)
+    .query(`
+      DECLARE @UpdatedRequests TABLE
+      (
+        MaYC INT,
+        MaTK VARCHAR(20),
+        LoaiXeCu NVARCHAR(120),
+        BienSoCu VARCHAR(20),
+        LoaiXeMoi NVARCHAR(120),
+        BienSoMoi VARCHAR(20),
+        TrangThai VARCHAR(20),
+        GhiChuTuChoi NVARCHAR(500),
+        NguoiDuyetMaTK VARCHAR(20),
+        TaiXeDaXem BIT,
+        NgayTao DATETIME2(0),
+        NgayCapNhat DATETIME2(0),
+        NgayXuLy DATETIME2(0),
+        NgayThongBaoTaiXe DATETIME2(0)
+      );
+
+      UPDATE dbo.TaiXeYeuCauDoiThongTinXe
+      SET TaiXeDaXem = 1,
+          NgayCapNhat = SYSDATETIME()
+      OUTPUT
+        INSERTED.MaYC,
+        INSERTED.MaTK,
+        INSERTED.LoaiXeCu,
+        INSERTED.BienSoCu,
+        INSERTED.LoaiXeMoi,
+        INSERTED.BienSoMoi,
+        INSERTED.TrangThai,
+        INSERTED.GhiChuTuChoi,
+        INSERTED.NguoiDuyetMaTK,
+        INSERTED.TaiXeDaXem,
+        INSERTED.NgayTao,
+        INSERTED.NgayCapNhat,
+        INSERTED.NgayXuLy,
+        INSERTED.NgayThongBaoTaiXe
+      INTO @UpdatedRequests
+      WHERE MaYC = @requestId
+        AND MaTK = @driverId
+        AND TrangThai IN ('approved', 'rejected');
+
+      SELECT *
+      FROM @UpdatedRequests;
+    `);
+
+  const acknowledgedRow = updateResult.recordset?.[0] ?? null;
+
+  if (!acknowledgedRow) {
+    throw createHttpError(404, 'Không tìm thấy kết quả yêu cầu cần xác nhận.');
+  }
+
+  return {
+    success: true,
+    message: 'Đã xác nhận thông báo kết quả yêu cầu đổi thông tin xe.',
+    request: mapVehicleChangeRequestRow(acknowledgedRow),
   };
 }

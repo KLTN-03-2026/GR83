@@ -4,12 +4,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import {
+  acknowledgeDriverVehicleChangeResolutionController,
+  approveVehicleChangeRequestController,
   approveDriverController,
+  createVehicleChangeRequestController,
   createDriverController,
+  getDriverProfileController,
+  getDriverWalletController,
+  getVehicleChangeRequestDetailController,
+  listDriverVehicleChangeResolutionsController,
+  listDriverWalletTransactionsController,
   listDriversController,
+  listPendingVehicleChangeRequestsController,
   lockDriverController,
   registerDriverApplicationController,
+  rejectVehicleChangeRequestController,
   rejectDriverController,
+  topupDriverWalletController,
+  transferDriverWalletController,
   unlockDriverController,
   uploadDriverDocumentsController,
   updateDriverController,
@@ -101,5 +113,20 @@ router.patch('/:driverId/approve', approveDriverController);
 router.patch('/:driverId/reject', rejectDriverController);
 router.patch('/:driverId/lock', lockDriverController);
 router.patch('/:driverId/unlock', unlockDriverController);
+router.get('/:driverId/profile', getDriverProfileController);
+router.get('/:driverId/wallet', getDriverWalletController);
+router.get('/:driverId/wallet/transactions', listDriverWalletTransactionsController);
+router.post('/:driverId/wallet/topup', topupDriverWalletController);
+router.post('/:driverId/wallet/transfer', transferDriverWalletController);
+router.post('/:driverId/vehicle-change-requests', createVehicleChangeRequestController);
+router.get('/:driverId/vehicle-change-requests/resolutions', listDriverVehicleChangeResolutionsController);
+router.patch(
+  '/:driverId/vehicle-change-requests/:requestId/acknowledge',
+  acknowledgeDriverVehicleChangeResolutionController,
+);
+router.get('/vehicle-change-requests/pending', listPendingVehicleChangeRequestsController);
+router.get('/vehicle-change-requests/:requestId', getVehicleChangeRequestDetailController);
+router.patch('/vehicle-change-requests/:requestId/approve', approveVehicleChangeRequestController);
+router.patch('/vehicle-change-requests/:requestId/reject', rejectVehicleChangeRequestController);
 
 export default router;

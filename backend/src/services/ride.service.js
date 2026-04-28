@@ -87,8 +87,8 @@ const TRIP_STATUS_TRANSITIONS = {
   ChoTaiXe: new Set(['DaNhanChuyen', 'DaHuy']),
   DaNhanChuyen: new Set(['DangDen', 'DaHuy']),
   DangDen: new Set(['DaDon', 'DaHuy']),
-  DaDon: new Set(['DangThucHien']),
-  DangThucHien: new Set(['HoanThanh']),
+  DaDon: new Set(['DangThucHien', 'DaHuy']),
+  DangThucHien: new Set(['HoanThanh', 'DaHuy']),
   HoanThanh: new Set([]),
   DaHuy: new Set([]),
 };
@@ -1434,14 +1434,32 @@ function calculatePromotionPricing(basePrice, promotion = null) {
       originalPrice,
       discountAmount: 0,
       finalPrice: originalPrice,
+      minOrderAmount: 0,
+      isEligible: true,
     };
   }
 
+  const discountType = String(promotion.discountType ?? 'percent').trim().toLowerCase();
   const discountPercent = Number(promotion.discountPercent ?? 0);
+  const discountAmountValue = Number(promotion.discountAmount ?? 0);
   const maxAmount = Number(promotion.maxAmount ?? 0);
-  const safeDiscountPercent = Number.isFinite(discountPercent) && discountPercent > 0 ? discountPercent : 0;
-  const rawDiscountAmount = roundCurrency(originalPrice * safeDiscountPercent / 100);
-  const limitedDiscountAmount = Number.isFinite(maxAmount) && maxAmount > 0
+  const minOrderAmount = Number(promotion.minOrderAmount ?? 0);
+  const safeMinOrderAmount = Number.isFinite(minOrderAmount) && minOrderAmount > 0 ? roundCurrency(minOrderAmount) : 0;
+
+  if (safeMinOrderAmount > 0 && originalPrice < safeMinOrderAmount) {
+    return {
+      originalPrice,
+      discountAmount: 0,
+      finalPrice: originalPrice,
+      minOrderAmount: safeMinOrderAmount,
+      isEligible: false,
+    };
+  }
+
+  const rawDiscountAmount = discountType === 'fixed'
+    ? roundCurrency(Number.isFinite(discountAmountValue) && discountAmountValue > 0 ? discountAmountValue : 0)
+    : roundCurrency(originalPrice * (Number.isFinite(discountPercent) && discountPercent > 0 ? discountPercent : 0) / 100);
+  const limitedDiscountAmount = discountType === 'percent' && Number.isFinite(maxAmount) && maxAmount > 0
     ? Math.min(rawDiscountAmount, roundCurrency(maxAmount))
     : rawDiscountAmount;
   const discountAmount = Math.min(originalPrice, Math.max(0, limitedDiscountAmount));
@@ -1451,7 +1469,39 @@ function calculatePromotionPricing(basePrice, promotion = null) {
     originalPrice,
     discountAmount,
     finalPrice,
+    minOrderAmount: safeMinOrderAmount,
+    isEligible: true,
   };
+}
+
+function buildPromotionIneligibleMessage(promotion = null, minOrderAmount = 0) {
+  const promotionCode = normalizeText(promotion?.code);
+  const minOrderText = formatCurrency(minOrderAmount || 0);
+
+  if (promotionCode) {
+    return `Mã ${promotionCode} chỉ áp dụng cho đơn từ ${minOrderText}.`;
+  }
+
+  return `Ưu đãi chỉ áp dụng cho đơn từ ${minOrderText}.`;
+}
+
+function buildPromotionTypeSummaryText(promotion = null) {
+  const discountType = String(promotion?.discountType ?? 'percent').trim().toLowerCase();
+
+  if (discountType === 'fixed') {
+    const discountAmount = Number(promotion?.discountAmount ?? 0);
+    return discountAmount > 0 ? `Giảm cố định ${formatCurrency(discountAmount)}` : '';
+  }
+
+  const discountPercent = Number(promotion?.discountPercent ?? 0);
+  const maxAmount = Number(promotion?.maxAmount ?? 0);
+
+  if (!(discountPercent > 0)) {
+    return '';
+  }
+
+  const maxAmountText = maxAmount > 0 ? `, tối đa ${formatCurrency(maxAmount)}` : '';
+  return `Giảm ${discountPercent}%${maxAmountText}`;
 }
 
 function buildPromotionSummaryText(promotion = null, discountAmount = 0) {
@@ -1471,6 +1521,12 @@ function buildPromotionSummaryText(promotion = null, discountAmount = 0) {
     parts.push(promotionTitle);
   }
 
+  const typeSummary = buildPromotionTypeSummaryText(promotion);
+
+  if (typeSummary) {
+    parts.push(typeSummary);
+  }
+
   if (discountAmount > 0) {
     parts.push(`Giảm ${formatCurrency(discountAmount)}`);
   }
@@ -1488,7 +1544,7 @@ async function resolveBookingPromotion(payload = {}) {
   }
 
   if (isSqlServerConfigured()) {
-    const promotionResult = await listPromotions({ status: 'active' });
+    const promotionResult = await listPromotions({ status: 'active', visibility: 'all' });
     const activePromotions = Array.isArray(promotionResult?.promotions) ? promotionResult.promotions : [];
     let resolvedPromotion = null;
 
@@ -1504,16 +1560,32 @@ async function resolveBookingPromotion(payload = {}) {
       throw createValidationError('Ma uu dai khong hop le hoac da het han. Vui long chon lai.');
     }
 
+    if (String(resolvedPromotion.visibility ?? '').toLowerCase() === 'hidden') {
+      const normalizedResolvedCode = normalizePromotionLookupCode(resolvedPromotion.code);
+
+      if (!promotionCode || normalizedResolvedCode !== promotionCode) {
+        throw createValidationError('Ma uu dai khong hop le hoac da het han. Vui long chon lai.');
+      }
+    }
+
     return resolvedPromotion;
   }
 
+  const fallbackDiscountType = String(payload?.promotionDiscountType ?? 'percent').trim().toLowerCase();
   const fallbackDiscountPercent = Number(payload?.promotionDiscountPercent);
+  const fallbackDiscountAmount = Number(payload?.promotionDiscountAmount);
   const fallbackMaxAmount = Number(payload?.promotionMaxAmount);
+  const fallbackMinOrderAmount = Number(payload?.promotionMinOrderAmount);
   const fallbackPromotionTitle = normalizeText(payload?.promotionTitle);
   const fallbackPromotionScope = normalizeText(payload?.promotionScope);
+  const fallbackPromotionStartsAt = normalizeText(payload?.promotionStartsAt);
   const fallbackPromotionExpiresAt = normalizeText(payload?.promotionExpiresAt);
+  const fallbackPromotionVisibility = normalizeText(payload?.promotionVisibility) || 'public';
 
-  if (!Number.isFinite(fallbackDiscountPercent) || fallbackDiscountPercent <= 0) {
+  const hasPercentDiscount = fallbackDiscountType !== 'fixed' && Number.isFinite(fallbackDiscountPercent) && fallbackDiscountPercent > 0;
+  const hasFixedDiscount = fallbackDiscountType === 'fixed' && Number.isFinite(fallbackDiscountAmount) && fallbackDiscountAmount > 0;
+
+  if (!hasPercentDiscount && !hasFixedDiscount) {
     return null;
   }
 
@@ -1522,9 +1594,14 @@ async function resolveBookingPromotion(payload = {}) {
     code: promotionCode,
     title: fallbackPromotionTitle,
     scope: fallbackPromotionScope,
-    discountPercent: fallbackDiscountPercent,
+    discountType: fallbackDiscountType === 'fixed' ? 'fixed' : 'percent',
+    discountPercent: hasPercentDiscount ? fallbackDiscountPercent : 0,
+    discountAmount: hasFixedDiscount ? fallbackDiscountAmount : 0,
     maxAmount: Number.isFinite(fallbackMaxAmount) && fallbackMaxAmount >= 0 ? fallbackMaxAmount : 0,
+    minOrderAmount: Number.isFinite(fallbackMinOrderAmount) && fallbackMinOrderAmount >= 0 ? fallbackMinOrderAmount : 0,
+    startsAt: fallbackPromotionStartsAt,
     expiresAt: fallbackPromotionExpiresAt,
+    visibility: fallbackPromotionVisibility,
     status: 'active',
   };
 }
@@ -1946,7 +2023,12 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
     }
 
     if (normalizedTripStatus === 'DaHuy' && ['DaDon', 'DangThucHien'].includes(currentTripStatus)) {
-      throw createValidationError('Không thể hủy chuyến sau khi khách đã được đón.');
+      const cancellationMeta = normalizeCancellationMeta(cancelMeta);
+      const cancelledByRoleCode = String(cancellationMeta?.cancelledByRoleCode ?? '').trim().toLowerCase();
+
+      if (cancelledByRoleCode !== 'q1') {
+        throw createValidationError('Không thể hủy chuyến sau khi khách đã được đón.');
+      }
     }
 
     if (!canTransitionTripStatus(currentTripStatus, normalizedTripStatus)) {
@@ -2355,6 +2437,11 @@ export async function bookRide(payload) {
 
   const appliedPromotion = await resolveBookingPromotion(payload);
   const promotionPricing = calculatePromotionPricing(selectedRide.price, appliedPromotion);
+
+  if (appliedPromotion && !promotionPricing.isEligible) {
+    throw createValidationError(buildPromotionIneligibleMessage(appliedPromotion, promotionPricing.minOrderAmount));
+  }
+
   const promotionSummary = buildPromotionSummaryText(appliedPromotion, promotionPricing.discountAmount);
 
   const booking = {
@@ -2385,9 +2472,14 @@ export async function bookRide(payload) {
     promotionId: appliedPromotion ? normalizePromotionLookupId(appliedPromotion.id) : null,
     promotionCode: normalizeText(appliedPromotion?.code).toUpperCase() || null,
     promotionTitle: normalizeText(appliedPromotion?.title) || null,
+    promotionDiscountType: normalizeText(appliedPromotion?.discountType) || 'percent',
     promotionDiscountPercent: Number(appliedPromotion?.discountPercent ?? 0) || 0,
+    promotionDiscountAmount: Number(appliedPromotion?.discountAmount ?? 0) || 0,
     promotionMaxAmount: Number(appliedPromotion?.maxAmount ?? 0) || 0,
+    promotionMinOrderAmount: Number(appliedPromotion?.minOrderAmount ?? 0) || 0,
     promotionScope: normalizeText(appliedPromotion?.scope) || null,
+    promotionVisibility: normalizeText(appliedPromotion?.visibility) || 'public',
+    promotionStartsAt: normalizeText(appliedPromotion?.startsAt) || null,
     promotionExpiresAt: normalizeText(appliedPromotion?.expiresAt) || null,
     promotionSummary,
     paymentMethod,
@@ -2439,6 +2531,17 @@ const TRIP_HISTORY_STATUS_TONES = {
 
 const TRIP_HISTORY_LIMIT_DEFAULT = 24;
 const TRIP_HISTORY_LIMIT_MAX = 40;
+const DRIVER_PLATFORM_FEE_PERCENT_DEFAULT = 30;
+
+function normalizeFeePercent(value, fallback = DRIVER_PLATFORM_FEE_PERCENT_DEFAULT) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return Math.max(0, Math.min(100, Number(fallback) || DRIVER_PLATFORM_FEE_PERCENT_DEFAULT));
+  }
+
+  return Math.max(0, Math.min(100, numericValue));
+}
 
 function normalizeTripHistoryRoleCode(rawRoleCode) {
   const normalizedRoleCode = String(rawRoleCode ?? '').trim().toUpperCase();
@@ -2591,15 +2694,26 @@ function normalizeHistoryAccountRow(accountRow) {
   };
 }
 
-function buildTripHistorySummary(rows = []) {
+function buildTripHistorySummary(rows = [], platformFeePercent = DRIVER_PLATFORM_FEE_PERCENT_DEFAULT) {
+  const normalizedPlatformFeePercent = normalizeFeePercent(platformFeePercent);
+
   return rows.reduce((summary, row) => {
     const status = getTripHistoryStatus(row);
     const distanceKm = Number(row.routeDistanceKm ?? row.QuangDuongKm);
     const amount = Number(row.paymentAmount ?? row.SoTien ?? row.GiaTien);
+    const normalizedAmount = Number.isFinite(amount) ? Math.max(0, amount) : 0;
+    const platformFeeAmount = status === 'completed'
+      ? Math.round(normalizedAmount * normalizedPlatformFeePercent / 100)
+      : 0;
+    const driverNetIncome = status === 'completed'
+      ? Math.max(0, normalizedAmount - platformFeeAmount)
+      : 0;
 
     summary.totalTrips += 1;
-    summary.totalAmount += Number.isFinite(amount) ? amount : 0;
+    summary.totalAmount += normalizedAmount;
     summary.totalDistanceKm += Number.isFinite(distanceKm) ? distanceKm : 0;
+    summary.totalDriverNetIncome += driverNetIncome;
+    summary.totalPlatformFeeAmount += platformFeeAmount;
 
     if (status === 'completed') {
       summary.completedTrips += 1;
@@ -2626,6 +2740,9 @@ function buildTripHistorySummary(rows = []) {
     cancelledTrips: 0,
     totalAmount: 0,
     totalDistanceKm: 0,
+    totalDriverNetIncome: 0,
+    totalPlatformFeeAmount: 0,
+    platformFeePercent: normalizedPlatformFeePercent,
   });
 }
 
@@ -2914,6 +3031,13 @@ async function enrichTripHistoryRow(row, account = null) {
   const routeProvider = getTripHistoryRouteProvider(row.routeProvider);
   const paymentLabel = getTripHistoryPaymentLabel(paymentMethod, paymentProvider);
   const paymentStatusLabel = getPaymentStatusLabel(paymentStatus || row.bookingPaymentStatus);
+  const platformFeePercent = normalizeFeePercent(env.driverPlatformFeePercent);
+  const platformFeeAmount = status === 'completed'
+    ? Math.round(Math.max(0, finalPrice) * platformFeePercent / 100)
+    : 0;
+  const driverNetIncome = status === 'completed'
+    ? Math.max(0, Math.round(finalPrice) - platformFeeAmount)
+    : 0;
   const driverVehicleLicensePlate = normalizeText(row.driverVehicleLicensePlate);
   const driverVehicleName = normalizeText(row.driverVehicleName);
   const promotionCode = normalizeText(row.promotionCode ?? row.paymentPromotionCode);
@@ -2947,6 +3071,11 @@ async function enrichTripHistoryRow(row, account = null) {
     paymentProvider,
     paymentStatus,
     paymentStatusLabel,
+    platformFeePercent,
+    platformFeeAmount,
+    platformFeeAmountFormatted: formatCurrency(platformFeeAmount),
+    driverNetIncome,
+    driverNetIncomeFormatted: formatCurrency(driverNetIncome),
     price: finalPrice,
     priceFormatted: formatCurrency(finalPrice),
     originalPrice,
@@ -3260,7 +3389,8 @@ export async function getTripHistory(payload = {}) {
     .query(buildTripHistoryQuery(roleCode));
 
   const rows = queryResult.recordset ?? [];
-  const summary = buildTripHistorySummary(rows);
+  const platformFeePercent = normalizeFeePercent(env.driverPlatformFeePercent);
+  const summary = buildTripHistorySummary(rows, platformFeePercent);
   const reviewSummary = buildTripHistoryReviewSummary(rows);
   const items = await Promise.all(rows.slice(0, limit).map((row) => enrichTripHistoryRow(row, resolvedAccount)));
 
@@ -3271,6 +3401,7 @@ export async function getTripHistory(payload = {}) {
     account: resolvedAccount,
     totalCount: rows.length,
     limit,
+    platformFeePercent,
     summary,
     reviewSummary,
     items,
