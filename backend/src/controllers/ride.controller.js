@@ -1,4 +1,11 @@
-import { bookRide, getTripHistory, searchRides, submitRideRating, updateTripStatus } from '../services/ride.service.js';
+import { bookRide, getTripHistory, getTripInvoice, searchRides, submitRideRating, updateTripStatus } from '../services/ride.service.js';
+import {
+  createTripIssueReport,
+  getAdminComplaintDetail,
+  getTripIssueReportMeta,
+  listAdminComplaintRequests,
+  updateAdminComplaintDetail,
+} from '../services/complaint.service.js';
 import { getTripMessages, sendTripMessage } from '../services/tripChat.service.js';
 import { subscribeRideEvents } from '../services/ride.realtime.service.js';
 
@@ -198,6 +205,23 @@ export async function getTripHistoryController(request, response, next) {
   }
 }
 
+export async function getTripInvoiceController(request, response, next) {
+  try {
+    const result = await getTripInvoice({
+      ...request.query,
+      bookingCode: request.params.bookingCode ?? request.query?.bookingCode,
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
 export async function updateTripStatusController(request, response, next) {
   try {
     const result = await updateTripStatus({
@@ -222,6 +246,76 @@ export async function submitRideRatingController(request, response, next) {
       bookingCode: request.params.bookingCode ?? request.body?.bookingCode,
     });
 
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getTripIssueReportMetaController(request, response, next) {
+  try {
+    const result = await getTripIssueReportMeta(request.params.bookingCode, request.query);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function createTripIssueReportController(request, response, next) {
+  try {
+    const attachmentUrl = request.file?.filename ? `/uploads/complaints/${request.file.filename}` : '';
+    const result = await createTripIssueReport(request.params.bookingCode, {
+      ...request.body,
+      attachmentUrl,
+    });
+
+    response.status(201).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function listAdminComplaintRequestsController(request, response, next) {
+  try {
+    const result = await listAdminComplaintRequests(request.query);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getAdminComplaintDetailController(request, response, next) {
+  try {
+    const result = await getAdminComplaintDetail(request.params.complaintId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function updateAdminComplaintDetailController(request, response, next) {
+  try {
+    const result = await updateAdminComplaintDetail(request.params.complaintId, request.body);
     response.status(200).json(result);
   } catch (error) {
     if (sendKnownRideError(response, error)) {

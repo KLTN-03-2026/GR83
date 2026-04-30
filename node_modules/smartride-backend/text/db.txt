@@ -678,6 +678,88 @@ VALUES
 ('TK0004', 'levanc@smartride.local',    '123', 'Q3', N'Lê Văn C',     'levanc@smartride.local',    '0903333333', N'Thanh Khê, Đà Nẵng',  N'/uploads/avatars/tx-c.png', '1991-11-21', N'Nam', N'Khoa');
 GO
 
+-- ============================================================================
+-- BẢNG DÙNG CHUNG CHO BÁO LỖI KHÁCH HÀNG + HỖ TRỢ/AN TOÀN TÀI XẾ
+-- Được Quản lý khiếu nại dùng chung sau này
+-- ============================================================================
+
+IF OBJECT_ID(N'dbo.KhieuNaiHoTro', N'U') IS NOT NULL
+    DROP TABLE dbo.KhieuNaiHoTro;
+GO
+
+IF OBJECT_ID(N'dbo.LoaiKhieuNaiHoTro', N'U') IS NOT NULL
+    DROP TABLE dbo.LoaiKhieuNaiHoTro;
+GO
+
+CREATE TABLE dbo.LoaiKhieuNaiHoTro
+(
+    MaLoaiSuCo   VARCHAR(40)   NOT NULL,
+    TenLoaiSuCo  NVARCHAR(120) NOT NULL,
+    DoiTuong     VARCHAR(20)   NOT NULL,
+    ThuTuHienThi INT           NOT NULL CONSTRAINT DF_LoaiKhieuNaiHoTro_ThuTu DEFAULT 0,
+
+    CONSTRAINT PK_LoaiKhieuNaiHoTro PRIMARY KEY (MaLoaiSuCo),
+    CONSTRAINT CK_LoaiKhieuNaiHoTro_DoiTuong CHECK (DoiTuong IN ('customer', 'driver', 'all'))
+);
+GO
+
+CREATE TABLE dbo.KhieuNaiHoTro
+(
+    MaKN           INT            IDENTITY(1,1) NOT NULL,
+    MaTK           VARCHAR(20)    NOT NULL,
+    VaiTroNguoiGui VARCHAR(10)    NOT NULL,
+    MaChuyen       VARCHAR(30)    NULL,
+    LoaiSuCo       VARCHAR(40)    NOT NULL,
+    MoTa           NVARCHAR(1200) NOT NULL,
+    TrangThai      VARCHAR(20)    NOT NULL CONSTRAINT DF_KhieuNaiHoTro_TrangThai DEFAULT 'new',
+    ThoiDiemSuViec DATETIME2(0)   NULL,
+    TepDinhKemUrl  NVARCHAR(500)  NULL,
+    PhanHoiAdmin   NVARCHAR(1200) NULL,
+    MaTKXuLy       VARCHAR(20)    NULL,
+    NgayTao        DATETIME2(0)   NOT NULL CONSTRAINT DF_KhieuNaiHoTro_NgayTao DEFAULT SYSDATETIME(),
+    NgayCapNhat    DATETIME2(0)   NOT NULL CONSTRAINT DF_KhieuNaiHoTro_NgayCapNhat DEFAULT SYSDATETIME(),
+
+    CONSTRAINT PK_KhieuNaiHoTro PRIMARY KEY (MaKN),
+    CONSTRAINT CK_KhieuNaiHoTro_VaiTroNguoiGui CHECK (VaiTroNguoiGui IN ('Q2','Q3')),
+    CONSTRAINT CK_KhieuNaiHoTro_TrangThai CHECK (TrangThai IN ('new','processing','resolved','rejected')),
+    CONSTRAINT CK_KhieuNaiHoTro_MoTa CHECK (LEN(LTRIM(RTRIM(MoTa))) BETWEEN 10 AND 1200),
+    CONSTRAINT FK_KhieuNaiHoTro_TaiKhoan FOREIGN KEY (MaTK)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT FK_KhieuNaiHoTro_DatXe FOREIGN KEY (MaChuyen)
+        REFERENCES dbo.DatXe(MaChuyen)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT FK_KhieuNaiHoTro_Loai FOREIGN KEY (LoaiSuCo)
+        REFERENCES dbo.LoaiKhieuNaiHoTro(MaLoaiSuCo)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+GO
+
+INSERT INTO dbo.LoaiKhieuNaiHoTro (MaLoaiSuCo, TenLoaiSuCo, DoiTuong, ThuTuHienThi)
+VALUES
+('fare-issue',       N'Giá cước / thanh toán',          'customer', 1),
+('driver-attitude',  N'Thái độ tài xế',                 'customer', 2),
+('unsafe-driving',   N'Tài xế lái xe không an toàn',    'customer', 3),
+('lost-item',        N'Thất lạc đồ dùng',               'customer', 4),
+('app-error',        N'Lỗi ứng dụng',                   'all',      5),
+('other',            N'Lý do khác',                     'all',      6),
+('accident',         N'Tai nạn khẩn cấp',               'driver',   7),
+('vehicle-issue',    N'Xe gặp sự cố',                   'driver',   8),
+('customer-conflict',N'Mâu thuẫn với khách',            'driver',   9),
+('safety-threat',    N'Nguy cơ an toàn',                'driver',  10);
+GO
+
+CREATE INDEX IX_KhieuNaiHoTro_MaTK_NgayTao
+ON dbo.KhieuNaiHoTro (MaTK, NgayTao DESC, MaKN DESC);
+GO
+
+CREATE INDEX IX_KhieuNaiHoTro_MaChuyen
+ON dbo.KhieuNaiHoTro (MaChuyen);
+GO
+
 -- Dữ liệu mẫu ngân hàng
 INSERT INTO dbo.NganHang (MaNH, HoVaTen, STK, NganHang)
 VALUES

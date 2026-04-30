@@ -3850,6 +3850,7 @@ svg {
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .trip-history-modal__status.is-success {
@@ -4783,6 +4784,410 @@ svg {
   transform: translateY(-1px);
 }
 
+.trip-history-modal__action-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ===== CustomerTripIssueReportModal ===== */
+.customer-issue-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1350;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.customer-issue-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+.customer-issue-modal__window {
+  position: relative;
+  z-index: 1;
+  width: min(1140px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 24px 50px rgba(15, 23, 42, 0.22);
+}
+
+.customer-issue-modal__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.customer-issue-modal__close img {
+  width: 18px;
+  height: 18px;
+}
+
+.customer-issue-modal__grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.92fr) minmax(420px, 1.18fr);
+  gap: 22px;
+  padding: 34px 34px 28px;
+}
+
+.customer-issue-modal__trip-card,
+.customer-issue-modal__form-card {
+  border-radius: 20px;
+}
+
+.customer-issue-modal__trip-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e5e7eb;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.customer-issue-modal__map {
+  min-height: 210px;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid #dbe4ee;
+  background: #e2e8f0;
+}
+
+.customer-issue-modal__trip-meta {
+  display: grid;
+  gap: 12px;
+}
+
+.customer-issue-modal__trip-time {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.customer-issue-modal__trip-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #334155;
+}
+
+.customer-issue-modal__trip-line strong {
+  font-size: 1.15rem;
+  color: #111827;
+}
+
+.customer-issue-modal__location {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding-top: 4px;
+}
+
+.customer-issue-modal__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  margin-top: 5px;
+  position: relative;
+}
+
+.customer-issue-modal__dot::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  width: 2px;
+  height: 34px;
+  background: #d1d5db;
+  transform: translateX(-50%);
+}
+
+.customer-issue-modal__location:last-of-type .customer-issue-modal__dot::after {
+  display: none;
+}
+
+.customer-issue-modal__dot--pickup {
+  background: #3b82f6;
+}
+
+.customer-issue-modal__dot--destination {
+  background: #dc2626;
+}
+
+.customer-issue-modal__location strong {
+  display: block;
+  color: #111827;
+  font-size: 1.02rem;
+}
+
+.customer-issue-modal__location small {
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.customer-issue-modal__driver-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.customer-issue-modal__driver-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: #eef2f7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.customer-issue-modal__driver-avatar img {
+  width: 40px;
+  height: 40px;
+  opacity: 0.75;
+}
+
+.customer-issue-modal__driver-info {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.customer-issue-modal__driver-info span {
+  display: block;
+  color: #6b7280;
+  font-size: 0.88rem;
+}
+
+.customer-issue-modal__driver-info strong {
+  display: block;
+  color: #111827;
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
+.customer-issue-modal__privacy-note {
+  padding-left: 28px;
+  position: relative;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.customer-issue-modal__privacy-note::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #84cc16;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.customer-issue-modal__form-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  padding: 18px 18px 16px;
+}
+
+.customer-issue-modal__form-card h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 2rem;
+}
+
+.customer-issue-modal__form-card > p {
+  margin: 8px 0 18px;
+  color: #64748b;
+  font-size: 0.98rem;
+}
+
+.customer-issue-modal__field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.customer-issue-modal__field > span {
+  color: #334155;
+  font-weight: 700;
+  font-size: 0.96rem;
+}
+
+.customer-issue-modal__select,
+.customer-issue-modal__textarea,
+.customer-issue-modal__date-input {
+  width: 100%;
+  border: 1px solid #d4dce6;
+  border-radius: 14px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.customer-issue-modal__select,
+.customer-issue-modal__date-input {
+  min-height: 52px;
+  padding: 0 16px;
+}
+
+.customer-issue-modal__textarea {
+  resize: vertical;
+  min-height: 110px;
+  padding: 14px 16px;
+}
+
+.customer-issue-modal__field small {
+  justify-self: end;
+  color: #94a3b8;
+}
+
+.customer-issue-modal__upload-box {
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 16px;
+  padding: 18px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.customer-issue-modal__upload-box input {
+  max-width: 240px;
+}
+
+.customer-issue-modal__upload-box strong {
+  display: block;
+  color: #334155;
+}
+
+.customer-issue-modal__upload-box small {
+  display: block;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.customer-issue-modal__error,
+.customer-issue-modal__success {
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.customer-issue-modal__error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.customer-issue-modal__success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.customer-issue-modal__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.customer-issue-modal__primary,
+.customer-issue-modal__secondary {
+  min-height: 54px;
+  border-radius: 14px;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.customer-issue-modal__secondary {
+  background: #f8fafc;
+  color: #334155;
+  border-color: #dbe3ec;
+}
+
+.customer-issue-modal__primary {
+  background: linear-gradient(90deg, #79d143 0%, #60bb34 100%);
+  color: #fff;
+  box-shadow: 0 16px 30px rgba(96, 187, 52, 0.22);
+}
+
+.customer-issue-modal__primary:disabled,
+.customer-issue-modal__secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 980px) {
+  .customer-issue-modal__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-issue-modal__driver-info {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .customer-issue-modal {
+    padding: 10px;
+  }
+
+  .customer-issue-modal__window {
+    width: min(100vw - 20px, 1000px);
+  }
+
+  .customer-issue-modal__grid {
+    padding: 18px;
+  }
+
+  .customer-issue-modal__form-card h2 {
+    font-size: 1.55rem;
+  }
+
+  .customer-issue-modal__actions {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-issue-modal__upload-box {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 @media (max-width: 1120px) {
   .trip-history-modal__table-head {
     display: none;
@@ -5386,6 +5791,12 @@ svg {
   text-align: center;
 }
 
+.trip-history-modal__table-cell--action {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: center;
+}
+
 .trip-history-modal__detail-button {
   min-height: 2.2rem;
   border-radius: 0.88rem;
@@ -5403,6 +5814,334 @@ svg {
   background: #b7c4ff;
 }
 
+.trip-history-modal__detail-button--secondary {
+  border-color: rgba(20, 121, 18, 0.25);
+  background: #c9f0b5;
+  color: #14532d;
+  box-shadow: 0 10px 18px rgba(22, 163, 74, 0.12);
+}
+
+.trip-history-modal__detail-button--secondary:hover {
+  background: #b7e89e;
+}
+
+.trip-history-modal__detail-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.trip-invoice-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: grid;
+  place-items: center;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+}
+
+.trip-invoice-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 17, 31, 0.6);
+}
+
+.trip-invoice-modal__window {
+  position: relative;
+  width: min(1100px, 96vw);
+  max-height: 94vh;
+  overflow: auto;
+  border-radius: 1rem;
+  background: #f2f6f0;
+  box-shadow: 0 24px 48px rgba(8, 18, 10, 0.35);
+}
+
+.trip-invoice-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.95rem 1.2rem;
+  background: linear-gradient(180deg, rgba(19, 80, 20, 0.15), rgba(19, 80, 20, 0.04));
+}
+
+.trip-invoice-modal__header h2 {
+  margin: 0;
+  font-size: clamp(2rem, 3.2vw, 3rem);
+  letter-spacing: 0.02em;
+  color: #0f3f18;
+}
+
+.trip-invoice-modal__header button {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.trip-invoice-modal__header button img {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+.trip-invoice-modal__content {
+  margin: 1rem;
+  border: 6px solid #96cc7f;
+  border-radius: 0.9rem;
+  background: #f8fbf6;
+  padding: 1rem;
+}
+
+.trip-invoice-modal__title-wrap {
+  text-align: center;
+  margin-bottom: 0.8rem;
+}
+
+.trip-invoice-modal__title-wrap h3 {
+  margin: 0;
+  color: #4f9a0c;
+  font-size: 2rem;
+}
+
+.trip-invoice-modal__title-wrap p {
+  margin: 0.25rem 0 0;
+  color: #5d9f26;
+  font-style: italic;
+}
+
+.trip-invoice-modal__grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 1.25rem;
+}
+
+.trip-invoice-modal__meta-list,
+.trip-invoice-modal__detail-list {
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.trip-invoice-modal__meta-list div,
+.trip-invoice-modal__detail-list div,
+.trip-invoice-modal__final-row,
+.trip-invoice-modal__total-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.trip-invoice-modal__total-row {
+  margin-top: 0.85rem;
+  padding-top: 0.55rem;
+  border-top: 2px solid #8ac664;
+}
+
+.trip-invoice-modal__total-row strong {
+  color: #4f9a0c;
+  font-size: 1.9rem;
+}
+
+.trip-invoice-modal__section {
+  margin-top: 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 2px solid #8ac664;
+}
+
+.trip-invoice-modal__section h4 {
+  margin: 0 0 0.45rem;
+  font-size: 1.65rem;
+}
+
+.trip-invoice-modal__final-row {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 2px solid #8ac664;
+}
+
+.trip-invoice-modal__bottom-grid {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.trip-invoice-modal__bottom-grid h5 {
+  margin: 0 0 0.3rem;
+  font-size: 1.25rem;
+}
+
+.trip-invoice-modal__bottom-grid p {
+  margin: 0;
+}
+
+.trip-invoice-modal__pdf-button {
+  margin-left: auto;
+  display: block;
+  min-height: 2.4rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(30, 105, 24, 0.3);
+  background: #8fd147;
+  color: #122611;
+  padding: 0.25rem 0.95rem;
+  font-weight: 800;
+}
+
+.trip-invoice-modal__section--route p {
+  margin: 0;
+  color: #2a3c28;
+}
+
+.trip-invoice-modal__route-point {
+  margin-top: 0.8rem;
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.trip-invoice-modal__route-point .dot {
+  width: 0.78rem;
+  height: 0.78rem;
+  margin-top: 0.3rem;
+  border-radius: 999px;
+}
+
+.trip-invoice-modal__route-point .dot--pickup {
+  background: #3b82f6;
+}
+
+.trip-invoice-modal__route-point .dot--destination {
+  background: #dc2626;
+}
+
+.trip-invoice-modal__route-point strong,
+.trip-invoice-modal__route-point small {
+  display: block;
+}
+
+.trip-invoice-modal__driver-box {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 2px solid #8ac664;
+}
+
+.trip-invoice-modal__driver-box p {
+  margin: 0.35rem 0;
+}
+
+@media (max-width: 900px) {
+  .trip-invoice-modal__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trip-invoice-modal__title-wrap h3 {
+    font-size: 1.45rem;
+  }
+
+  .trip-invoice-modal__section h4 {
+    font-size: 1.2rem;
+  }
+
+  .trip-invoice-modal__total-row strong {
+    font-size: 1.5rem;
+  }
+}
+
+@media print {
+  body > *:not(.trip-invoice-modal) {
+    display: none !important;
+  }
+
+  .trip-invoice-modal {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+    background: #fff !important;
+    z-index: auto !important;
+  }
+
+  .trip-invoice-modal__backdrop {
+    display: none !important;
+  }
+
+  .trip-invoice-modal__window {
+    position: static !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  .trip-invoice-modal__header {
+    background: none !important;
+    border-bottom: 2px solid #4f9a0c;
+    padding: 0.5rem 1rem !important;
+  }
+
+  .trip-invoice-modal__header h2 {
+    font-size: 2.2rem !important;
+    color: #0f3f18 !important;
+  }
+
+  .trip-invoice-modal__header button {
+    display: none !important;
+  }
+
+  .trip-invoice-modal__content {
+    margin: 0.5rem !important;
+    border: 3px solid #4f9a0c !important;
+    background: #fff !important;
+    padding: 0.75rem !important;
+    break-inside: avoid;
+  }
+
+  .trip-invoice-modal__title-wrap h3 {
+    font-size: 1.5rem !important;
+    color: #1a5c1a !important;
+  }
+
+  .trip-invoice-modal__title-wrap p {
+    font-size: 0.85rem !important;
+  }
+
+  .trip-invoice-modal__grid {
+    grid-template-columns: 1.15fr 1fr !important;
+    gap: 1rem !important;
+  }
+
+  .trip-invoice-modal__pdf-button {
+    display: none !important;
+  }
+
+  .trip-invoice-modal__total-row strong,
+  .trip-invoice-modal__final-row strong {
+    font-size: 1.3rem !important;
+    color: #1a5c1a !important;
+  }
+
+  .trip-invoice-modal__section {
+    border-top: 1px solid #4f9a0c !important;
+  }
+
+  .trip-invoice-modal__total-row {
+    border-top: 1px solid #4f9a0c !important;
+  }
+
+  .trip-invoice-modal__final-row {
+    border-top: 1px solid #4f9a0c !important;
+  }
+
+  .trip-invoice-modal__driver-box {
+    border-top: 1px solid #4f9a0c !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
 .trip-history-modal__status {
   display: inline-flex;
   align-items: center;
@@ -5413,6 +6152,7 @@ svg {
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .trip-history-modal__status.is-success {
@@ -17264,6 +18004,628 @@ svg {
   color: var(--booking-tab-accent);
 }
 
+  /* ===== AdminRevenueReportModal ===== */
+  .revenue-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .revenue-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .revenue-modal__window {
+    position: relative;
+    z-index: 1;
+    background: #fff;
+    border-radius: 12px;
+    width: min(1100px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
+  }
+
+  .revenue-modal .admin-user-modal__date-popper {
+    z-index: 1300;
+  }
+
+  .revenue-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  .revenue-modal__title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111;
+    margin: 0;
+  }
+
+  .revenue-modal__close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    line-height: 1;
+  }
+
+  .revenue-modal__close:hover {
+    background: #f3f4f6;
+    color: #111;
+  }
+
+  .revenue-modal__filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 24px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  .revenue-modal__filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 250px;
+  }
+
+  .revenue-modal__filter-label {
+    font-size: 13px;
+    color: #374151;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .revenue-modal__date-wrap {
+    position: relative;
+    min-width: 170px;
+  }
+
+  .revenue-modal__date-input {
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 7px 36px 7px 10px;
+    font-size: 13px;
+    color: #111;
+    background: #fff;
+    height: 36px;
+    width: 100%;
+    min-width: 170px;
+    cursor: pointer;
+  }
+
+  .revenue-modal__date-input:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  }
+
+  .revenue-modal__select {
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: #111;
+    background: #fff;
+    height: 36px;
+    cursor: pointer;
+    min-width: 160px;
+  }
+
+  .revenue-modal__select:focus {
+    outline: none;
+    border-color: #6366f1;
+  }
+
+  .revenue-modal__filter-btn {
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    height: 36px;
+  }
+
+  .revenue-modal__filter-btn:hover {
+    background: #4f46e5;
+  }
+
+  .revenue-modal__summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 14px 24px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  .revenue-modal__card {
+    background: #f8f9ff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 12px 16px;
+    text-align: center;
+  }
+
+  .revenue-modal__card--accent {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+  }
+
+  .revenue-modal__card-label {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+
+  .revenue-modal__card-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111;
+  }
+
+  .revenue-modal__card--accent .revenue-modal__card-value {
+    color: #4f46e5;
+  }
+
+  .revenue-modal__export-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 10px 24px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  .revenue-modal__export-btn {
+    border: none;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .revenue-modal__export-btn--excel {
+    background: #f59e0b;
+    color: #fff;
+  }
+
+  .revenue-modal__export-btn--excel:hover {
+    background: #d97706;
+  }
+
+  .revenue-modal__export-btn--pdf {
+    background: #ef4444;
+    color: #fff;
+  }
+
+  .revenue-modal__export-btn--pdf:hover {
+    background: #dc2626;
+  }
+
+  .revenue-modal__table-wrap {
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .revenue-modal__loading,
+  .revenue-modal__error {
+    padding: 40px;
+    text-align: center;
+    font-size: 14px;
+    color: #6b7280;
+  }
+
+  .revenue-modal__error {
+    color: #dc2626;
+  }
+
+  .revenue-modal__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .revenue-modal__table thead tr {
+    background: #1e1b4b;
+    color: #fff;
+  }
+
+  .revenue-modal__table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  .revenue-modal__table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .revenue-modal__table tbody tr:hover td {
+    background: #f5f6ff;
+  }
+
+  .revenue-modal__num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .revenue-modal__num--bold {
+    font-weight: 600;
+    color: #111;
+  }
+
+  .revenue-modal__num--discount {
+    color: #16a34a;
+  }
+
+  .revenue-modal__num--fee {
+    color: #4f46e5;
+    font-weight: 500;
+  }
+
+  .revenue-modal__code {
+    font-family: monospace;
+    font-size: 12px;
+    color: #374151;
+  }
+
+  .revenue-modal__payment {
+    font-size: 12px;
+    color: #374151;
+  }
+
+  .revenue-modal__footer {
+    padding: 10px 24px;
+    font-size: 12px;
+    color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  @media (max-width: 900px) {
+    .revenue-modal__summary {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .revenue-modal__filters {
+      gap: 8px;
+    }
+
+    .revenue-modal__filter-group {
+      min-width: 100%;
+    }
+
+    .revenue-modal__date-wrap {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .revenue-modal__select {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .revenue-modal__export-row {
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+  }
+
+/* ===== DriverSupportSafetyModal ===== */
+.driver-support-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.driver-support-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.driver-support-modal__window {
+  position: relative;
+  z-index: 1;
+  width: min(700px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow: auto;
+  border-radius: 20px;
+  background: #f5f6f8;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+.driver-support-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 10px;
+}
+
+.driver-support-modal__title {
+  margin: 0;
+  font-size: 34px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.driver-support-modal__close {
+  border: none;
+  background: transparent;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.driver-support-modal__close:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.driver-support-modal__close img {
+  width: 20px;
+  height: 20px;
+}
+
+.driver-support-modal__content {
+  padding: 0 22px 22px;
+}
+
+.driver-support-modal__sub {
+  margin: 0 0 10px;
+  font-size: 30px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.driver-support-modal__quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.driver-support-modal__quick-action {
+  min-height: 92px;
+  border-radius: 14px;
+  color: #fff;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.driver-support-modal__quick-action strong {
+  font-size: 24px;
+  text-transform: uppercase;
+}
+
+.driver-support-modal__quick-action span {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.driver-support-modal__quick-action--sos {
+  background: #ef2020;
+}
+
+.driver-support-modal__quick-action--call {
+  background: #08b561;
+}
+
+.driver-support-modal__quick-action--chat {
+  background: #3780ea;
+}
+
+.driver-support-modal__contact-lines {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  color: #1f2937;
+  font-size: 24px;
+}
+
+.driver-support-modal__contact-lines span {
+  display: inline-block;
+  min-width: 96px;
+}
+
+.driver-support-modal__form-title {
+  font-size: 38px;
+  margin-bottom: 8px;
+  color: #111827;
+  font-weight: 800;
+}
+
+.driver-support-modal__select,
+.driver-support-modal__textarea {
+  width: 100%;
+  border: 1px solid #bfc6d1;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 24px;
+  color: #111827;
+}
+
+.driver-support-modal__select {
+  height: 64px;
+  padding: 0 16px;
+  margin-bottom: 10px;
+}
+
+.driver-support-modal__textarea {
+  resize: vertical;
+  min-height: 126px;
+  padding: 12px 16px;
+}
+
+.driver-support-modal__error {
+  margin-top: 8px;
+  color: #dc2626;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.driver-support-modal__actions {
+  margin-top: 12px;
+}
+
+.driver-support-modal__submit {
+  border: none;
+  border-radius: 11px;
+  background: #facc15;
+  color: #1f2937;
+  font-size: 30px;
+  font-weight: 700;
+  min-width: 220px;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+
+.driver-support-modal__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.driver-support-modal__history {
+  margin-top: 14px;
+  border-top: 1px solid #d9dee7;
+  padding-top: 12px;
+}
+
+.driver-support-modal__history h4 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  color: #111827;
+}
+
+.driver-support-modal__history ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.driver-support-modal__history li {
+  background: #fff;
+  border: 1px solid #dbe0e8;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.driver-support-modal__history-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.driver-support-modal__history li p {
+  margin: 6px 0;
+  font-size: 18px;
+  color: #334155;
+}
+
+.driver-support-modal__history li small {
+  font-size: 16px;
+  color: #6b7280;
+}
+
+.driver-support-modal__empty {
+  padding: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  font-size: 18px;
+  color: #475569;
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .driver-support-modal__title {
+    font-size: 24px;
+  }
+
+  .driver-support-modal__sub {
+    font-size: 21px;
+  }
+
+  .driver-support-modal__quick-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-support-modal__quick-action strong {
+    font-size: 20px;
+  }
+
+  .driver-support-modal__quick-action span,
+  .driver-support-modal__contact-lines,
+  .driver-support-modal__history h4,
+  .driver-support-modal__history-line {
+    font-size: 16px;
+  }
+
+  .driver-support-modal__form-title {
+    font-size: 23px;
+  }
+
+  .driver-support-modal__select,
+  .driver-support-modal__textarea,
+  .driver-support-modal__submit,
+  .driver-support-modal__history li p,
+  .driver-support-modal__history li small,
+  .driver-support-modal__empty {
+    font-size: 14px;
+  }
+}
+
 .content-section--promo {
   background: linear-gradient(180deg, #eff2f4 0%, #eceff2 100%);
 }
@@ -19707,11 +21069,11 @@ svg {
   min-width: 180px;
   box-shadow: 0 6px 24px rgba(0,0,0,0.12);
   z-index: 100;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .atm-toolbar__dropdown-panel--time {
-  min-width: 220px;
+  min-width: 260px;
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -19722,9 +21084,9 @@ svg {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.8rem;
+  font-size: 0.92rem;
   color: #374151;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .atm-toolbar__date-input {
@@ -19809,7 +21171,7 @@ svg {
 .atm-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: 0.96rem;
 }
 
 .atm-table thead tr {
@@ -19821,11 +21183,11 @@ svg {
 }
 
 .atm-table th {
-  padding: 0.6rem 0.75rem;
+  padding: 0.68rem 0.78rem;
   font-weight: 700;
   text-align: left;
   white-space: nowrap;
-  font-size: 0.82rem;
+  font-size: 0.93rem;
 }
 
 .atm-table tbody tr {
@@ -19838,7 +21200,7 @@ svg {
 }
 
 .atm-table td {
-  padding: 0.5rem 0.75rem;
+  padding: 0.58rem 0.78rem;
   color: #1e293b;
   vertical-align: middle;
 }
@@ -19848,13 +21210,13 @@ svg {
   font-weight: 700;
   color: #3b3fd8;
   white-space: nowrap;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
 }
 
 .atm-table__route {
   width: 220px;
   max-width: 220px;
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   color: #374151;
   vertical-align: middle;
 }
@@ -19889,7 +21251,7 @@ svg {
   white-space: nowrap;
   font-weight: 600;
   color: #065f46;
-  font-size: 0.82rem;
+  font-size: 0.94rem;
 }
 
 .atm-table__actions {
@@ -19906,7 +21268,7 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.82rem;
+  font-size: 0.92rem;
   font-weight: 600;
   color: #1e293b;
   white-space: nowrap;
@@ -19925,7 +21287,7 @@ svg {
   padding: 0.38rem 0.85rem;
   border: none;
   border-radius: 8px;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.15s, transform 0.1s;
@@ -20151,5 +21513,344 @@ svg {
   .atm-route__pickup,
   .atm-route__dest {
     max-width: 120px;
+  }
+}
+
+/* ===== AdminComplaintManagementModal ===== */
+.admin-complaint-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 230;
+  display: grid;
+  place-items: center;
+  padding: 0.9rem;
+}
+
+.admin-complaint-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 19, 25, 0.45);
+}
+
+.admin-complaint-modal__window {
+  position: relative;
+  width: min(1140px, 100%);
+  max-height: min(90vh, 940px);
+  background: #f7f9fb;
+  border-radius: 18px;
+  border: 1px solid #dde4ec;
+  box-shadow: 0 28px 64px rgba(10, 18, 28, 0.28);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-complaint-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid #dce5ee;
+}
+
+.admin-complaint-modal__header h2 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.admin-complaint-modal__header button {
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.admin-complaint-modal__header button img {
+  width: 1rem;
+  height: 1rem;
+}
+
+.admin-complaint-modal__toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.85rem 1.2rem;
+}
+
+.admin-complaint-modal__toolbar select,
+.admin-complaint-modal__toolbar input {
+  height: 2.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 0 0.85rem;
+  font-size: 1rem;
+}
+
+.admin-complaint-modal__toolbar input {
+  width: min(360px, 60vw);
+}
+
+.admin-complaint-modal__table-wrap {
+  flex: 1;
+  overflow: auto;
+  border-top: 1px solid #e3e9f0;
+}
+
+.admin-complaint-modal__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 920px;
+}
+
+.admin-complaint-modal__table thead th {
+  background: #4a3ec1;
+  color: #ffffff;
+  text-align: center;
+  padding: 0.85rem 0.7rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.admin-complaint-modal__table tbody td {
+  border-bottom: 1px solid #e4eaf1;
+  text-align: center;
+  padding: 0.85rem 0.6rem;
+  font-size: 1rem;
+}
+
+.admin-complaint-modal__table tbody td:nth-child(4) {
+  text-align: left;
+}
+
+.admin-complaint-modal__table button {
+  border: 0;
+  border-radius: 10px;
+  background: #8bd94f;
+  color: #0e1722;
+  font-size: 0.98rem;
+  font-weight: 700;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.admin-complaint-modal__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+}
+
+.admin-complaint-modal__status::before {
+  content: '';
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.admin-complaint-modal__status.is-processing::before {
+  background: radial-gradient(circle at 30% 30%, #ffe89a, #d9a732);
+}
+
+.admin-complaint-modal__status.is-resolved::before {
+  background: radial-gradient(circle at 30% 30%, #a3ffca, #2dbd75);
+}
+
+.admin-complaint-modal__empty {
+  text-align: center;
+  color: #556172;
+  padding: 1.3rem 0.8rem;
+}
+
+.admin-complaint-modal__empty--error {
+  color: #b42318;
+}
+
+.admin-complaint-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.admin-complaint-detail__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 20, 28, 0.38);
+}
+
+.admin-complaint-detail__window {
+  position: relative;
+  width: min(1120px, 100%);
+  max-height: min(90vh, 920px);
+  overflow: auto;
+  border-radius: 16px;
+  background: #f7f8fa;
+  border: 1px solid #dde5ee;
+  padding: 1rem 1.2rem 1.15rem;
+}
+
+.admin-complaint-detail__header h3 {
+  margin: 0 0 0.95rem;
+  font-size: 2rem;
+}
+
+.admin-complaint-detail__meta-grid,
+.admin-complaint-detail__contact-grid,
+.admin-complaint-detail__content-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.admin-complaint-detail__meta-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-complaint-detail__meta-grid article,
+.admin-complaint-detail__contact-card,
+.admin-complaint-detail__box,
+.admin-complaint-detail__content-grid textarea {
+  border: 1px solid #d8e0e9;
+  border-radius: 14px;
+  background: #f1f4f7;
+}
+
+.admin-complaint-detail__meta-grid article {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 0.95rem;
+}
+
+.admin-complaint-detail__meta-grid article span {
+  font-size: 1.05rem;
+}
+
+.admin-complaint-detail__meta-grid article strong {
+  font-size: 2rem;
+}
+
+.admin-complaint-detail__contact-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-complaint-detail__contact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding: 0.85rem 0.95rem;
+}
+
+.admin-complaint-detail__contact-card strong {
+  font-size: 1.18rem;
+}
+
+.admin-complaint-detail__contact-card small {
+  font-size: 1.04rem;
+}
+
+.admin-complaint-detail__content-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.6rem;
+}
+
+.admin-complaint-detail__content-grid h4,
+.admin-complaint-detail > h4 {
+  margin: 0.45rem 0;
+  font-size: 1.8rem;
+}
+
+.admin-complaint-detail__box {
+  min-height: 6.2rem;
+  padding: 0.9rem;
+  font-size: 1.24rem;
+}
+
+.admin-complaint-detail__content-grid textarea {
+  width: 100%;
+  min-height: 6.2rem;
+  resize: vertical;
+  padding: 0.9rem;
+  font-size: 1.2rem;
+}
+
+.admin-complaint-detail__status-row {
+  display: flex;
+  gap: 2rem;
+  margin-top: 0.65rem;
+}
+
+.admin-complaint-detail__status-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.2rem;
+}
+
+.admin-complaint-detail__footer {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.admin-complaint-detail__footer div {
+  display: inline-flex;
+  gap: 0.9rem;
+}
+
+.admin-complaint-detail__footer button {
+  min-width: 170px;
+  height: 3rem;
+  border-radius: 12px;
+  border: 0;
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.admin-complaint-detail__footer button:first-child {
+  background: #d7dce3;
+  color: #1e293b;
+}
+
+.admin-complaint-detail__footer button:last-child {
+  background: #94d841;
+  color: #12240e;
+  font-weight: 700;
+}
+
+.admin-complaint-detail__state {
+  color: #4b5565;
+  font-size: 1.02rem;
+}
+
+.admin-complaint-detail__state--error {
+  color: #b42318;
+}
+
+@media (max-width: 900px) {
+  .admin-complaint-modal__toolbar {
+    flex-direction: column;
+  }
+
+  .admin-complaint-modal__toolbar input {
+    width: 100%;
+  }
+
+  .admin-complaint-detail__meta-grid,
+  .admin-complaint-detail__contact-grid,
+  .admin-complaint-detail__content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-complaint-detail__footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.65rem;
   }
 }

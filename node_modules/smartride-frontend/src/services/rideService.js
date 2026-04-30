@@ -23,6 +23,25 @@ function buildTripHistoryQueryString(params = {}) {
   return queryString ? `?${queryString}` : '';
 }
 
+function buildTripInvoiceQueryString(params = {}) {
+  const searchParams = new URLSearchParams();
+
+  if (params.accountId) {
+    searchParams.set('accountId', String(params.accountId));
+  }
+
+  if (params.identifier) {
+    searchParams.set('identifier', String(params.identifier));
+  }
+
+  if (params.roleCode) {
+    searchParams.set('roleCode', String(params.roleCode));
+  }
+
+  const queryString = searchParams.toString();
+  return queryString ? `?${queryString}` : '';
+}
+
 function buildTripMessagesQueryString(params = {}) {
   const searchParams = new URLSearchParams();
 
@@ -42,12 +61,29 @@ function buildTripMessagesQueryString(params = {}) {
   return queryString ? `?${queryString}` : '';
 }
 
+function buildTripIssueMetaQueryString(params = {}) {
+  const searchParams = new URLSearchParams();
+
+  if (params.accountId) {
+    searchParams.set('accountId', String(params.accountId));
+  }
+
+  const queryString = searchParams.toString();
+  return queryString ? `?${queryString}` : '';
+}
+
 export const rideService = {
   getHealth() {
     return request('/health');
   },
   getTripHistory(params = {}, { signal } = {}) {
     return request(`/rides/history${buildTripHistoryQueryString(params)}`, {
+      method: 'GET',
+      signal,
+    });
+  },
+  getTripInvoice(bookingCode, params = {}, { signal } = {}) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/invoice${buildTripInvoiceQueryString(params)}`, {
       method: 'GET',
       signal,
     });
@@ -89,6 +125,18 @@ export const rideService = {
     return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/rating`, {
       method: 'POST',
       body: JSON.stringify(payload && typeof payload === 'object' ? payload : {}),
+    });
+  },
+  getTripIssueReportMeta(bookingCode, params = {}, { signal } = {}) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/issues/meta${buildTripIssueMetaQueryString(params)}`, {
+      method: 'GET',
+      signal,
+    });
+  },
+  submitTripIssueReport(bookingCode, payload) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/issues`, {
+      method: 'POST',
+      body: payload,
     });
   },
 };

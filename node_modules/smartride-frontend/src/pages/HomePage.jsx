@@ -100,6 +100,8 @@ const MOCKUP_ROUTE_PRESETS = {
 
 const REMEMBER_LOGIN_STORAGE_KEY = 'smartride.rememberedLoginCredentials';
 const DRIVER_DISPATCH_SETTINGS_STORAGE_PREFIX = 'smartride.driver.dispatch.settings';
+const FORCE_TRIP_CANCELLED_EVENT_NAME = 'smartride:force-trip-cancelled';
+const FORCE_TRIP_CANCELLED_STORAGE_KEY = 'smartride.forceTripCancelled';
 const DEFAULT_DRIVER_DISPATCH_SETTINGS = {
   checkedIn: false,
   autoReceiveEnabled: true,
@@ -1448,6 +1450,8 @@ export default function HomePage() {
   const bookingSuccessRef = useRef(null);
   const dismissedCustomerTrackingBookingCodeRef = useRef('');
   const bookingTrackingModalOpenRef = useRef(false);
+  const bookingTrackingBubbleOpenRef = useRef(false);
+  const driverTripActionBubbleOpenRef = useRef(false);
   const bookingRatingPromptedBookingCodeRef = useRef('');
   const bookingCompletionNotifiedBookingCodeRef = useRef('');
   const activeDriverRideRequestRef = useRef(null);
@@ -1565,6 +1569,14 @@ export default function HomePage() {
   useEffect(() => {
     bookingTrackingModalOpenRef.current = bookingTrackingModalOpen;
   }, [bookingTrackingModalOpen]);
+
+  useEffect(() => {
+    bookingTrackingBubbleOpenRef.current = bookingTrackingBubbleOpen;
+  }, [bookingTrackingBubbleOpen]);
+
+  useEffect(() => {
+    driverTripActionBubbleOpenRef.current = driverTripActionBubbleOpen;
+  }, [driverTripActionBubbleOpen]);
 
   useEffect(() => {
     bookingSuccessRef.current = bookingSuccess;
@@ -1939,6 +1951,7 @@ export default function HomePage() {
 
       if (
         !bookingTrackingModalOpenRef.current &&
+        !bookingTrackingBubbleOpenRef.current &&
         !isDismissedByCustomer &&
         isCustomerTrackedRideStatus(nextBooking?.tripStatus ?? nextBooking?.status)
       ) {
@@ -2026,8 +2039,7 @@ export default function HomePage() {
 
         setActiveDriverTripAction((currentRequest) => mergeRideBookingSnapshot(currentRequest, matchedBooking));
 
-        if (!driverTripActionModalOpen) {
-          setDriverTripActionBubbleOpen(false);
+        if (!driverTripActionModalOpen && !driverTripActionBubbleOpenRef.current) {
           setDriverTripActionModalOpen(true);
         }
 
@@ -2099,6 +2111,13 @@ export default function HomePage() {
           const isCancelledEvent = normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled';
 
           if (isCancelledEvent) {
+            const cancelledByRoleCode = String(
+              event?.cancelledByRoleCode ?? eventBooking?.cancelledByRoleCode ?? '',
+            ).trim().toLowerCase();
+            const cancelledMessage = cancelledByRoleCode === 'q1'
+              ? 'Chuyến đi của bạn đã bị hủy bởi hệ thống. Xin lỗi vì sự bất tiện này'
+              : 'Chuyến đã bị hủy.';
+
             setBookingTrackingModalOpen(false);
             setBookingTrackingBubbleOpen(false);
             setBookingRatingModalOpen(false);
@@ -2111,7 +2130,7 @@ export default function HomePage() {
             setBookingSuccess(null);
             dismissedCustomerTrackingBookingCodeRef.current = '';
             resetBodyScrollLock();
-            showMiniToast('Chuyến đã bị hủy.', 'error', 2600);
+            showMiniToast(cancelledMessage, 'error', 2600);
 
             return;
           }
@@ -2161,7 +2180,13 @@ export default function HomePage() {
           const eventBookingCode = getRideBookingCode(eventBooking);
           const normalizedTripStatus = String(event?.tripStatus ?? eventBooking?.tripStatus ?? '').trim().toLowerCase();
           const isAcceptedEvent = normalizedTripStatus === 'danhanchuyen';
-          const isCancelledEvent = normalizedTripStatus === 'dahuy';
+          const isCancelledEvent = normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled';
+          const cancelledByRoleCode = String(
+            event?.cancelledByRoleCode ?? eventBooking?.cancelledByRoleCode ?? '',
+          ).trim().toLowerCase();
+          const driverCancelledMessage = cancelledByRoleCode === 'q1'
+            ? 'Chuyến đi của bạn đã bị hủy bởi hệ thống. Xin lỗi vì sự bất tiện này'
+            : 'Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.';
 
           // If no booking code but it is a cancellation, still close driver modals.
           if (!eventBookingCode) {
@@ -2178,7 +2203,7 @@ export default function HomePage() {
               setBookingSuccess(null);
               dismissedCustomerTrackingBookingCodeRef.current = '';
               resetBodyScrollLock();
-              showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
+              showMiniToast(driverCancelledMessage, 'error', 2600);
             }
             return;
           }
@@ -2207,7 +2232,7 @@ export default function HomePage() {
           }
 
           if (isCancelledEvent) {
-            showMiniToast('Chuyến đã bị hủy. Các giao diện trạng thái và chat đã được đóng.', 'error', 2600);
+            showMiniToast(driverCancelledMessage, 'error', 2600);
 
             setBookingTrackingModalOpen(false);
             setBookingTrackingBubbleOpen(false);
@@ -3445,6 +3470,76 @@ export default function HomePage() {
       }
     }
   };
+
+  const forceClearBookingTrackingByBookingCode = (bookingCode, message = 'Chuyến đã bị hủy.') => {
+    const normalizedBookingCode = String(bookingCode ?? '').trim();
+    const activeBookingCode = String(getRideBookingCode(bookingSuccessRef.current) ?? '').trim();
+
+    if (!normalizedBookingCode || !activeBookingCode || activeBookingCode !== normalizedBookingCode) {
+      return false;
+    }
+
+    setBookingTrackingModalOpen(false);
+    setBookingTrackingBubbleOpen(false);
+    setBookingRatingModalOpen(false);
+    setBookingSuccess(null);
+    dismissedCustomerTrackingBookingCodeRef.current = '';
+    resetBodyScrollLock();
+    showMiniToast(message, 'error', 2600);
+
+    return true;
+  };
+
+  const handleForceTripCancelled = (bookingCode) => {
+    forceClearBookingTrackingByBookingCode(
+      bookingCode,
+      'Chuyến đi của bạn đã bị hủy bởi hệ thống. Xin lỗi vì sự bất tiện này',
+    );
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleLocalForceCancelled = (payload = {}) => {
+      const forcedBookingCode = String(payload?.bookingCode ?? '').trim();
+
+      if (!forcedBookingCode) {
+        return;
+      }
+
+      forceClearBookingTrackingByBookingCode(
+        forcedBookingCode,
+        'Chuyến đi của bạn đã bị hủy bởi hệ thống. Xin lỗi vì sự bất tiện này',
+      );
+    };
+
+    const handleCustomEvent = (event) => {
+      handleLocalForceCancelled(event?.detail ?? {});
+    };
+
+    const handleStorage = (event) => {
+      if (event.key !== FORCE_TRIP_CANCELLED_STORAGE_KEY || !event.newValue) {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(event.newValue);
+        handleLocalForceCancelled(payload);
+      } catch {
+        // Ignore malformed storage payload.
+      }
+    };
+
+    window.addEventListener(FORCE_TRIP_CANCELLED_EVENT_NAME, handleCustomEvent);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener(FORCE_TRIP_CANCELLED_EVENT_NAME, handleCustomEvent);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [bookingSuccess, showMiniToast]);
 
   const minimizeBookingTrackingModal = () => {
     if (!bookingSuccess) {
@@ -6508,6 +6603,7 @@ export default function HomePage() {
         onLogout={handleLogout}
         onLogin={openLoginModal}
         onNotify={showMiniToast}
+        onForceTripCancelled={handleForceTripCancelled}
         driverCheckedIn={isDriverCheckedIn}
         driverAutoReceiveEnabled={isDriverAutoReceiveEnabled}
         onDriverCheckedInChange={handleDriverCheckedInChange}

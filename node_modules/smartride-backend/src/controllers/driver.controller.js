@@ -20,6 +20,11 @@ import {
   unlockDriver,
   updateDriver,
 } from '../services/driver.service.js';
+import {
+  createDriverSupportRequest as createDriverSupportRequestService,
+  getDriverSupportOverview as getDriverSupportOverviewService,
+  listDriverSupportRequests as listDriverSupportRequestsService,
+} from '../services/driverSupport.service.js';
 import { broadcastAdminEvent } from '../services/ride.realtime.service.js';
 
 const uploadedDriverDocumentDirectories = {
@@ -245,6 +250,45 @@ export async function transferDriverWalletController(request, response, next) {
   try {
     const result = await transferDriverWallet(request.params.driverId, request.body);
     response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getDriverSupportOverviewController(request, response, next) {
+  try {
+    const result = await getDriverSupportOverviewService(request.params.driverId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function listDriverSupportRequestsController(request, response, next) {
+  try {
+    const result = await listDriverSupportRequestsService(request.params.driverId, request.query);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownDriverError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function createDriverSupportRequestController(request, response, next) {
+  try {
+    const result = await createDriverSupportRequestService(request.params.driverId, request.body);
+    response.status(201).json(result);
   } catch (error) {
     if (sendKnownDriverError(response, error)) {
       return;

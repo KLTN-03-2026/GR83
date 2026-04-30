@@ -2717,6 +2717,7 @@ function buildTripHistorySummary(rows = [], platformFeePercent = DRIVER_PLATFORM
 
     if (status === 'completed') {
       summary.completedTrips += 1;
+      summary.completedAmount += normalizedAmount;
     }
 
     if (status === 'scheduled') {
@@ -2739,6 +2740,7 @@ function buildTripHistorySummary(rows = [], platformFeePercent = DRIVER_PLATFORM
     inProgressTrips: 0,
     cancelledTrips: 0,
     totalAmount: 0,
+    completedAmount: 0,
     totalDistanceKm: 0,
     totalDriverNetIncome: 0,
     totalPlatformFeeAmount: 0,
@@ -2866,6 +2868,7 @@ function buildTripHistorySelectClause() {
       dx.MaChuyen AS bookingCode,
       dx.MaTK AS accountId,
       dx.MaTX AS driverAccountId,
+      tx.MaTK AS driverSystemAccountId,
       dx.LyDoHuy AS cancelReasonRaw,
       dx.TenKhachHang AS customerName,
       dx.SDT AS customerPhone,
@@ -3405,5 +3408,82 @@ export async function getTripHistory(payload = {}) {
     summary,
     reviewSummary,
     items,
+  };
+}
+
+export async function getTripInvoice(payload = {}) {
+  const bookingCode = normalizeText(payload?.bookingCode ?? payload?.tripCode ?? payload?.id);
+  const roleCode = normalizeTripHistoryRoleCode(payload?.roleCode);
+  const normalizedAccountId = normalizeText(payload?.accountId);
+  const normalizedIdentifier = normalizeText(payload?.identifier).toLowerCase();
+
+  if (!bookingCode) {
+    throw createValidationError('Thiếu mã chuyến để lấy hóa đơn.');
+  }
+
+  if (roleCode !== 'Q1' && !normalizedAccountId && !normalizedIdentifier) {
+    throw createValidationError('Thiếu thông tin tài khoản để lấy hóa đơn.');
+  }
+
+  await ensureRideSchema();
+
+  const [resolvedAccount, pool] = await Promise.all([
+    resolveHistoryAccount(payload),
+    getSqlServerPool(),
+  ]);
+
+  const queryResult = await pool
+    .request()
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .query(`
+      ${buildTripHistorySelectClause()}
+      WHERE LOWER(ISNULL(dx.MaChuyen, '')) = LOWER(@bookingCode)
+      ORDER BY dx.NgayTao DESC;
+    `);
+
+  const row = queryResult.recordset?.[0] ?? null;
+
+  if (!row) {
+    throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
+  }
+
+  const requesterAccountId = normalizeText(resolvedAccount?.id || normalizedAccountId);
+  const ownerAccountId = normalizeText(row.accountId);
+  const driverAccountId = normalizeText(row.driverAccountId);
+  const driverSystemAccountId = normalizeText(row.driverSystemAccountId);
+
+  if (roleCode === 'Q2') {
+    if (requesterAccountId && ownerAccountId.toLowerCase() !== requesterAccountId.toLowerCase()) {
+      throw createForbiddenError('Ban khong co quyen xem hoa don cua chuyen nay.');
+    }
+  }
+
+  if (roleCode === 'Q3') {
+    const isDriverOwner = requesterAccountId
+      && (
+        driverAccountId.toLowerCase() === requesterAccountId.toLowerCase()
+        || driverSystemAccountId.toLowerCase() === requesterAccountId.toLowerCase()
+      );
+
+    if (!isDriverOwner) {
+      throw createForbiddenError('Ban khong co quyen xem hoa don cua chuyen nay.');
+    }
+  }
+
+  const item = await enrichTripHistoryRow(row, resolvedAccount);
+
+  if (item.status !== 'completed') {
+    throw createForbiddenError('Chỉ có thể xuất hóa đơn cho chuyến đi đã hoàn thành.');
+  }
+
+  const invoiceCode = normalizeText(item.paymentCode).replace(/^TT/i, 'HDX') || `HDX-${item.bookingCode}`;
+
+  return {
+    success: true,
+    message: 'Lấy hóa đơn chuyến đi thành công.',
+    item: {
+      ...item,
+      invoiceCode,
+    },
   };
 }

@@ -7,11 +7,14 @@ import {
   acknowledgeDriverVehicleChangeResolutionController,
   approveVehicleChangeRequestController,
   approveDriverController,
+  createDriverSupportRequestController,
   createVehicleChangeRequestController,
   createDriverController,
+  getDriverSupportOverviewController,
   getDriverProfileController,
   getDriverWalletController,
   getVehicleChangeRequestDetailController,
+  listDriverSupportRequestsController,
   listDriverVehicleChangeResolutionsController,
   listDriverWalletTransactionsController,
   listDriversController,
@@ -118,6 +121,9 @@ router.get('/:driverId/wallet', getDriverWalletController);
 router.get('/:driverId/wallet/transactions', listDriverWalletTransactionsController);
 router.post('/:driverId/wallet/topup', topupDriverWalletController);
 router.post('/:driverId/wallet/transfer', transferDriverWalletController);
+router.get('/:driverId/support-overview', getDriverSupportOverviewController);
+router.get('/:driverId/support-requests', listDriverSupportRequestsController);
+router.post('/:driverId/support-requests', createDriverSupportRequestController);
 router.post('/:driverId/vehicle-change-requests', createVehicleChangeRequestController);
 router.get('/:driverId/vehicle-change-requests/resolutions', listDriverVehicleChangeResolutionsController);
 router.patch(

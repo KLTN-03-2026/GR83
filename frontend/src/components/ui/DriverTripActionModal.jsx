@@ -471,6 +471,12 @@ export default function DriverTripActionModal({
     setCancelConfirmOpen(false);
     setCustomerInfoDialogOpen(false);
     setChatDialogOpen(false);
+
+    if (onMinimize) {
+      onMinimize();
+      return;
+    }
+
     onClose?.();
   };
 

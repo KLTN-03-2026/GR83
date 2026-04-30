@@ -4,6 +4,11 @@ import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { rideService } from '../../services/rideService';
 import { connectRideEventStream } from '../../services/rideRealtimeService';
+import DatePicker, { registerLocale } from 'react-datepicker';
+import { format, isValid, parse } from 'date-fns';
+import { vi } from 'date-fns/locale';
+
+registerLocale('vi-VN', vi);
 
 const TRIP_STATUS_OPTIONS = [
   { value: 'all', label: 'Tất cả trạng thái' },
@@ -40,6 +45,31 @@ function formatDate(value) {
   const d = new Date(value);
   if (isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function parseDateForPicker(dateString) {
+  const normalizedValue = String(dateString ?? '').trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedDate = parse(normalizedValue, 'yyyy-MM-dd', new Date());
+
+  if (isValid(parsedDate)) {
+    return parsedDate;
+  }
+
+  const fallbackDate = new Date(normalizedValue);
+  return isValid(fallbackDate) ? fallbackDate : null;
+}
+
+function formatDateForFilterValue(dateValue) {
+  if (!(dateValue instanceof Date) || !isValid(dateValue)) {
+    return '';
+  }
+
+  return format(dateValue, 'yyyy-MM-dd');
 }
 
 function DetailRow({ label, value }) {
@@ -200,7 +230,9 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
     if (!open) return;
     const handler = (e) => {
       if (statusDropRef.current && !statusDropRef.current.contains(e.target)) setStatusOpen(false);
-      if (timeDropRef.current && !timeDropRef.current.contains(e.target)) setTimeOpen(false);
+      if (timeDropRef.current && !timeDropRef.current.contains(e.target)) {
+        setTimeOpen(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -245,6 +277,14 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
     setStatusFilter(value);
     setStatusOpen(false);
     setPage(1);
+  };
+
+  const toggleTimeFilter = () => {
+    setTimeOpen((current) => {
+      const nextOpen = !current;
+
+      return nextOpen;
+    });
   };
 
   const handleCancelConfirm = async () => {
@@ -307,7 +347,7 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
 
           {/* Time filter */}
           <div className="atm-toolbar__dropdown" ref={timeDropRef}>
-            <button className="atm-toolbar__dropdown-btn" onClick={() => setTimeOpen((v) => !v)}>
+            <button className="atm-toolbar__dropdown-btn" onClick={toggleTimeFilter}>
               <span>📅</span>
               <span>Thời gian</span>
               <span className="atm-toolbar__dropdown-caret">▾</span>
@@ -316,26 +356,60 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
               <div className="atm-toolbar__dropdown-panel atm-toolbar__dropdown-panel--time">
                 <label className="atm-toolbar__time-label">
                   Từ ngày
-                  <input
-                    type="date"
-                    className="atm-toolbar__date-input"
-                    value={dateFrom}
-                    onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                  <DatePicker
+                    selected={parseDateForPicker(dateFrom)}
+                    onChange={(selectedDate) => {
+                      setDateFrom(formatDateForFilterValue(selectedDate));
+                      setPage(1);
+                    }}
+                    locale="vi-VN"
+                    dateFormat="dd/MM/yyyy"
+                    placeholderText="dd/mm/yyyy"
+                    showMonthDropdown
+                    showYearDropdown
+                    dropdownMode="select"
+                    shouldCloseOnSelect
+                    className="admin-user-modal__date-input"
+                    calendarClassName="admin-user-modal__date-calendar"
+                    popperClassName="admin-user-modal__date-popper"
+                    popperPlacement="bottom-start"
+                    autoComplete="off"
+                    showPopperArrow={false}
                   />
                 </label>
                 <label className="atm-toolbar__time-label">
                   Đến ngày
-                  <input
-                    type="date"
-                    className="atm-toolbar__date-input"
-                    value={dateTo}
-                    onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                  <DatePicker
+                    selected={parseDateForPicker(dateTo)}
+                    onChange={(selectedDate) => {
+                      setDateTo(formatDateForFilterValue(selectedDate));
+                      setPage(1);
+                    }}
+                    locale="vi-VN"
+                    dateFormat="dd/MM/yyyy"
+                    placeholderText="dd/mm/yyyy"
+                    showMonthDropdown
+                    showYearDropdown
+                    dropdownMode="select"
+                    shouldCloseOnSelect
+                    className="admin-user-modal__date-input"
+                    calendarClassName="admin-user-modal__date-calendar"
+                    popperClassName="admin-user-modal__date-popper"
+                    popperPlacement="bottom-start"
+                    autoComplete="off"
+                    showPopperArrow={false}
                   />
                 </label>
                 {(dateFrom || dateTo) && (
                   <button
                     className="atm-toolbar__clear-btn"
-                    onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); }}
+                    onClick={() => {
+                      setDateFrom('');
+                      setDateTo('');
+                      setDateFromPickerOpen(false);
+                      setDateToPickerOpen(false);
+                      setPage(1);
+                    }}
                   >
                     Xóa bộ lọc
                   </button>

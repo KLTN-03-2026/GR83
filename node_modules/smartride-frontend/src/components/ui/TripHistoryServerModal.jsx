@@ -7,7 +7,9 @@ import { vi } from 'date-fns/locale';
 import { closeIcon } from '../../assets/icons';
 import { rideService } from '../../services/rideService';
 import { classNames } from '../../utils/classNames';
+import CustomerTripIssueReportModal from './CustomerTripIssueReportModal';
 import TripHistoryDetailModal from './TripHistoryDetailModal';
+import TripInvoiceModal from './TripInvoiceModal';
 
 registerLocale('vi-VN', vi);
 
@@ -339,6 +341,7 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
   const pickupLabel = normalizeText(rawItem.pickupLabel);
   const destinationLabel = normalizeText(rawItem.destinationLabel);
   const vehicle = normalizeText(rawItem.vehicle).toLowerCase();
+  const tripStatus = normalizeText(rawItem.tripStatus);
   const vehicleLabel = normalizeText(rawItem.vehicleLabel) || 'Xe';
   const routeGeometry = normalizeRouteGeometry(rawItem.routeGeometry);
   const pickupPosition = normalizePosition(rawItem.pickupPosition);
@@ -364,6 +367,7 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
     status,
     statusLabel,
     statusTone,
+    tripStatus,
     bookedAt,
     completedAt,
     rideTitle: normalizeText(rawItem.rideTitle),
@@ -379,6 +383,7 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
     ratingScore: Number(rawItem.ratingScore ?? 0),
     ratingComment: normalizeText(rawItem.ratingComment),
     driverDisplayName: normalizeText(rawItem.driverDisplayName ?? rawItem.driverName),
+    driverAccountId: normalizeText(rawItem.driverAccountId),
     driverPhone: normalizeText(rawItem.driverPhone),
     driverVehicleName: normalizeText(rawItem.driverVehicleName),
     driverVehicleLicensePlate: normalizeText(rawItem.driverVehicleLicensePlate),
@@ -438,6 +443,7 @@ function deriveSummaryFromItems(items) {
 
     if (trip.status === 'completed') {
       summary.completedTrips += 1;
+      summary.completedAmount += Number(trip.price ?? 0) || 0;
     }
 
     if (trip.status === 'scheduled') {
@@ -460,6 +466,7 @@ function deriveSummaryFromItems(items) {
     inProgressTrips: 0,
     cancelledTrips: 0,
     totalAmount: 0,
+    completedAmount: 0,
     totalDistanceKm: 0,
   });
 }
@@ -472,6 +479,7 @@ function normalizeTripHistorySummary(responseSummary = {}, items = []) {
     inProgressTrips: Number(responseSummary.inProgressTrips ?? 0) || 0,
     cancelledTrips: Number(responseSummary.cancelledTrips ?? 0) || 0,
     totalAmount: Number(responseSummary.totalAmount ?? 0) || 0,
+    completedAmount: Number(responseSummary.completedAmount ?? 0) || 0,
     totalDistanceKm: Number(responseSummary.totalDistanceKm ?? 0) || 0,
   };
 
@@ -495,8 +503,8 @@ function buildTripHistoryStats(mode, summary) {
   return [
     { value: formatCompactNumber(summary.totalTrips), label: 'Tổng chuyến' },
     { value: formatCompactNumber(summary.completedTrips), label: 'Hoàn thành' },
-    { value: formatCompactNumber(summary.scheduledTrips), label: 'Đặt trước' },
-    { value: formatCurrency(summary.totalAmount), label: 'Tổng chi' },
+    { value: formatCompactNumber(summary.cancelledTrips), label: 'Đã hủy' },
+    { value: formatCurrency(summary.completedAmount ?? 0), label: 'Tổng chi' },
   ];
 }
 
@@ -548,6 +556,7 @@ export default function TripHistoryServerModal({
   accountDisplayName = '',
   accountIdentifier = '',
   accountPhone = '',
+  onNotify,
   onClose,
 }) {
   const normalizedMode = mode === 'driver' ? 'driver' : 'customer';
@@ -557,6 +566,9 @@ export default function TripHistoryServerModal({
   const [dateFilterPickerOpen, setDateFilterPickerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTripId, setSelectedTripId] = useState('');
+  const [issueReportTripId, setIssueReportTripId] = useState('');
+  const [invoiceTrip, setInvoiceTrip] = useState(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
   const [historySummary, setHistorySummary] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -616,6 +628,14 @@ export default function TripHistoryServerModal({
     return visibleTrips.find((trip) => trip.id === selectedTripId) ?? null;
   }, [selectedTripId, visibleTrips]);
 
+  const issueReportTrip = useMemo(() => {
+    if (!historyItems.length) {
+      return null;
+    }
+
+    return historyItems.find((trip) => trip.id === issueReportTripId) ?? null;
+  }, [historyItems, issueReportTripId]);
+
   const stats = useMemo(
     () => buildTripHistoryStats(normalizedMode, historySummary ?? deriveSummaryFromItems(historyItems)),
     [historyItems, historySummary, normalizedMode],
@@ -631,6 +651,9 @@ export default function TripHistoryServerModal({
     setDateFilterPickerOpen(false);
     setStatusFilter('all');
     setSelectedTripId('');
+    setIssueReportTripId('');
+    setInvoiceTrip(null);
+    setInvoiceLoading(false);
     setHistoryItems([]);
     setHistorySummary(null);
     setHistoryError('');
@@ -706,6 +729,16 @@ export default function TripHistoryServerModal({
         return;
       }
 
+      if (invoiceTrip) {
+        setInvoiceTrip(null);
+        return;
+      }
+
+      if (issueReportTripId) {
+        setIssueReportTripId('');
+        return;
+      }
+
       onClose?.();
     };
 
@@ -714,7 +747,7 @@ export default function TripHistoryServerModal({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [dateFilterPickerOpen, open, onClose, selectedTripId]);
+  }, [dateFilterPickerOpen, invoiceTrip, issueReportTripId, open, onClose, selectedTripId]);
 
   useEffect(() => {
     if (!open) {
@@ -725,8 +758,12 @@ export default function TripHistoryServerModal({
       setSelectedTripId('');
     }
 
+    if (issueReportTripId && !historyItems.some((trip) => trip.id === issueReportTripId)) {
+      setIssueReportTripId('');
+    }
+
     return undefined;
-  }, [open, selectedTripId, visibleTrips]);
+  }, [historyItems, issueReportTripId, open, selectedTripId, visibleTrips]);
 
   if (!open) {
     return null;
@@ -736,6 +773,31 @@ export default function TripHistoryServerModal({
   const selectedTripStatusTone = selectedTrip?.statusTone || 'neutral';
   const selectedTripDateLabel = formatTripDate(selectedTrip?.completedAt || selectedTrip?.bookedAt);
   const selectedTripPriceLabel = selectedTrip?.priceFormatted || '--';
+
+  const handleOpenInvoice = async (tripItem) => {
+    const bookingCode = normalizeText(tripItem?.bookingCode);
+
+    if (!bookingCode) {
+      onNotify?.('Không tìm thấy mã chuyến để mở hóa đơn.', 'error', 2200);
+      return;
+    }
+
+    setInvoiceLoading(true);
+
+    try {
+      const response = await rideService.getTripInvoice(bookingCode, {
+        accountId: resolvedAccountId,
+        identifier: resolvedIdentifier,
+        roleCode: normalizedMode === 'driver' ? 'Q3' : 'Q2',
+      });
+
+      setInvoiceTrip(response?.item ?? tripItem);
+    } catch (error) {
+      onNotify?.(error?.message || 'Không thể tải hóa đơn chuyến đi.', 'error', 2400);
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
 
   return createPortal(
     <div className={classNames('trip-history-modal', `trip-history-modal--${normalizedMode}`)} role="dialog" aria-modal="true" aria-label={preset.title}>
@@ -882,7 +944,7 @@ export default function TripHistoryServerModal({
                     <th>Số tiền</th>
                     <th>Ngày giờ</th>
                     <th>Trạng thái</th>
-                    <th>Chi tiết</th>
+                    <th>Thao tác</th>
                   </tr>
                 </thead>
 
@@ -951,12 +1013,53 @@ export default function TripHistoryServerModal({
             open={Boolean(selectedTrip)}
             trip={selectedTrip}
             mode={normalizedMode}
+            onOpenInvoice={(tripItem) => {
+              void handleOpenInvoice(tripItem);
+            }}
+            invoiceLoading={invoiceLoading}
             accountDisplayName={accountDisplayName}
             accountIdentifier={accountIdentifier}
             accountPhone={accountPhone}
+            onOpenIssueReport={async (tripItem) => {
+              const nextTripId = tripItem?.id ?? '';
+              const bookingCode = normalizeText(tripItem?.bookingCode);
+
+              if (!nextTripId || !bookingCode || !resolvedAccountId) {
+                onNotify?.('Không thể mở báo lỗi cho chuyến đi này.', 'error', 2200);
+                return;
+              }
+
+              try {
+                const metaResponse = await rideService.getTripIssueReportMeta(bookingCode, { accountId: resolvedAccountId });
+
+                if (metaResponse?.alreadyReported) {
+                  onNotify?.('Bạn đã khiếu nại cho chuyến đi này.', 'info', 2600);
+                  return;
+                }
+
+                setIssueReportTripId(nextTripId);
+              } catch (error) {
+                onNotify?.(error?.message || 'Không thể kiểm tra trạng thái khiếu nại.', 'error', 2600);
+              }
+            }}
             onClose={() => setSelectedTripId('')}
           />
         ) : null}
+
+        {issueReportTrip && normalizedMode === 'customer' ? (
+          <CustomerTripIssueReportModal
+            open={Boolean(issueReportTrip)}
+            trip={issueReportTrip}
+            accountId={resolvedAccountId}
+            onClose={() => setIssueReportTripId('')}
+          />
+        ) : null}
+
+        <TripInvoiceModal
+          open={Boolean(invoiceTrip)}
+          invoice={invoiceTrip}
+          onClose={() => setInvoiceTrip(null)}
+        />
       </section>
     </div>,
     document.body,

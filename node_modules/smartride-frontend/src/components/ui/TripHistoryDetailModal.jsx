@@ -124,6 +124,9 @@ export default function TripHistoryDetailModal({
   mode = 'customer',
   open = false,
   onClose,
+  onOpenInvoice,
+  invoiceLoading = false,
+  onOpenIssueReport,
   accountDisplayName = '',
   accountIdentifier = '',
   accountPhone = '',
@@ -149,10 +152,20 @@ export default function TripHistoryDetailModal({
   const bookingCodeLabel = trip.bookingCodeShortLabel || trip.bookingCode || '--';
   const tripCodeLabel = trip.tripCodeShortLabel || trip.tripCode || '--';
   const actionWindowExpired = normalizedMode === 'customer' && isOlderThanDays(trip.completedAt || trip.bookedAt, 7);
+  const normalizedTripStatus = normalizeText(trip.tripStatus).toLowerCase();
+  const driverNotAccepted = normalizedMode === 'customer'
+    && (
+      !normalizeText(trip.driverAccountId)
+      || normalizedTripStatus === 'chotaixe'
+      || normalizedTripStatus === 'waiting-driver'
+    );
+  const cannotReportIssue = actionWindowExpired || driverNotAccepted;
   const noticeText = normalizedMode === 'customer'
     ? actionWindowExpired
       ? 'Bạn không thể xếp hạng, gửi tiền tip hoặc báo lỗi sau 7 ngày.'
-      : 'Bạn có thể xếp hạng, gửi tiền tip hoặc báo lỗi trong 7 ngày sau chuyến đi.'
+      : driverNotAccepted
+        ? 'Tài xế chưa nhận đơn nên bạn chưa thể báo lỗi cho chuyến đi này.'
+        : 'Bạn có thể xếp hạng, gửi tiền tip hoặc báo lỗi trong 7 ngày sau chuyến đi.'
     : 'Tài xế xem lại hành trình, thanh toán và đánh giá của chuyến này.';
   const partyLabel = normalizedMode === 'customer' ? 'Tài xế' : 'Khách hàng';
   const partyName = normalizedMode === 'customer'
@@ -449,11 +462,24 @@ export default function TripHistoryDetailModal({
 
             {normalizedMode === 'customer' ? (
               <div className="trip-history-modal__action-row">
-                <button className="trip-history-modal__action-button trip-history-modal__action-button--invoice" type="button">
-                  Hóa đơn
-                </button>
+                {trip.status === 'completed' && (
+                  <button
+                    className="trip-history-modal__action-button trip-history-modal__action-button--invoice"
+                    type="button"
+                    onClick={() => onOpenInvoice?.(trip)}
+                    disabled={invoiceLoading}
+                  >
+                    {invoiceLoading ? 'Đang tải...' : 'Hóa đơn'}
+                  </button>
+                )}
 
-                <button className="trip-history-modal__action-button trip-history-modal__action-button--report" type="button">
+                <button
+                  className="trip-history-modal__action-button trip-history-modal__action-button--report"
+                  type="button"
+                  onClick={() => onOpenIssueReport?.(trip)}
+                  disabled={cannotReportIssue}
+                  title={driverNotAccepted ? 'Tài xế chưa nhận đơn' : ''}
+                >
                   Báo lỗi
                 </button>
               </div>

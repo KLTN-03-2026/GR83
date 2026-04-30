@@ -7,6 +7,8 @@ import AdminUserManagementModal from '../admin/AdminUserManagementModal';
 import AdminDriverManagementModal from '../admin/AdminDriverManagementModal';
 import AdminPromotionManagementModal from '../admin/AdminPromotionManagementModal';
 import AdminTripManagementModal from '../admin/AdminTripManagementModal';
+import AdminRevenueReportModal from '../admin/AdminRevenueReportModal';
+import AdminComplaintManagementModal from '../admin/AdminComplaintManagementModal';
 import AdminVehicleChangeRequestModal from '../admin/AdminVehicleChangeRequestModal';
 import TripHistoryModal from '../ui/TripHistoryModal';
 import DriverReviewModal from '../ui/DriverReviewModal';
@@ -14,6 +16,7 @@ import DriverWalletModal from '../ui/DriverWalletModal';
 import DriverPersonalInfoModal from '../ui/DriverPersonalInfoModal';
 import DriverIncomeReportModal from '../ui/DriverIncomeReportModal';
 import DriverRideReceiveSettingsModal from '../ui/DriverRideReceiveSettingsModal';
+import DriverSupportSafetyModal from '../ui/DriverSupportSafetyModal';
 import { notificationService } from '../../services/notificationService';
 import { driverVehicleRequestService } from '../../services/driverVehicleRequestService';
 import { connectRideEventStream } from '../../services/rideRealtimeService';
@@ -65,7 +68,10 @@ const ROLE_MENUS = {
           { id: 'driver-reviews', label: 'Xem đánh giá' },
           { id: 'driver-income-report', label: 'Quản lý thu nhập' },
         ],
-        [{ id: 'driver-trips', label: 'Quản lý chuyến đi' }, null],
+        [
+          { id: 'driver-trips', label: 'Quản lý chuyến đi' },
+          { id: 'driver-support-safety', label: 'Hỗ trợ và an toàn' },
+        ],
       ],
     },
   };
@@ -294,6 +300,7 @@ export default function Header({
   onLogout,
   onLogin,
   onNotify,
+  onForceTripCancelled,
   driverCheckedIn = false,
   driverAutoReceiveEnabled = true,
   onDriverCheckedInChange,
@@ -306,10 +313,13 @@ export default function Header({
   const [adminNotificationModalOpen, setAdminNotificationModalOpen] = useState(false);
   const [adminPromotionModalOpen, setAdminPromotionModalOpen] = useState(false);
   const [adminTripModalOpen, setAdminTripModalOpen] = useState(false);
+  const [adminRevenueModalOpen, setAdminRevenueModalOpen] = useState(false);
+  const [adminComplaintModalOpen, setAdminComplaintModalOpen] = useState(false);
   const [driverWalletModalOpen, setDriverWalletModalOpen] = useState(false);
   const [driverProfileModalOpen, setDriverProfileModalOpen] = useState(false);
   const [driverIncomeModalOpen, setDriverIncomeModalOpen] = useState(false);
   const [driverDispatchModalOpen, setDriverDispatchModalOpen] = useState(false);
+  const [driverSupportModalOpen, setDriverSupportModalOpen] = useState(false);
   const [driverResolutionPopup, setDriverResolutionPopup] = useState(null);
   const [pendingVehicleRequests, setPendingVehicleRequests] = useState([]);
   const [adminVehicleModalOpen, setAdminVehicleModalOpen] = useState(false);
@@ -390,6 +400,10 @@ export default function Header({
       setAdminTripModalOpen(false);
     }
 
+    if (normalizedRoleCode !== 'Q1' && adminComplaintModalOpen) {
+      setAdminComplaintModalOpen(false);
+    }
+
     if (normalizedRoleCode !== 'Q3' && driverWalletModalOpen) {
       setDriverWalletModalOpen(false);
     }
@@ -404,6 +418,10 @@ export default function Header({
 
     if (normalizedRoleCode !== 'Q3' && driverDispatchModalOpen) {
       setDriverDispatchModalOpen(false);
+    }
+
+    if (normalizedRoleCode !== 'Q3' && driverSupportModalOpen) {
+      setDriverSupportModalOpen(false);
     }
 
     if (normalizedRoleCode !== 'Q3' && driverResolutionPopup) {
@@ -429,10 +447,12 @@ export default function Header({
     adminNotificationModalOpen,
     adminUserModalOpen,
     activeTripHistoryItemId,
+    adminComplaintModalOpen,
     canViewNotifications,
     driverProfileModalOpen,
     driverIncomeModalOpen,
     driverDispatchModalOpen,
+    driverSupportModalOpen,
     driverResolutionPopup,
     driverWalletModalOpen,
     adminVehicleModalOpen,
@@ -451,10 +471,12 @@ export default function Header({
       !adminPaymentModalOpen &&
       !adminNotificationModalOpen &&
       !adminPromotionModalOpen &&
+      !adminComplaintModalOpen &&
       !driverWalletModalOpen &&
       !driverProfileModalOpen &&
       !driverIncomeModalOpen &&
       !driverDispatchModalOpen &&
+      !driverSupportModalOpen &&
       !adminVehicleModalOpen &&
       !adminUserModalOpen
     ) {
@@ -486,10 +508,12 @@ export default function Header({
       setAdminPaymentModalOpen(false);
       setAdminNotificationModalOpen(false);
       setAdminPromotionModalOpen(false);
+      setAdminComplaintModalOpen(false);
       setDriverWalletModalOpen(false);
       setDriverProfileModalOpen(false);
       setDriverIncomeModalOpen(false);
       setDriverDispatchModalOpen(false);
+      setDriverSupportModalOpen(false);
       setAdminVehicleModalOpen(false);
       setDriverResolutionPopup(null);
       setActiveTripHistoryItemId('');
@@ -514,10 +538,12 @@ export default function Header({
     adminNotificationModalOpen,
     adminPaymentModalOpen,
     adminPromotionModalOpen,
+    adminComplaintModalOpen,
     driverWalletModalOpen,
     driverProfileModalOpen,
     driverIncomeModalOpen,
     driverDispatchModalOpen,
+    driverSupportModalOpen,
     adminVehicleModalOpen,
     adminUserModalOpen,
   ]);
@@ -884,9 +910,36 @@ export default function Header({
       setAdminPaymentModalOpen(false);
       setAdminPromotionModalOpen(false);
       setAdminNotificationModalOpen(false);
+      setAdminComplaintModalOpen(false);
       setAdminTripModalOpen(true);
       return;
     }
+
+    if (normalizedRoleCode === 'Q1' && item.id === 'admin-complaints') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminTripModalOpen(false);
+      setAdminRevenueModalOpen(false);
+      setAdminComplaintModalOpen(true);
+      return;
+    }
+
+      if (normalizedRoleCode === 'Q1' && item.id === 'admin-revenue') {
+        setActiveRolePopupItem(null);
+        setAdminUserModalOpen(false);
+        setAdminDriverModalOpen(false);
+        setAdminPaymentModalOpen(false);
+        setAdminPromotionModalOpen(false);
+        setAdminNotificationModalOpen(false);
+        setAdminTripModalOpen(false);
+        setAdminComplaintModalOpen(false);
+        setAdminRevenueModalOpen(true);
+        return;
+      }
 
     if (normalizedRoleCode === 'Q3' && item.id === 'driver-wallet') {
       setActiveRolePopupItem(null);
@@ -897,6 +950,7 @@ export default function Header({
       setAdminPromotionModalOpen(false);
       setDriverProfileModalOpen(false);
       setDriverIncomeModalOpen(false);
+      setDriverSupportModalOpen(false);
       setActiveTripHistoryItemId('');
       setDriverWalletModalOpen(true);
       return;
@@ -912,8 +966,25 @@ export default function Header({
       setDriverProfileModalOpen(false);
       setDriverWalletModalOpen(false);
       setDriverDispatchModalOpen(false);
+      setDriverSupportModalOpen(false);
       setActiveTripHistoryItemId('');
       setDriverIncomeModalOpen(true);
+      return;
+    }
+
+    if (normalizedRoleCode === 'Q3' && item.id === 'driver-support-safety') {
+      setActiveRolePopupItem(null);
+      setAdminUserModalOpen(false);
+      setAdminDriverModalOpen(false);
+      setAdminPaymentModalOpen(false);
+      setAdminNotificationModalOpen(false);
+      setAdminPromotionModalOpen(false);
+      setDriverProfileModalOpen(false);
+      setDriverWalletModalOpen(false);
+      setDriverIncomeModalOpen(false);
+      setDriverDispatchModalOpen(false);
+      setActiveTripHistoryItemId('');
+      setDriverSupportModalOpen(true);
       return;
     }
 
@@ -927,6 +998,7 @@ export default function Header({
       setDriverProfileModalOpen(false);
       setDriverWalletModalOpen(false);
       setDriverIncomeModalOpen(false);
+      setDriverSupportModalOpen(false);
       setActiveTripHistoryItemId('');
       setDriverDispatchModalOpen(true);
       return;
@@ -940,6 +1012,9 @@ export default function Header({
       setAdminNotificationModalOpen(false);
       setAdminPromotionModalOpen(false);
       setDriverWalletModalOpen(false);
+      setDriverIncomeModalOpen(false);
+      setDriverDispatchModalOpen(false);
+      setDriverSupportModalOpen(false);
       setActiveTripHistoryItemId('');
       setDriverProfileModalOpen(true);
       return;
@@ -983,6 +1058,7 @@ export default function Header({
     setAdminPaymentModalOpen(false);
     setAdminNotificationModalOpen(false);
     setAdminPromotionModalOpen(false);
+    setAdminComplaintModalOpen(false);
     setDriverWalletModalOpen(false);
     setDriverProfileModalOpen(false);
     setDriverIncomeModalOpen(false);
@@ -1407,6 +1483,7 @@ export default function Header({
         accountDisplayName={accountDisplayName}
         accountIdentifier={accountIdentifier}
         accountPhone={accountPhone}
+        onNotify={onNotify}
         onClose={closeTripHistoryPopup}
       />
 
@@ -1423,7 +1500,14 @@ export default function Header({
 
       <AdminDriverManagementModal open={adminDriverModalOpen} onClose={() => setAdminDriverModalOpen(false)} />
 
-      <AdminPaymentManagementModal open={adminPaymentModalOpen} onClose={() => setAdminPaymentModalOpen(false)} />
+      <AdminPaymentManagementModal
+        open={adminPaymentModalOpen}
+        onClose={() => setAdminPaymentModalOpen(false)}
+        roleCode={normalizedRoleCode}
+        accountId={accountId}
+        accountIdentifier={accountIdentifier}
+        onNotify={onNotify}
+      />
 
       <AdminNotificationManagementModal
         open={adminNotificationModalOpen}
@@ -1440,6 +1524,18 @@ export default function Header({
         onClose={() => setAdminTripModalOpen(false)}
         accountId={accountId}
       />
+
+      <AdminComplaintManagementModal
+        open={adminComplaintModalOpen}
+        onClose={() => setAdminComplaintModalOpen(false)}
+        accountId={accountId}
+        onNotify={onNotify}
+      />
+
+        <AdminRevenueReportModal
+          open={adminRevenueModalOpen}
+          onClose={() => setAdminRevenueModalOpen(false)}
+        />
 
       <DriverWalletModal
         open={driverWalletModalOpen}
@@ -1481,6 +1577,14 @@ export default function Header({
         onCheckedInChange={(nextValue) => {
           onDriverCheckedInChange?.(nextValue);
         }}
+      />
+
+      <DriverSupportSafetyModal
+        open={driverSupportModalOpen}
+        onClose={() => setDriverSupportModalOpen(false)}
+        driverId={accountId}
+        onNotify={onNotify}
+        onForceTripCancelled={onForceTripCancelled}
       />
 
       <AdminVehicleChangeRequestModal

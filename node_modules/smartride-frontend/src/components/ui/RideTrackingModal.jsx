@@ -697,7 +697,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
         <div className="booking-tracking-modal__backdrop" onClick={handleBackdropClick} aria-hidden="true" />
 
         <section className="booking-tracking-modal__window booking-tracking-modal__window--preview">
-          <button className="booking-tracking-modal__close" type="button" onClick={() => onClose?.()} aria-label="Đóng">
+          <button className="booking-tracking-modal__close" type="button" onClick={() => onMinimize ? onMinimize() : onClose?.()} aria-label="Thu nhỏ">
             <img className="booking-tracking-modal__close-icon" src={closeIcon} alt="" aria-hidden="true" />
           </button>
 
@@ -853,7 +853,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
       <div className="booking-tracking-modal__backdrop" onClick={handleBackdropClick} aria-hidden="true" />
 
       <section className="booking-tracking-modal__window booking-tracking-modal__window--tracking">
-        <button className="booking-tracking-modal__close" type="button" onClick={() => onClose?.()} aria-label="Đóng">
+        <button className="booking-tracking-modal__close" type="button" onClick={() => onMinimize ? onMinimize() : onClose?.()} aria-label="Thu nhỏ">
           <img className="booking-tracking-modal__close-icon" src={closeIcon} alt="" aria-hidden="true" />
         </button>
 

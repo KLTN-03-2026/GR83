@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { format, isValid, parse } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { rideService } from '../../services/rideService';
 
 registerLocale('vi-VN', vi);
 
@@ -19,79 +20,6 @@ const PAYMENT_STATUS_OPTIONS = [
   { value: 'paid', label: 'Đã thanh toán' },
   { value: 'pending', label: 'Chờ xác nhận' },
   { value: 'failed', label: 'Thất bại' },
-];
-
-const PAYMENT_ROWS = [
-  {
-    id: 101,
-    paymentCode: 'TT-TR01',
-    tripCode: 'TR01',
-    customerName: 'Nguyễn Văn A',
-    driverName: 'Anh Tài',
-    amount: 50000,
-    paidAt: '2026-03-25T10:30:00',
-    status: 'paid',
-    paymentMethodLabel: 'Tiền mặt',
-    paymentProviderLabel: '',
-    rideTitle: 'RiBike tiết kiệm',
-    note: 'Cuốc xe đã được đối soát thành công.',
-  },
-  {
-    id: 102,
-    paymentCode: 'TT-TR02',
-    tripCode: 'TR02',
-    customerName: 'Trần Thị B',
-    driverName: 'Minh Hoàng',
-    amount: 150000,
-    paidAt: '2026-03-25T11:00:00',
-    status: 'failed',
-    paymentMethodLabel: 'Ví điện tử',
-    paymentProviderLabel: 'Momo',
-    rideTitle: 'RiCar tiết kiệm',
-    note: 'Giao dịch thất bại do ví điện tử không phản hồi.',
-  },
-  {
-    id: 103,
-    paymentCode: 'TT-TR03',
-    tripCode: 'TR03',
-    customerName: 'Lê Văn C',
-    driverName: 'Quang Huy',
-    amount: 70000,
-    paidAt: '2026-03-26T09:15:00',
-    status: 'paid',
-    paymentMethodLabel: 'QR code',
-    paymentProviderLabel: 'ZaloPay',
-    rideTitle: 'RiBike phổ thông',
-    note: 'Đã quét QR và xác nhận thanh toán.',
-  },
-  {
-    id: 104,
-    paymentCode: 'TT-TR04',
-    tripCode: 'TR04',
-    customerName: 'Phạm Thị D',
-    driverName: 'Anh Tài',
-    amount: 80000,
-    paidAt: '2026-03-26T14:20:00',
-    status: 'paid',
-    paymentMethodLabel: 'Tiền mặt',
-    paymentProviderLabel: '',
-    rideTitle: 'RiBike Plus',
-    note: 'Tiền mặt đã được thu sau khi kết thúc chuyến.',
-  },
-  {
-    id: 105,
-    paymentCode: 'TT-TR05',
-    tripCode: 'TR05',
-    customerName: 'Hoàng Văn E',
-    driverName: 'Minh Hoàng',
-    amount: 120000,
-    paidAt: '2026-03-27T08:45:00',
-    status: 'paid',
-    paymentMethodLabel: 'Ví điện tử',
-    paymentProviderLabel: 'VNPay',
-    rideTitle: 'RiCar Plus',
-    note: 'Giao dịch hoàn tất trước khi xe khởi hành.',
-  },
 ];
 
 function normalizeToken(value) {
@@ -176,7 +104,78 @@ function buildPaymentSummary(row) {
   return row.paymentMethodLabel;
 }
 
-export default function AdminPaymentManagementModal({ open = false, onClose }) {
+function normalizePaymentStatus(item = {}) {
+  const paymentStatus = normalizeToken(item.paymentStatus);
+  const tripStatus = normalizeToken(item.tripStatus || item.status);
+
+  if (paymentStatus === 'thatbai' || paymentStatus === 'failed' || tripStatus === 'dahuy') {
+    return 'failed';
+  }
+
+  if (paymentStatus === 'dathanhtoan' || paymentStatus === 'paid' || tripStatus === 'hoanthanh' || item.status === 'completed') {
+    return 'paid';
+  }
+
+  return 'pending';
+}
+
+function parsePaymentMethodSummary(item = {}) {
+  const paymentLabel = String(item.paymentLabel ?? '').trim();
+
+  if (!paymentLabel) {
+    return {
+      paymentMethodLabel: 'Không xác định',
+      paymentProviderLabel: '',
+    };
+  }
+
+  const separator = paymentLabel.includes(' - ') ? ' - ' : paymentLabel.includes('-') ? '-' : '';
+
+  if (!separator) {
+    return {
+      paymentMethodLabel: paymentLabel,
+      paymentProviderLabel: '',
+    };
+  }
+
+  const [methodLabel, providerLabel] = paymentLabel.split(separator).map((part) => String(part ?? '').trim());
+
+  return {
+    paymentMethodLabel: methodLabel || paymentLabel,
+    paymentProviderLabel: providerLabel || '',
+  };
+}
+
+function mapPaymentRow(item = {}, index = 0) {
+  const methodSummary = parsePaymentMethodSummary(item);
+  const paymentCode = String(item.paymentCode ?? item.id ?? '').trim();
+  const bookingCode = String(item.bookingCode ?? item.tripCode ?? '').trim();
+  const transactionId = paymentCode || `TT-${bookingCode || index + 1}`;
+
+  return {
+    id: transactionId,
+    paymentCode: transactionId,
+    tripCode: bookingCode || paymentCode || `TR-${index + 1}`,
+    customerName: String(item.customerName ?? '').trim() || 'Khách hàng SmartRide',
+    driverName: String(item.driverDisplayName ?? item.driverName ?? '').trim() || 'Tài xế SmartRide',
+    amount: Number(item.price ?? item.paymentAmount ?? 0),
+    paidAt: item.completedAt || item.bookedAt || '',
+    status: normalizePaymentStatus(item),
+    paymentMethodLabel: methodSummary.paymentMethodLabel,
+    paymentProviderLabel: methodSummary.paymentProviderLabel,
+    rideTitle: String(item.rideTitle ?? '').trim() || 'Chuyến đi SmartRide',
+    note: String(item.note ?? '').trim() || 'Dữ liệu thanh toán được đồng bộ trực tiếp từ hệ thống.',
+  };
+}
+
+export default function AdminPaymentManagementModal({
+  open = false,
+  onClose,
+  roleCode = 'Q1',
+  accountId = '',
+  accountIdentifier = '',
+  onNotify,
+}) {
   const [transactionKeyword, setTransactionKeyword] = useState('');
   const [tripKeyword, setTripKeyword] = useState('');
   const [customerKeyword, setCustomerKeyword] = useState('');
@@ -185,6 +184,66 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
   const [paymentDatePickerOpen, setPaymentDatePickerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedPayment, setSelectedPayment] = useState(null);
+  const [paymentRows, setPaymentRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [requestError, setRequestError] = useState('');
+
+  const normalizedRoleCode = String(roleCode ?? '').trim().toUpperCase() === 'Q3' ? 'Q3' : 'Q1';
+  const normalizedAccountId = String(accountId ?? '').trim();
+  const normalizedIdentifier = String(accountIdentifier ?? '').trim();
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let isActive = true;
+    const abortController = new AbortController();
+
+    const loadPayments = async () => {
+      setLoading(true);
+      setRequestError('');
+
+      try {
+        const response = await rideService.getTripHistory(
+          {
+            roleCode: normalizedRoleCode,
+            accountId: normalizedRoleCode === 'Q3' ? normalizedAccountId : '',
+            identifier: normalizedRoleCode === 'Q3' ? normalizedIdentifier : '',
+            limit: 40,
+          },
+          { signal: abortController.signal },
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        const rawItems = Array.isArray(response?.items) ? response.items : [];
+        setPaymentRows(rawItems.map((item, index) => mapPaymentRow(item, index)));
+      } catch (error) {
+        if (!isActive || error?.name === 'AbortError') {
+          return;
+        }
+
+        const message = error?.message || 'Không thể tải dữ liệu thanh toán lúc này.';
+        setPaymentRows([]);
+        setRequestError(message);
+        onNotify?.(message, 'error', 2800);
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadPayments();
+
+    return () => {
+      isActive = false;
+      abortController.abort();
+    };
+  }, [normalizedAccountId, normalizedIdentifier, normalizedRoleCode, onNotify, open]);
 
   const filteredPayments = useMemo(() => {
     const normalizedTransactionKeyword = normalizeToken(transactionKeyword);
@@ -192,7 +251,7 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
     const normalizedCustomerKeyword = normalizeToken(customerKeyword);
     const normalizedDriverKeyword = normalizeToken(driverKeyword);
 
-    return PAYMENT_ROWS.filter((payment) => {
+    return paymentRows.filter((payment) => {
       if (statusFilter !== 'all' && payment.status !== statusFilter) {
         return false;
       }
@@ -202,7 +261,7 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
       }
 
       if (normalizedTransactionKeyword) {
-        const searchableTransaction = normalizeToken(`${payment.paymentCode} ${payment.id}`);
+        const searchableTransaction = normalizeToken(payment.id);
 
         if (!searchableTransaction.includes(normalizedTransactionKeyword)) {
           return false;
@@ -223,10 +282,10 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
 
       return true;
     });
-  }, [customerKeyword, driverKeyword, paymentDateFilter, statusFilter, transactionKeyword, tripKeyword]);
+  }, [customerKeyword, driverKeyword, paymentDateFilter, paymentRows, statusFilter, transactionKeyword, tripKeyword]);
 
   const paymentStats = useMemo(() => {
-    return PAYMENT_ROWS.reduce(
+    return paymentRows.reduce(
       (accumulator, payment) => {
         accumulator.total += 1;
         accumulator.amount += Number(payment.amount) || 0;
@@ -243,7 +302,7 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
       },
       { total: 0, paid: 0, pending: 0, failed: 0, amount: 0 },
     );
-  }, []);
+  }, [paymentRows]);
 
   useEffect(() => {
     if (!open) {
@@ -306,10 +365,12 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
 
         <header className="admin-payment-modal__header">
           <div className="admin-payment-modal__header-copy">
-            <p className="admin-payment-modal__eyebrow">ADMIN / THANH TOÁN</p>
+            <p className="admin-payment-modal__eyebrow">{normalizedRoleCode === 'Q3' ? 'TÀI XẾ / THANH TOÁN' : 'ADMIN / THANH TOÁN'}</p>
             <h3>QUẢN LÝ THANH TOÁN</h3>
             <p>
-              Tra cứu giao dịch thanh toán, đối soát số tiền và theo dõi trạng thái của từng cuốc xe trong một popup duy nhất.
+              {normalizedRoleCode === 'Q3'
+                ? 'Tra cứu giao dịch thanh toán của các chuyến bạn đã thực hiện, theo dõi trạng thái và đối soát số tiền ngay trong popup.'
+                : 'Tra cứu giao dịch thanh toán, đối soát số tiền và theo dõi trạng thái của từng cuốc xe trong một popup duy nhất.'}
             </p>
           </div>
 
@@ -432,7 +493,7 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
         </div>
 
         <div className="admin-payment-modal__meta">
-          <span>Hiển thị {filteredPayments.length}/{PAYMENT_ROWS.length} giao dịch</span>
+          <span>Hiển thị {filteredPayments.length}/{paymentRows.length} giao dịch</span>
           <span>Tổng giá trị đối soát: {formatMoney(paymentStats.amount)}</span>
         </div>
 
@@ -452,7 +513,23 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
             </thead>
 
             <tbody>
-              {filteredPayments.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td className="admin-payment-modal__empty-row" colSpan={8}>
+                    Đang tải dữ liệu thanh toán...
+                  </td>
+                </tr>
+              ) : null}
+
+              {!loading && requestError ? (
+                <tr>
+                  <td className="admin-payment-modal__empty-row" colSpan={8}>
+                    {requestError}
+                  </td>
+                </tr>
+              ) : null}
+
+              {!loading && !requestError && filteredPayments.length > 0 ? (
                 filteredPayments.map((payment) => {
                   const statusMeta = getPaymentStatusMeta(payment.status);
 
@@ -484,19 +561,23 @@ export default function AdminPaymentManagementModal({ open = false, onClose }) {
                     </tr>
                   );
                 })
-              ) : (
+              ) : null}
+
+              {!loading && !requestError && filteredPayments.length === 0 ? (
                 <tr>
                   <td className="admin-payment-modal__empty-row" colSpan={8}>
                     Không có giao dịch nào khớp với bộ lọc hiện tại.
                   </td>
                 </tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
 
         <p className="admin-payment-modal__hint">
-          Màn hình này dùng để tra cứu và đối soát các giao dịch thanh toán của khách hàng.
+          {normalizedRoleCode === 'Q3'
+            ? 'Màn hình này dùng để tài xế tra cứu lịch sử thanh toán chuyến đi của mình.'
+            : 'Màn hình này dùng để tra cứu và đối soát các giao dịch thanh toán của khách hàng.'}
         </p>
       </section>
 
