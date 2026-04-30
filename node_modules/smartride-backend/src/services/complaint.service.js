@@ -315,6 +315,106 @@ async function ensureIssueTypeLookup(pool) {
   `);
 }
 
+async function ensureComplaintForeignKeys(pool) {
+  await pool.request().query(`
+    IF OBJECT_ID(N'dbo.KhieuNaiHoTro', N'U') IS NULL
+      RETURN;
+
+    -- MaTK -> TaiKhoan.MaTK
+    IF OBJECT_ID(N'dbo.TaiKhoan', N'U') IS NOT NULL
+      AND NOT EXISTS
+      (
+        SELECT 1
+        FROM sys.foreign_key_columns fkc
+        INNER JOIN sys.columns pc
+          ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+        INNER JOIN sys.columns rc
+          ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+        WHERE fkc.parent_object_id = OBJECT_ID(N'dbo.KhieuNaiHoTro')
+          AND fkc.referenced_object_id = OBJECT_ID(N'dbo.TaiKhoan')
+          AND pc.name = 'MaTK'
+          AND rc.name = 'MaTK'
+      )
+    BEGIN
+      ALTER TABLE dbo.KhieuNaiHoTro WITH CHECK
+      ADD CONSTRAINT FK_KhieuNaiHoTro_TaiKhoan
+      FOREIGN KEY (MaTK) REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+    END;
+
+    -- MaChuyen -> DatXe.MaChuyen
+    IF OBJECT_ID(N'dbo.DatXe', N'U') IS NOT NULL
+      AND NOT EXISTS
+      (
+        SELECT 1
+        FROM sys.foreign_key_columns fkc
+        INNER JOIN sys.columns pc
+          ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+        INNER JOIN sys.columns rc
+          ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+        WHERE fkc.parent_object_id = OBJECT_ID(N'dbo.KhieuNaiHoTro')
+          AND fkc.referenced_object_id = OBJECT_ID(N'dbo.DatXe')
+          AND pc.name = 'MaChuyen'
+          AND rc.name = 'MaChuyen'
+      )
+    BEGIN
+      ALTER TABLE dbo.KhieuNaiHoTro WITH CHECK
+      ADD CONSTRAINT FK_KhieuNaiHoTro_DatXe
+      FOREIGN KEY (MaChuyen) REFERENCES dbo.DatXe(MaChuyen)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+    END;
+
+    -- LoaiSuCo -> LoaiKhieuNaiHoTro.MaLoaiSuCo
+    IF OBJECT_ID(N'dbo.LoaiKhieuNaiHoTro', N'U') IS NOT NULL
+      AND NOT EXISTS
+      (
+        SELECT 1
+        FROM sys.foreign_key_columns fkc
+        INNER JOIN sys.columns pc
+          ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+        INNER JOIN sys.columns rc
+          ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+        WHERE fkc.parent_object_id = OBJECT_ID(N'dbo.KhieuNaiHoTro')
+          AND fkc.referenced_object_id = OBJECT_ID(N'dbo.LoaiKhieuNaiHoTro')
+          AND pc.name = 'LoaiSuCo'
+          AND rc.name = 'MaLoaiSuCo'
+      )
+    BEGIN
+      ALTER TABLE dbo.KhieuNaiHoTro WITH CHECK
+      ADD CONSTRAINT FK_KhieuNaiHoTro_Loai
+      FOREIGN KEY (LoaiSuCo) REFERENCES dbo.LoaiKhieuNaiHoTro(MaLoaiSuCo)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+    END;
+
+    -- MaTKXuLy -> TaiKhoan.MaTK
+    IF COL_LENGTH(N'dbo.KhieuNaiHoTro', N'MaTKXuLy') IS NOT NULL
+      AND OBJECT_ID(N'dbo.TaiKhoan', N'U') IS NOT NULL
+      AND NOT EXISTS
+      (
+        SELECT 1
+        FROM sys.foreign_key_columns fkc
+        INNER JOIN sys.columns pc
+          ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+        INNER JOIN sys.columns rc
+          ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+        WHERE fkc.parent_object_id = OBJECT_ID(N'dbo.KhieuNaiHoTro')
+          AND fkc.referenced_object_id = OBJECT_ID(N'dbo.TaiKhoan')
+          AND pc.name = 'MaTKXuLy'
+          AND rc.name = 'MaTK'
+      )
+    BEGIN
+      ALTER TABLE dbo.KhieuNaiHoTro WITH CHECK
+      ADD CONSTRAINT FK_KhieuNaiHoTro_NguoiXuLy
+      FOREIGN KEY (MaTKXuLy) REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+    END;
+  `);
+}
+
 async function readTripOwnership(pool, bookingCode) {
   const result = await pool.request()
     .input('bookingCode', sql.VarChar(30), bookingCode)
@@ -453,6 +553,7 @@ export async function ensureComplaintSchema() {
       `);
 
       await ensureIssueTypeLookup(pool);
+      await ensureComplaintForeignKeys(pool);
     })().catch((error) => {
       complaintSchemaPromise = null;
       throw error;

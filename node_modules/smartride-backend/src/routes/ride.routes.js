@@ -10,14 +10,17 @@ import {
 	getTripHistoryController,
 	getTripInvoiceController,
 	getTripMessagesController,
+	getAdminDriverViolationDetailController,
 	searchRideController,
 	streamRideEventsController,
 	sendTripMessageController,
+	listAdminDriverViolationsController,
 	submitRideRatingController,
 	updateTripStatusController,
 	getAdminComplaintDetailController,
 	listAdminComplaintRequestsController,
 	updateAdminComplaintDetailController,
+	updateAdminDriverViolationController,
 } from '../controllers/ride.controller.js';
 
 const router = Router();
@@ -81,6 +84,9 @@ router.get('/:bookingCode/invoice', getTripInvoiceController);
 router.get('/issues/admin', listAdminComplaintRequestsController);
 router.get('/issues/admin/:complaintId', getAdminComplaintDetailController);
 router.patch('/issues/admin/:complaintId', updateAdminComplaintDetailController);
+router.get('/violations/admin', listAdminDriverViolationsController);
+router.get('/violations/admin/:violationId', getAdminDriverViolationDetailController);
+router.patch('/violations/admin/:violationId', updateAdminDriverViolationController);
 router.get('/:bookingCode/messages', getTripMessagesController);
 router.post('/:bookingCode/messages', sendTripMessageController);
 router.patch('/:bookingCode/status', updateTripStatusController);

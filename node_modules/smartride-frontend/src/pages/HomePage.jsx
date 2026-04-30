@@ -737,9 +737,36 @@ function normalizeAppRoleCode(rawRoleCode) {
 
 function normalizeRideStatusToken(value) {
   return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
     .trim()
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
+}
+
+function resolveRideStatusToken(value) {
+  if (!value || typeof value !== 'object') {
+    return normalizeRideStatusToken(value);
+  }
+
+  const statusTokens = [
+    normalizeRideStatusToken(value?.tripStatus),
+    normalizeRideStatusToken(value?.status),
+    normalizeRideStatusToken(value?.tripStatusLabel),
+    normalizeRideStatusToken(value?.statusLabel),
+  ].filter(Boolean);
+
+  if (statusTokens.includes('hoanthanh') || statusTokens.includes('completed')) {
+    return 'hoanthanh';
+  }
+
+  if (statusTokens.includes('dahuy') || statusTokens.includes('cancelled')) {
+    return 'dahuy';
+  }
+
+  return statusTokens[0] ?? '';
 }
 
 function getRideBookingCode(record = null) {
@@ -805,7 +832,7 @@ function hasSubmittedTripRating(record) {
 }
 
 function isCustomerTrackedRideStatus(value) {
-  const normalizedStatusToken = normalizeRideStatusToken(value);
+  const normalizedStatusToken = resolveRideStatusToken(value);
 
   if (!normalizedStatusToken) {
     return false;
@@ -818,7 +845,7 @@ function isCustomerTrackedRideStatus(value) {
 }
 
 function isCompletedRideStatus(value) {
-  const normalizedStatusToken = normalizeRideStatusToken(value);
+  const normalizedStatusToken = resolveRideStatusToken(value);
 
   if (!normalizedStatusToken) {
     return false;
@@ -828,7 +855,7 @@ function isCompletedRideStatus(value) {
 }
 
 function isDriverTrackedRideStatus(value) {
-  const normalizedStatusToken = normalizeRideStatusToken(value);
+  const normalizedStatusToken = resolveRideStatusToken(value);
 
   if (!normalizedStatusToken) {
     return false;
@@ -922,7 +949,7 @@ function findTrackedCustomerRideBooking(items, preferredBookingCode = '') {
     return candidateItems.find((item) => getRideBookingCode(item) === normalizedPreferredBookingCode) ?? null;
   }
 
-  return candidateItems.find((item) => isCustomerTrackedRideStatus(item?.tripStatus ?? item?.status)) ?? null;
+  return candidateItems.find((item) => isCustomerTrackedRideStatus(item)) ?? null;
 }
 
 function findTrackedDriverRideBooking(items, preferredBookingCode = '') {
@@ -933,7 +960,7 @@ function findTrackedDriverRideBooking(items, preferredBookingCode = '') {
     return candidateItems.find((item) => getRideBookingCode(item) === normalizedPreferredBookingCode) ?? null;
   }
 
-  return candidateItems.find((item) => isDriverTrackedRideStatus(item?.tripStatus ?? item?.status)) ?? null;
+  return candidateItems.find((item) => isDriverTrackedRideStatus(item)) ?? null;
 }
 
 function maskEmailForDisplay(emailValue) {
@@ -1595,7 +1622,7 @@ export default function HomePage() {
 
   // Reactively close customer modals when booking is cancelled externally (admin cancel missed via socket reconnect)
   useEffect(() => {
-    const tripStatus = normalizeRideStatusToken(bookingSuccess?.tripStatus ?? bookingSuccess?.status ?? '');
+    const tripStatus = resolveRideStatusToken(bookingSuccess);
     const isCancelledStatus = tripStatus === 'dahuy' || tripStatus === 'cancelled';
 
     if (!isCancelledStatus || !bookingTrackingModalOpen) {
@@ -1946,14 +1973,21 @@ export default function HomePage() {
       const isDismissedByCustomer = Boolean(
         nextBookingCode && dismissedCustomerTrackingBookingCodeRef.current === nextBookingCode,
       );
+      const nextTripStatus = resolveRideStatusToken(nextBooking);
 
       setBookingSuccess((currentBooking) => mergeRideBookingSnapshot(currentBooking, nextBooking));
+
+      if (isCompletedRideStatus(nextTripStatus)) {
+        dismissedCustomerTrackingBookingCodeRef.current = '';
+        setBookingTrackingModalOpen(false);
+        setBookingTrackingBubbleOpen(false);
+      }
 
       if (
         !bookingTrackingModalOpenRef.current &&
         !bookingTrackingBubbleOpenRef.current &&
         !isDismissedByCustomer &&
-        isCustomerTrackedRideStatus(nextBooking?.tripStatus ?? nextBooking?.status)
+        isCustomerTrackedRideStatus(nextBooking)
       ) {
         setBookingTrackingModalOpen(true);
       }
@@ -2107,7 +2141,7 @@ export default function HomePage() {
         }
 
         if (eventType === 'ride.trip.status.updated') {
-          const normalizedTripStatus = String(event?.tripStatus ?? eventBooking?.tripStatus ?? '').trim().toLowerCase();
+          const normalizedTripStatus = normalizeRideStatusToken(event?.tripStatus ?? eventBooking?.tripStatus ?? '');
           const isCancelledEvent = normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled';
 
           if (isCancelledEvent) {
@@ -2178,7 +2212,7 @@ export default function HomePage() {
 
         if (eventType === 'ride.trip.status.updated') {
           const eventBookingCode = getRideBookingCode(eventBooking);
-          const normalizedTripStatus = String(event?.tripStatus ?? eventBooking?.tripStatus ?? '').trim().toLowerCase();
+          const normalizedTripStatus = normalizeRideStatusToken(event?.tripStatus ?? eventBooking?.tripStatus ?? '');
           const isAcceptedEvent = normalizedTripStatus === 'danhanchuyen';
           const isCancelledEvent = normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled';
           const cancelledByRoleCode = String(
@@ -2418,7 +2452,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const currentBookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
-    const currentTripStatus = bookingSuccess?.tripStatus ?? bookingSuccess?.status ?? '';
+    const currentTripStatus = resolveRideStatusToken(bookingSuccess);
 
     if (
       normalizedUserRoleCode !== 'Q3' &&
@@ -2460,9 +2494,26 @@ export default function HomePage() {
     }
 
     bookingRatingPromptedBookingCodeRef.current = currentBookingCode;
+    setBookingTrackingModalOpen(false);
+    setBookingTrackingBubbleOpen(false);
     setBookingRatingModalOpen(true);
     return undefined;
   }, [bookingSuccess?.bookingCode, bookingSuccess?.ratingScore, bookingSuccess?.ratingSubmittedAt, bookingSuccess?.status, bookingSuccess?.tripStatus, normalizedUserRoleCode]);
+
+  useEffect(() => {
+    const currentTripStatus = resolveRideStatusToken(bookingSuccess);
+
+    if (!bookingSuccess || !isCompletedRideStatus(currentTripStatus)) {
+      return undefined;
+    }
+
+    if (bookingTrackingModalOpen || bookingTrackingBubbleOpen) {
+      setBookingTrackingModalOpen(false);
+      setBookingTrackingBubbleOpen(false);
+    }
+
+    return undefined;
+  }, [bookingSuccess, bookingSuccess?.status, bookingSuccess?.tripStatus, bookingSuccess?.tripStatusLabel, bookingTrackingBubbleOpen, bookingTrackingModalOpen]);
 
   useEffect(() => {
     if (credentialLockRemainingSeconds <= 0) {
@@ -2581,8 +2632,14 @@ export default function HomePage() {
 
   const runRideSearch = async (vehicleOverride = activeVehicle) => {
     if (bookingSuccess) {
-      setBookingTrackingModalOpen(true);
-      return;
+      const bsStatusToken = resolveRideStatusToken(bookingSuccess);
+      if (isCompletedRideStatus(bsStatusToken) || bsStatusToken === 'dahuy' || bsStatusToken === 'cancelled') {
+        closeCompletedBookingFlow(String(bookingSuccess?.bookingCode ?? '').trim());
+        // fall through to run search
+      } else {
+        setBookingTrackingModalOpen(true);
+        return;
+      }
     }
 
     const pickupLabel = route.pickup.label.trim();
@@ -3360,8 +3417,26 @@ export default function HomePage() {
 
   const openPreviewForVehicle = (vehicleId, preferredRideId = null) => {
     if (bookingSuccess) {
-      setBookingTrackingModalOpen(true);
-      return;
+      const currentTripStatus = resolveRideStatusToken(bookingSuccess);
+
+      if (isCompletedRideStatus(currentTripStatus)) {
+        closeCompletedBookingFlow(String(bookingSuccess?.bookingCode ?? '').trim());
+      } else {
+        const normalizedTripStatus = normalizeRideStatusToken(currentTripStatus);
+
+        if (normalizedTripStatus === 'dahuy' || normalizedTripStatus === 'cancelled') {
+          setBookingTrackingModalOpen(false);
+          setBookingTrackingBubbleOpen(false);
+          setBookingRatingModalOpen(false);
+          setBookingSuccess(null);
+          dismissedCustomerTrackingBookingCodeRef.current = '';
+          resetBodyScrollLock();
+        } else {
+          setBookingTrackingModalOpen(true);
+          return;
+        }
+      }
+
     }
 
     const resolvedVehicleId = vehicleTabs.some((tab) => tab.id === vehicleId) ? vehicleId : activeVehicle;
@@ -3413,11 +3488,33 @@ export default function HomePage() {
     setPreviewModalOpen(false);
   };
 
+  const handleBookingTrackingSync = (nextBooking) => {
+    if (!nextBooking || typeof nextBooking !== 'object') {
+      return;
+    }
+
+    setBookingSuccess((currentBooking) => mergeRideBookingSnapshot(currentBooking, nextBooking));
+
+    if (isCompletedRideStatus(nextBooking)) {
+      setBookingTrackingModalOpen(false);
+      setBookingTrackingBubbleOpen(false);
+    }
+  };
+
   const closeBookingTrackingModal = () => {
     const currentBookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
-    const currentTripStatus = bookingSuccess?.tripStatus ?? bookingSuccess?.status ?? '';
+    const currentTripStatus = resolveRideStatusToken(bookingSuccess);
 
-    if (bookingSuccess && (bookingRatingModalOpen || isCompletedRideStatus(currentTripStatus))) {
+    if (bookingSuccess && isCompletedRideStatus(currentTripStatus)) {
+      // Trip is completed: close the tracking modal/bubble only.
+      // The rating dialog useEffect will detect the completed state and open the rating dialog.
+      // handleCloseBookingRatingModal → closeCompletedBookingFlow handles final cleanup.
+      setBookingTrackingModalOpen(false);
+      setBookingTrackingBubbleOpen(false);
+      return;
+    }
+
+    if (bookingSuccess && bookingRatingModalOpen) {
       if (currentBookingCode) {
         bookingRatingPromptedBookingCodeRef.current = currentBookingCode;
         bookingCompletionNotifiedBookingCodeRef.current = currentBookingCode;
@@ -3548,6 +3645,12 @@ export default function HomePage() {
       return;
     }
 
+    if (isCompletedRideStatus(bookingSuccess)) {
+      setBookingTrackingModalOpen(false);
+      setBookingTrackingBubbleOpen(false);
+      return;
+    }
+
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(true);
   };
@@ -3555,6 +3658,12 @@ export default function HomePage() {
   const restoreBookingTrackingModal = () => {
     if (!bookingSuccess) {
       setBookingTrackingBubbleOpen(false);
+      return;
+    }
+
+    if (isCompletedRideStatus(bookingSuccess)) {
+      setBookingTrackingBubbleOpen(false);
+      setBookingTrackingModalOpen(false);
       return;
     }
 
@@ -9265,12 +9374,16 @@ export default function HomePage() {
           : null}
 
         <RideTrackingModal
-          open={bookingTrackingModalOpen}
+          open={
+            bookingTrackingModalOpen &&
+            !isCompletedRideStatus(bookingSuccess)
+          }
           booking={bookingSuccess}
           onClose={closeBookingTrackingModal}
           onMinimize={minimizeBookingTrackingModal}
           onCancel={handleCancelBooking}
           onNotify={showMiniToast}
+          onBookingSync={handleBookingTrackingSync}
         />
 
         <TripRatingDialog
@@ -9280,7 +9393,10 @@ export default function HomePage() {
           onSubmit={handleBookingRatingSubmit}
         />
 
-        {bookingTrackingBubbleOpen && bookingSuccess && !bookingTrackingModalOpen
+        {bookingTrackingBubbleOpen &&
+        bookingSuccess &&
+        !bookingTrackingModalOpen &&
+        !isCompletedRideStatus(bookingSuccess)
           ? createPortal(
               <button
                 className="booking-tracking-bubble"

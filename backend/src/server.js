@@ -8,6 +8,7 @@ import { ensurePromotionSchema } from './services/promotion.service.js';
 import { ensureDriverSchema } from './services/driver.service.js';
 import { startNotificationScheduler } from './services/notification.scheduler.js';
 import { ensureRideSchema } from './services/ride.service.js';
+import { ensureDriverViolationSchema } from './services/driverViolation.service.js';
 import { Server } from 'socket.io';
 import { connectRideEventBroker, registerRideSocketServer } from './services/ride.realtime.service.js';
 
@@ -78,8 +79,7 @@ function bootstrapSqlServerSchemas() {
       { label: 'thông báo', setupFn: ensureNotificationSchema, onSuccess: startNotificationScheduler },
       { label: 'ưu đãi', setupFn: ensurePromotionSchema },
       { label: 'chuyến xe', setupFn: ensureRideSchema },
-      { label: 'tài xế', setupFn: ensureDriverSchema },
-    ];
+      { label: 'tài xế', setupFn: ensureDriverSchema },      { label: 'vi phạm tài xế', setupFn: ensureDriverViolationSchema },    ];
 
     const failedResults = [];
 

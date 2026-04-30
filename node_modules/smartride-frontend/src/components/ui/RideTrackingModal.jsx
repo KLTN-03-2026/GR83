@@ -276,7 +276,15 @@ function getTripStatusCopy(tripStatusToken, driverName = '') {
   };
 }
 
-export default function RideTrackingModal({ open = false, booking = null, onClose, onMinimize, onCancel, onNotify }) {
+export default function RideTrackingModal({
+  open = false,
+  booking = null,
+  onClose,
+  onMinimize,
+  onCancel,
+  onNotify,
+  onBookingSync,
+}) {
   const [liveBooking, setLiveBooking] = useState(booking);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [chatDialogOpen, setChatDialogOpen] = useState(false);
@@ -338,6 +346,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
             ...current,
             ...matchedBooking,
           }));
+          onBookingSync?.(matchedBooking);
         }
       } catch {
         // Keep the optimistic snapshot if the history refresh fails.
@@ -354,7 +363,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [booking?.accountId, booking?.bookingCode, booking?.customerAccountId, open]);
+  }, [booking?.accountId, booking?.bookingCode, booking?.customerAccountId, onBookingSync, open]);
 
   useEffect(() => {
     if (!open) {
@@ -419,6 +428,25 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
   const progressValue = liveStatus.progress;
   const canCallDriver = Boolean(normalizeText(driverPhone));
   const driverVehicleDisplayLabel = driverVehicleLabel || 'RiBike';
+  const shouldCloseTripFlow =
+    tripStatusToken === 'hoanthanh' ||
+    tripStatusToken === 'completed' ||
+    tripStatusToken === 'dahuy' ||
+    tripStatusToken === 'cancelled';
+
+  const handleDismissTracking = () => {
+    if (shouldCloseTripFlow) {
+      onClose?.();
+      return;
+    }
+
+    if (onMinimize) {
+      onMinimize();
+      return;
+    }
+
+    onClose?.();
+  };
 
   const copyTextToClipboard = async (textToCopy) => {
     const normalizedText = normalizeText(textToCopy);
@@ -546,12 +574,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
     setDriverInfoDialogOpen(false);
     setDriverLocationDialogOpen(false);
 
-    if (onMinimize) {
-      onMinimize();
-      return;
-    }
-
-    onClose?.();
+    handleDismissTracking();
   };
 
   const handleCopyText = async (textToCopy, successMessage) => {
@@ -697,7 +720,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
         <div className="booking-tracking-modal__backdrop" onClick={handleBackdropClick} aria-hidden="true" />
 
         <section className="booking-tracking-modal__window booking-tracking-modal__window--preview">
-          <button className="booking-tracking-modal__close" type="button" onClick={() => onMinimize ? onMinimize() : onClose?.()} aria-label="Thu nhỏ">
+          <button className="booking-tracking-modal__close" type="button" onClick={handleDismissTracking} aria-label="Thu nhỏ">
             <img className="booking-tracking-modal__close-icon" src={closeIcon} alt="" aria-hidden="true" />
           </button>
 
@@ -853,7 +876,7 @@ export default function RideTrackingModal({ open = false, booking = null, onClos
       <div className="booking-tracking-modal__backdrop" onClick={handleBackdropClick} aria-hidden="true" />
 
       <section className="booking-tracking-modal__window booking-tracking-modal__window--tracking">
-        <button className="booking-tracking-modal__close" type="button" onClick={() => onMinimize ? onMinimize() : onClose?.()} aria-label="Thu nhỏ">
+        <button className="booking-tracking-modal__close" type="button" onClick={handleDismissTracking} aria-label="Thu nhỏ">
           <img className="booking-tracking-modal__close-icon" src={closeIcon} alt="" aria-hidden="true" />
         </button>
 

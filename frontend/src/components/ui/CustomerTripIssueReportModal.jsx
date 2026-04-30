@@ -89,6 +89,23 @@ export default function CustomerTripIssueReportModal({ open, onClose, trip, acco
           return;
         }
 
+        // For network errors, silently fall back so the form is still usable
+        if (!loadError?.status) {
+          setMeta((current) => ({
+            ...current,
+            issueTypes: current.issueTypes.length > 0 ? current.issueTypes : [
+              { id: 'fare-issue', label: 'Giá cước / thanh toán' },
+              { id: 'driver-attitude', label: 'Thái độ tài xế' },
+              { id: 'unsafe-driving', label: 'Tài xế lái xe không an toàn' },
+              { id: 'lost-item', label: 'Thất lạc đồ dùng' },
+              { id: 'app-error', label: 'Lỗi ứng dụng' },
+              { id: 'other', label: 'Lý do khác' },
+            ],
+          }));
+          setIssueType((current) => current || 'fare-issue');
+          return;
+        }
+
         setError(loadError?.message || 'Không thể tải dữ liệu báo lỗi.');
       })
       .finally(() => {
@@ -171,11 +188,37 @@ export default function CustomerTripIssueReportModal({ open, onClose, trip, acco
         onClose?.();
       }, 900);
     } catch (submitError) {
+      const submitErrorMessage = String(submitError?.message ?? '').trim();
+
+      // In unstable network/CORS scenarios the server may persist the complaint
+      // but the client fails to receive response; re-check once before showing hard error.
+      if (!submitError?.status && submitErrorMessage) {
+        try {
+          const verification = await rideService.getTripIssueReportMeta(trip.bookingCode, { accountId });
+
+          if (verification?.alreadyReported) {
+            setMeta((currentMeta) => ({ ...currentMeta, alreadyReported: true }));
+            setSuccessMessage('Đã gửi báo lỗi thành công. Chúng tôi sẽ xử lý trong thời gian sớm nhất.');
+            setDescription('');
+            setAttachmentFile(null);
+            setTimeout(() => {
+              onClose?.();
+            }, 900);
+            return;
+          }
+        } catch {
+          // Keep original submit error if verification is unavailable.
+        }
+      }
+
       if (submitError?.status === 409) {
         setMeta((currentMeta) => ({ ...currentMeta, alreadyReported: true }));
         setError('Bạn đã khiếu nại cho chuyến đi này. Vui lòng chờ admin xử lý.');
       } else {
-        setError(submitError?.message || 'Không thể gửi báo lỗi.');
+        const isNetworkError = !submitError?.status;
+        setError(isNetworkError
+          ? 'Không thể gửi báo lỗi. Vui lòng kiểm tra kết nối mạng và thử lại.'
+          : (submitError?.message || 'Không thể gửi báo lỗi.'));
       }
     } finally {
       setSubmitting(false);

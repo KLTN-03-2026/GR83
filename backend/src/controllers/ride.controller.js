@@ -6,6 +6,11 @@ import {
   listAdminComplaintRequests,
   updateAdminComplaintDetail,
 } from '../services/complaint.service.js';
+import {
+  getAdminDriverViolationDetail,
+  listAdminDriverViolations,
+  updateAdminDriverViolation,
+} from '../services/driverViolation.service.js';
 import { getTripMessages, sendTripMessage } from '../services/tripChat.service.js';
 import { subscribeRideEvents } from '../services/ride.realtime.service.js';
 
@@ -316,6 +321,45 @@ export async function getAdminComplaintDetailController(request, response, next)
 export async function updateAdminComplaintDetailController(request, response, next) {
   try {
     const result = await updateAdminComplaintDetail(request.params.complaintId, request.body);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function listAdminDriverViolationsController(request, response, next) {
+  try {
+    const result = await listAdminDriverViolations(request.query);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getAdminDriverViolationDetailController(request, response, next) {
+  try {
+    const result = await getAdminDriverViolationDetail(request.params.violationId);
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function updateAdminDriverViolationController(request, response, next) {
+  try {
+    const result = await updateAdminDriverViolation(request.params.violationId, request.body);
     response.status(200).json(result);
   } catch (error) {
     if (sendKnownRideError(response, error)) {

@@ -5,6 +5,7 @@ import { getSqlServerPool, isSqlServerConfigured } from './database.service.js';
 import { ensureNotificationSchema } from './notification.service.js';
 import { listPromotions } from './promotion.service.js';
 import { publishRideEvent } from './ride.realtime.service.js';
+import { enforceDriverAutoLockForContinuousCancellation } from './driverViolation.service.js';
 
 const VEHICLE_CONFIG = {
   motorbike: {
@@ -1059,6 +1060,22 @@ export async function ensureRideSchema() {
       `);
 
       await pool.request().query(`
+        IF COL_LENGTH(N'dbo.TaiXe', N'KhoaTamDen') IS NULL
+        BEGIN
+          ALTER TABLE dbo.TaiXe
+          ADD KhoaTamDen DATETIME2(0) NULL;
+        END
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.TaiXe', N'LyDoKhoaTam') IS NULL
+        BEGIN
+          ALTER TABLE dbo.TaiXe
+          ADD LyDoKhoaTam NVARCHAR(500) NULL;
+        END
+      `);
+
+      await pool.request().query(`
         IF OBJECT_ID(N'dbo.DanhGiaChuyenXe', N'U') IS NULL
         BEGIN
           CREATE TABLE dbo.DanhGiaChuyenXe
@@ -1350,6 +1367,41 @@ async function resolveDriverStatus(transaction, driverIdentifier) {
     `);
 
   return normalizeText(queryResult.recordset?.[0]?.DriverStatus);
+}
+
+async function resolveDriverDispatchState(transaction, driverIdentifier) {
+  const normalizedDriverIdentifier = normalizeText(driverIdentifier);
+
+  if (!normalizedDriverIdentifier) {
+    return {
+      driverStatus: '',
+      temporaryLockUntil: null,
+      temporaryLockReason: '',
+    };
+  }
+
+  const queryResult = await new sql.Request(transaction)
+    .input('driverIdentifier', sql.VarChar(20), normalizedDriverIdentifier)
+    .query(`
+      SELECT TOP 1
+        tx.TrangThai AS DriverStatus,
+        tx.KhoaTamDen AS TemporaryLockUntil,
+        tx.LyDoKhoaTam AS TemporaryLockReason
+      FROM TaiXe tx
+      WHERE
+        LOWER(ISNULL(tx.CCCD, '')) = LOWER(@driverIdentifier)
+        OR LOWER(ISNULL(tx.MaTK, '')) = LOWER(@driverIdentifier)
+      ORDER BY CASE WHEN LOWER(ISNULL(tx.CCCD, '')) = LOWER(@driverIdentifier) THEN 0 ELSE 1 END;
+    `);
+
+  const row = queryResult.recordset?.[0] ?? null;
+  const temporaryLockUntil = row?.TemporaryLockUntil ? new Date(row.TemporaryLockUntil) : null;
+
+  return {
+    driverStatus: normalizeText(row?.DriverStatus),
+    temporaryLockUntil: temporaryLockUntil && !Number.isNaN(temporaryLockUntil.getTime()) ? temporaryLockUntil : null,
+    temporaryLockReason: normalizeText(row?.TemporaryLockReason),
+  };
 }
 
 function isDriverReadyStatus(driverStatus) {
@@ -1905,6 +1957,11 @@ function updateRecentBookingTripStatus(bookingCode, tripStatus, driverAccountId 
   booking.tripStatusTone = getTripStatusTone(booking.tripStatus);
   booking.updatedAt = new Date().toISOString();
 
+  if (normalizedTripStatus === 'HoanThanh' && normalizeText(booking.paymentMethod).toLowerCase() === 'cash') {
+    booking.paymentStatus = 'DaThanhToan';
+    booking.paymentStatusLabel = getPaymentStatusLabel('DaThanhToan');
+  }
+
   if (normalizedTripStatus === 'DaHuy') {
     const normalizedCancellationMeta = normalizeCancellationMeta(cancelMeta);
 
@@ -2013,9 +2070,10 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
     const resolvedDriverCccd = normalizedDriverAccountId
       ? await resolveDriverCccd(transaction, normalizedDriverAccountId)
       : '';
-    const resolvedDriverStatus = normalizedDriverAccountId
-      ? await resolveDriverStatus(transaction, normalizedDriverAccountId)
-      : '';
+    const resolvedDriverDispatchState = normalizedDriverAccountId
+      ? await resolveDriverDispatchState(transaction, normalizedDriverAccountId)
+      : { driverStatus: '', temporaryLockUntil: null, temporaryLockReason: '' };
+    const resolvedDriverStatus = resolvedDriverDispatchState.driverStatus;
     const driverTripId = resolvedDriverCccd || normalizedDriverAccountId;
 
     if (!normalizedTripStatus) {
@@ -2047,6 +2105,24 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       throw createValidationError('Tài khoản tài xế chưa ở trạng thái hoạt động.');
     }
 
+    if (
+      normalizedTripStatus === 'DaNhanChuyen'
+      && resolvedDriverDispatchState.temporaryLockUntil
+      && resolvedDriverDispatchState.temporaryLockUntil.getTime() > Date.now()
+    ) {
+      const lockUntilLabel = resolvedDriverDispatchState.temporaryLockUntil.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      throw createValidationError(
+        `${resolvedDriverDispatchState.temporaryLockReason || 'Tài xế đang bị tạm khóa nhận chuyến'} đến ${lockUntilLabel}.`,
+      );
+    }
+
     if (currentDriverCccd && driverTripId && currentDriverCccd.toLowerCase() !== driverTripId.toLowerCase()) {
       throw createValidationError('Đã có tài xế khác nhận đơn');
     }
@@ -2056,6 +2132,10 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
         UPDATE DatXe
         SET
           TrangThaiChuyen = @tripStatus,
+          TrangThaiThanhToan = CASE
+            WHEN @tripStatus = N'HoanThanh' AND PhuongThucThanhToan = 'cash' THEN N'DaThanhToan'
+            ELSE TrangThaiThanhToan
+          END,
           MaTX = CASE
             WHEN @tripStatus = N'DaNhanChuyen' THEN COALESCE(MaTX, @driverAccountId)
             ELSE MaTX
@@ -2065,6 +2145,13 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
             ELSE LyDoHuy
           END
         WHERE MaChuyen = @bookingCode;
+
+        IF @tripStatus = N'HoanThanh'
+          UPDATE ThanhToan
+          SET TrangThaiThanhToan = N'DaThanhToan'
+          WHERE MaChuyen = @bookingCode
+            AND PhuongThucThanhToan = 'cash'
+            AND TrangThaiThanhToan = N'ChoThuTien';
       `);
 
       if (normalizedTripStatus === 'DaNhanChuyen' || normalizedTripStatus === 'DaHuy') {
@@ -2117,6 +2204,22 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
         updatedBooking,
       ),
     );
+
+    if (normalizedTripStatus === 'DaHuy') {
+      const canceledByRoleCode = normalizeText(normalizedCancellationMeta.cancelledByRoleCode).toLowerCase();
+
+      if (canceledByRoleCode === 'q3' || canceledByRoleCode === 'driver') {
+        try {
+          await enforceDriverAutoLockForContinuousCancellation({
+            bookingCode: normalizeText(updatedRow?.MaChuyen ?? bookingCode),
+            driverAccountId: normalizeText(updatedRow?.MaTX ?? currentRow?.MaTX ?? ''),
+            driverSystemAccountId: normalizeText(updatedRow?.driverAccountId ?? currentRow?.driverAccountId ?? ''),
+          });
+        } catch {
+          // Do not block trip status update if policy side-effects fail.
+        }
+      }
+    }
 
     return tripStatusResult;
   } catch (error) {
