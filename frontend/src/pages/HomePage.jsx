@@ -5,6 +5,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import RoutePreviewMap from '../components/ui/RoutePreviewMap';
 import RideTrackingModal from '../components/ui/RideTrackingModal';
 import TripRatingDialog from '../components/ui/TripRatingDialog';
+import AssistantChatbotPopup from '../components/ui/AssistantChatbotPopup';
 import DriverRideRequestModal from '../components/ui/DriverRideRequestModal';
 import DriverRideRejectModal from '../components/ui/DriverRideRejectModal';
 import DriverTripActionModal from '../components/ui/DriverTripActionModal';
@@ -1430,6 +1431,7 @@ export default function HomePage() {
   const [bookingSelectedPromoId, setBookingSelectedPromoId] = useState('');
   const [bookingHighlightedPromoId, setBookingHighlightedPromoId] = useState('');
   const [bookingPromoCards, setBookingPromoCards] = useState(() => promoCards);
+  const [assistantChatbotOpen, setAssistantChatbotOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [driverSignupModalOpen, setDriverSignupModalOpen] = useState(false);
@@ -6736,7 +6738,7 @@ export default function HomePage() {
                   {loginButtonLabel}
                 </button>
 
-                <button className="chatbot-shortcut" type="button" aria-label="Mở chatbot">
+                <button className="chatbot-shortcut" type="button" aria-label="Mở chatbot" onClick={() => setAssistantChatbotOpen(true)}>
                   <span className="chatbot-shortcut__bubble">
                     <img className="chatbot-shortcut__icon" src={chatbotIcon} alt="" aria-hidden="true" />
                   </span>
@@ -9423,6 +9425,14 @@ export default function HomePage() {
               document.body,
             )
           : null}
+
+        <AssistantChatbotPopup
+          open={assistantChatbotOpen}
+          onClose={() => setAssistantChatbotOpen(false)}
+          onNotify={showMiniToast}
+          accountId={String(authenticatedUser?.id ?? '').trim()}
+          roleCode={normalizedUserRoleCode || 'Q2'}
+        />
 
         <DriverRideRequestModal
           open={driverRideRequestModalOpen}

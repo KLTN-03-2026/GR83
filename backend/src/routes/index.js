@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes.js';
+import assistantRoutes from './assistant.routes.js';
 import driverRoutes from './driver.routes.js';
 import healthRoutes from './health.routes.js';
 import notificationRoutes from './notification.routes.js';
@@ -10,6 +11,7 @@ import rideRoutes from './ride.routes.js';
 const router = Router();
 
 router.use('/health', healthRoutes);
+router.use('/assistant', assistantRoutes);
 router.use('/auth', authRoutes);
 router.use('/drivers', driverRoutes);
 router.use('/notifications', notificationRoutes);

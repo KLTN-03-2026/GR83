@@ -36,6 +36,10 @@ IF OBJECT_ID(N'dbo.HoTroAnToanTaiXe',           N'U') IS NOT NULL DROP TABLE dbo
 GO
 IF OBJECT_ID(N'dbo.TinNhan',                    N'U') IS NOT NULL DROP TABLE dbo.TinNhan;
 GO
+IF OBJECT_ID(N'dbo.ChatbotMessage',             N'U') IS NOT NULL DROP TABLE dbo.ChatbotMessage;
+GO
+IF OBJECT_ID(N'dbo.ChatbotConversation',        N'U') IS NOT NULL DROP TABLE dbo.ChatbotConversation;
+GO
 IF OBJECT_ID(N'dbo.DanhGiaChuyenXe',            N'U') IS NOT NULL DROP TABLE dbo.DanhGiaChuyenXe;
 GO
 IF OBJECT_ID(N'dbo.ThanhToan',                  N'U') IS NOT NULL DROP TABLE dbo.ThanhToan;
@@ -564,6 +568,52 @@ CREATE TABLE dbo.TinNhan
 GO
 
 CREATE INDEX IX_TinNhan_MaChuyen_NgayTao ON dbo.TinNhan (MaChuyen, NgayTao DESC, MaTinNhan DESC);
+GO
+
+-- 10.1) ChatbotConversation — Phiên hội thoại chatbot theo từng tài khoản
+CREATE TABLE dbo.ChatbotConversation
+(
+    ConversationId VARCHAR(40)   NOT NULL,
+    AccountId      VARCHAR(20)   NOT NULL,
+    RoleCode       VARCHAR(4)    NULL,
+    Title          NVARCHAR(200) NULL,
+    CreatedAt      DATETIME2(0)  NOT NULL CONSTRAINT DF_ChatbotConversation_CreatedAt DEFAULT SYSDATETIME(),
+    UpdatedAt      DATETIME2(0)  NOT NULL CONSTRAINT DF_ChatbotConversation_UpdatedAt DEFAULT SYSDATETIME(),
+
+    CONSTRAINT PK_ChatbotConversation PRIMARY KEY (ConversationId),
+    CONSTRAINT FK_ChatbotConversation_TaiKhoan FOREIGN KEY (AccountId)
+        REFERENCES dbo.TaiKhoan(MaTK)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT CK_ChatbotConversation_Title CHECK (Title IS NULL OR LEN(LTRIM(RTRIM(Title))) BETWEEN 1 AND 200)
+);
+GO
+
+CREATE INDEX IX_ChatbotConversation_AccountId_UpdatedAt
+ON dbo.ChatbotConversation (AccountId, UpdatedAt DESC, ConversationId DESC);
+GO
+
+-- 10.2) ChatbotMessage — Tin nhắn chatbot theo từng phiên
+CREATE TABLE dbo.ChatbotMessage
+(
+    MessageId       BIGINT         IDENTITY(1,1) NOT NULL,
+    ConversationId  VARCHAR(40)    NOT NULL,
+    SenderRole      VARCHAR(20)    NOT NULL,
+    MessageText     NVARCHAR(2000) NOT NULL,
+    Provider        VARCHAR(20)    NULL,
+    Model           VARCHAR(120)   NULL,
+    CreatedAt       DATETIME2(0)   NOT NULL CONSTRAINT DF_ChatbotMessage_CreatedAt DEFAULT SYSDATETIME(),
+
+    CONSTRAINT PK_ChatbotMessage PRIMARY KEY (MessageId),
+    CONSTRAINT FK_ChatbotMessage_Conversation FOREIGN KEY (ConversationId)
+        REFERENCES dbo.ChatbotConversation(ConversationId)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT CK_ChatbotMessage_SenderRole CHECK (SenderRole IN ('user', 'assistant')),
+    CONSTRAINT CK_ChatbotMessage_MessageText CHECK (LEN(LTRIM(RTRIM(MessageText))) BETWEEN 1 AND 2000)
+);
+GO
+
+CREATE INDEX IX_ChatbotMessage_ConversationId_CreatedAt
+ON dbo.ChatbotMessage (ConversationId, CreatedAt DESC, MessageId DESC);
 GO
 
 -- 11) LoaiSuCoHoTroTaiXe — Danh mục loại sự cố hỗ trợ tài xế (legacy, không có FK)
