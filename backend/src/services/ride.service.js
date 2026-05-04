@@ -1,11 +1,17 @@
 import sql from 'mssql';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { searchPlaces } from './places.service.js';
 import { env } from '../config/env.js';
 import { getSqlServerPool, isSqlServerConfigured } from './database.service.js';
-import { ensureNotificationSchema } from './notification.service.js';
+import { createNotification, ensureNotificationSchema } from './notification.service.js';
 import { listPromotions } from './promotion.service.js';
-import { publishRideEvent } from './ride.realtime.service.js';
-import { enforceDriverAutoLockForContinuousCancellation } from './driverViolation.service.js';
+import { hasActiveRideSocketClient, publishRideEvent } from './ride.realtime.service.js';
+import { ensureDriverSchema } from './driver.service.js';
+import { deductCustomerWalletForRide, refundCustomerWalletForRide } from './customer.wallet.service.js';
+import {
+  enforceDriverAutoLockForContinuousCancellation,
+  ensureDriverViolationSchema,
+} from './driverViolation.service.js';
 
 const VEHICLE_CONFIG = {
   motorbike: {
@@ -28,6 +34,12 @@ const VEHICLE_CONFIG = {
   },
 };
 
+const BOOKING_SERVICE_FEE = {
+  motorbike: 5000,
+  car: 7000,
+  intercity: 10000,
+};
+
 const DISTANCE_RATE_PER_KM = 5000;
 const GOOGLE_DIRECTIONS_URL = 'https://maps.googleapis.com/maps/api/directions/json';
 const ROUTING_SERVICE_URL = 'https://router.project-osrm.org/route/v1/driving';
@@ -43,11 +55,12 @@ const PAYMENT_METHOD_LABELS = {
   cash: 'Tiền mặt',
   qr: 'Thanh toán bằng QR code',
   wallet: 'Thanh toán bằng Ví điện tử',
+  app_wallet: 'Ví SmartRide',
 };
 const PAYMENT_PROVIDER_LABELS = {
   zalopay: 'Zalo pay',
   momo: 'Momo',
-  vnpay: 'VNPay',
+  app_wallet: 'Ví SmartRide',
 };
 const TRIP_STATUS_LABELS = {
   ChoTaiXe: 'Chờ tài xế',
@@ -96,12 +109,24 @@ const TRIP_STATUS_TRANSITIONS = {
 const DRIVER_RIDE_REQUEST_NOTIFICATION_TITLE = 'Cuốc xe mới';
 const DRIVER_RIDE_REQUEST_NOTIFICATION_RECIPIENT = 'driver';
 const DRIVER_RIDE_REQUEST_NOTIFICATION_STATUS = 'sent';
+const DRIVER_DISPATCH_ATTEMPT_STATUS = {
+  pending: 'pending',
+  rejected: 'rejected',
+  accepted: 'accepted',
+};
+const DRIVER_DISPATCH_WARNING_REJECT_STREAK = 3;
+const DRIVER_DISPATCH_LOCK_REJECT_STREAK = 5;
+const DRIVER_DISPATCH_LOCK_WINDOW_MS = 60 * 60 * 1000;
 const PAYMENT_STATUS_LABELS = {
   ChoThuTien: 'Chờ thu tiền',
   ChoXacNhan: 'Chờ xác nhận',
   DaThanhToan: 'Đã thanh toán',
   ThatBai: 'Thanh toán thất bại',
 };
+const ZALOPAY_TIMEOUT_MS = 12000;
+const MOMO_TIMEOUT_MS = 12000;
+const MOMO_SUCCESS_RESULT_CODE = 0;
+const momoMockPaidOrderIds = new Set();
 
 const DEFAULT_PRICING_TABLE = {
   motorbike: {
@@ -255,8 +280,16 @@ function normalizeText(value) {
     .replace(/\s+/g, ' ');
 }
 
-function normalizeStatusToken(value) {
+function stripVietnameseDiacritics(value) {
   return normalizeText(value)
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+
+function normalizeStatusToken(value) {
+  return stripVietnameseDiacritics(value)
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
 }
@@ -1044,6 +1077,22 @@ export async function ensureRideSchema() {
       `);
 
       await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXe', N'MaTKTaiXeDuocMoi') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe
+          ADD MaTKTaiXeDuocMoi VARCHAR(20) NULL;
+        END
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXe', N'LanDieuPhoiHienTai') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe
+          ADD LanDieuPhoiHienTai INT NOT NULL CONSTRAINT DF_DatXe_LanDieuPhoiHienTai DEFAULT (0);
+        END
+      `);
+
+      await pool.request().query(`
         IF COL_LENGTH(N'dbo.DatXe', N'LyDoHuy') IS NULL
         BEGIN
           ALTER TABLE dbo.DatXe
@@ -1107,6 +1156,181 @@ export async function ensureRideSchema() {
             CONSTRAINT CK_DanhGiaChuyenXe_SoSao CHECK (SoSaoDanhGia BETWEEN 1 AND 5)
           );
         END
+      `);
+
+      await pool.request().query(`
+        IF OBJECT_ID(N'dbo.DatXeDieuPhoi', N'U') IS NULL
+        BEGIN
+          CREATE TABLE dbo.DatXeDieuPhoi
+          (
+            MaDieuPhoi INT IDENTITY(1,1) NOT NULL,
+            MaChuyen VARCHAR(30) NOT NULL,
+            MaTKTaiXe VARCHAR(20) NOT NULL,
+            MaTX VARCHAR(20) NULL,
+            ThuTuDieuPhoi INT NOT NULL,
+            TrangThai VARCHAR(20) NOT NULL CONSTRAINT DF_DatXeDieuPhoi_TrangThai DEFAULT 'pending',
+            KhoangCachKm DECIMAL(10, 3) NULL,
+            LyDoTuChoi NVARCHAR(500) NULL,
+            DuLieuDieuPhoi NVARCHAR(1200) NULL,
+            NgayPhanHoi DATETIME2(0) NULL,
+            NgayTao DATETIME2(0) NOT NULL CONSTRAINT DF_DatXeDieuPhoi_NgayTao DEFAULT SYSDATETIME(),
+            NgayCapNhat DATETIME2(0) NOT NULL CONSTRAINT DF_DatXeDieuPhoi_NgayCapNhat DEFAULT SYSDATETIME(),
+
+            CONSTRAINT PK_DatXeDieuPhoi PRIMARY KEY (MaDieuPhoi),
+            CONSTRAINT UQ_DatXeDieuPhoi_MaChuyen_MaTKTaiXe UNIQUE (MaChuyen, MaTKTaiXe),
+            CONSTRAINT FK_DatXeDieuPhoi_DatXe FOREIGN KEY (MaChuyen)
+              REFERENCES dbo.DatXe(MaChuyen)
+              ON UPDATE NO ACTION
+              ON DELETE CASCADE,
+            CONSTRAINT FK_DatXeDieuPhoi_TaiKhoan FOREIGN KEY (MaTKTaiXe)
+              REFERENCES dbo.TaiKhoan(MaTK)
+              ON UPDATE NO ACTION
+              ON DELETE NO ACTION,
+            CONSTRAINT CK_DatXeDieuPhoi_TrangThai CHECK (TrangThai IN ('pending', 'rejected', 'accepted')),
+            CONSTRAINT CK_DatXeDieuPhoi_ThuTu CHECK (ThuTuDieuPhoi > 0)
+          );
+        END
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'MaTX') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD MaTX VARCHAR(20) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'KhoangCachKm') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD KhoangCachKm DECIMAL(10, 3) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'LyDoTuChoi') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD LyDoTuChoi NVARCHAR(500) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'DuLieuDieuPhoi') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD DuLieuDieuPhoi NVARCHAR(1200) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayPhanHoi') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD NgayPhanHoi DATETIME2(0) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayTao') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD NgayTao DATETIME2(0) NULL;
+
+          IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayMoi') IS NOT NULL
+          BEGIN
+            EXEC sp_executesql N'
+              UPDATE dbo.DatXeDieuPhoi
+              SET NgayTao = COALESCE(NgayTao, NgayMoi, SYSDATETIME())
+              WHERE NgayTao IS NULL;
+            ';
+          END
+          ELSE
+          BEGIN
+            EXEC sp_executesql N'
+              UPDATE dbo.DatXeDieuPhoi
+              SET NgayTao = COALESCE(NgayTao, SYSDATETIME())
+              WHERE NgayTao IS NULL;
+            ';
+          END
+
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ALTER COLUMN NgayTao DATETIME2(0) NOT NULL;
+
+          IF NOT EXISTS (
+            SELECT 1
+            FROM sys.default_constraints dc
+            INNER JOIN sys.columns c
+              ON c.object_id = dc.parent_object_id
+             AND c.column_id = dc.parent_column_id
+            WHERE dc.parent_object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+              AND c.name = N'NgayTao'
+          )
+          BEGIN
+            ALTER TABLE dbo.DatXeDieuPhoi
+            ADD CONSTRAINT DF_DatXeDieuPhoi_NgayTao DEFAULT SYSDATETIME() FOR NgayTao;
+          END
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayCapNhat') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXeDieuPhoi
+          ADD NgayCapNhat DATETIME2(0) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayCapNhat') IS NOT NULL
+        BEGIN
+          DECLARE @backfillNgayCapNhatSql NVARCHAR(MAX) = N'
+            UPDATE dbo.DatXeDieuPhoi
+            SET NgayCapNhat = COALESCE(NgayCapNhat, NgayTao, SYSDATETIME())
+            WHERE NgayCapNhat IS NULL;
+          ';
+
+          EXEC sp_executesql @backfillNgayCapNhatSql;
+
+          IF EXISTS (
+            SELECT 1
+            FROM sys.columns
+            WHERE object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+              AND name = N'NgayCapNhat'
+              AND is_nullable = 1
+          )
+          BEGIN
+            EXEC sp_executesql N'ALTER TABLE dbo.DatXeDieuPhoi ALTER COLUMN NgayCapNhat DATETIME2(0) NOT NULL;';
+          END
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayCapNhat') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sys.default_constraints dc
+            INNER JOIN sys.columns c
+              ON c.object_id = dc.parent_object_id
+             AND c.column_id = dc.parent_column_id
+            WHERE dc.parent_object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+              AND c.name = N'NgayCapNhat'
+          )
+        BEGIN
+          EXEC sp_executesql N'ALTER TABLE dbo.DatXeDieuPhoi ADD CONSTRAINT DF_DatXeDieuPhoi_NgayCapNhat DEFAULT SYSDATETIME() FOR NgayCapNhat;';
+        END
+      `);
+
+      await pool.request().query(`
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayTao') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE name = N'IX_DatXeDieuPhoi_MaTKTaiXe_NgayTao'
+              AND object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+          )
+        BEGIN
+          CREATE INDEX IX_DatXeDieuPhoi_MaTKTaiXe_NgayTao
+          ON dbo.DatXeDieuPhoi (MaTKTaiXe, NgayTao DESC, MaDieuPhoi DESC);
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayMoi') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE name = N'IX_DatXeDieuPhoi_MaTKTaiXe_NgayMoi'
+              AND object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+          )
+        BEGIN
+          CREATE INDEX IX_DatXeDieuPhoi_MaTKTaiXe_NgayMoi
+          ON dbo.DatXeDieuPhoi (MaTKTaiXe, NgayMoi DESC, MaDieuPhoi DESC);
+        END
+
       `);
 
       await pool.request().query(`
@@ -1269,6 +1493,21 @@ export async function ensureRideSchema() {
         BEGIN
           ALTER TABLE dbo.DatXe ADD TenUuDai NVARCHAR(120) NULL;
         END
+
+        IF COL_LENGTH(N'dbo.DatXe', N'PhanTramPhiNenTang') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe ADD PhanTramPhiNenTang DECIMAL(5, 2) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXe', N'TienPhiNenTang') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe ADD TienPhiNenTang INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.DatXe', N'TienTaiXeNhan') IS NULL
+        BEGIN
+          ALTER TABLE dbo.DatXe ADD TienTaiXeNhan INT NULL;
+        END
       `);
 
       await pool.request().query(`
@@ -1290,6 +1529,91 @@ export async function ensureRideSchema() {
         IF COL_LENGTH(N'dbo.ThanhToan', N'TenUuDai') IS NULL
         BEGIN
           ALTER TABLE dbo.ThanhToan ADD TenUuDai NVARCHAR(120) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'GatewayAppTransId') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD GatewayAppTransId VARCHAR(80) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'GatewayTransToken') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD GatewayTransToken VARCHAR(120) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'GatewayLastQueryAt') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD GatewayLastQueryAt DATETIME2(0) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'GatewayLastReturnCode') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD GatewayLastReturnCode INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'PhanTramPhiNenTang') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD PhanTramPhiNenTang DECIMAL(5, 2) NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'TienPhiNenTang') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD TienPhiNenTang INT NULL;
+        END
+
+        IF COL_LENGTH(N'dbo.ThanhToan', N'TienTaiXeNhan') IS NULL
+        BEGIN
+          ALTER TABLE dbo.ThanhToan ADD TienTaiXeNhan INT NULL;
+        END
+      `);
+
+      await pool.request().query(`
+        IF OBJECT_ID(N'dbo.PaymentGatewayAudit', N'U') IS NULL
+        BEGIN
+          CREATE TABLE dbo.PaymentGatewayAudit
+          (
+            AuditId BIGINT IDENTITY(1,1) NOT NULL,
+            PaymentCode VARCHAR(30) NULL,
+            BookingCode VARCHAR(30) NULL,
+            Provider VARCHAR(20) NOT NULL,
+            EventType VARCHAR(40) NOT NULL,
+            Source VARCHAR(30) NOT NULL,
+            VerifyStatus VARCHAR(20) NOT NULL,
+            RequestMac VARCHAR(128) NULL,
+            ComputedMac VARCHAR(128) NULL,
+            AppTransId VARCHAR(80) NULL,
+            GatewayReturnCode INT NULL,
+            Message NVARCHAR(500) NULL,
+            RequestPayload NVARCHAR(MAX) NULL,
+            ResponsePayload NVARCHAR(MAX) NULL,
+            CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_PaymentGatewayAudit_CreatedAt DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (AuditId)
+          );
+        END
+      `);
+
+      await pool.request().query(`
+        IF NOT EXISTS (
+          SELECT 1
+          FROM sys.indexes
+          WHERE name = N'IX_PaymentGatewayAudit_BookingCode_CreatedAt'
+            AND object_id = OBJECT_ID(N'dbo.PaymentGatewayAudit')
+        )
+        BEGIN
+          CREATE INDEX IX_PaymentGatewayAudit_BookingCode_CreatedAt
+          ON dbo.PaymentGatewayAudit(BookingCode, CreatedAt DESC);
+        END
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM sys.indexes
+          WHERE name = N'IX_ThanhToan_GatewayAppTransId'
+            AND object_id = OBJECT_ID(N'dbo.ThanhToan')
+        )
+        BEGIN
+          CREATE INDEX IX_ThanhToan_GatewayAppTransId
+          ON dbo.ThanhToan(GatewayAppTransId)
+          WHERE GatewayAppTransId IS NOT NULL;
         END
       `);
 
@@ -1404,10 +1728,363 @@ async function resolveDriverDispatchState(transaction, driverIdentifier) {
   };
 }
 
+async function resolveDriverDispatchCandidates(transaction, pickup = {}, excludedDriverSystemAccountIds = []) {
+  const queryResult = await new sql.Request(transaction).query(`
+    SELECT
+      tx.MaTK AS driverSystemAccountId,
+      tx.CCCD AS driverAccountId,
+      tx.DiaChi AS driverAddress,
+      tx.TrangThai AS driverStatus,
+      tx.KhoaTamDen AS temporaryLockUntil,
+      tx.LyDoKhoaTam AS temporaryLockReason,
+      tk.Ten AS driverName,
+      tk.SDT AS driverPhone,
+      tk.TrangThai AS accountStatus
+    FROM dbo.TaiXe tx
+    INNER JOIN dbo.TaiKhoan tk
+      ON tk.MaTK = tx.MaTK
+    WHERE tx.MaTK IS NOT NULL
+      AND NULLIF(tx.CCCD, '') IS NOT NULL;
+  `);
+
+  const excludedSet = new Set(
+    (Array.isArray(excludedDriverSystemAccountIds) ? excludedDriverSystemAccountIds : [])
+      .map((item) => normalizeText(item).toLowerCase())
+      .filter(Boolean),
+  );
+
+  const pickupPosition = normalizePosition(pickup?.position) || await resolveLocationPosition(pickup);
+  const now = Date.now();
+  const rows = queryResult.recordset ?? [];
+  const normalizedCandidates = await Promise.all(rows.map(async (row) => {
+    const driverSystemAccountId = normalizeText(row.driverSystemAccountId);
+
+    if (!driverSystemAccountId || excludedSet.has(driverSystemAccountId.toLowerCase())) {
+      return null;
+    }
+
+    // Only dispatch to drivers that are currently online in realtime channel.
+    if (!hasActiveRideSocketClient({ accountId: driverSystemAccountId, roleCode: 'Q3' })) {
+      return null;
+    }
+
+    const accountStatus = normalizeStatusToken(row.accountStatus);
+    const driverStatus = normalizeStatusToken(row.driverStatus);
+
+    if (accountStatus === 'khoa' || !isDriverReadyStatus(driverStatus)) {
+      return null;
+    }
+
+    const temporaryLockUntil = row.temporaryLockUntil ? new Date(row.temporaryLockUntil) : null;
+
+    if (temporaryLockUntil && !Number.isNaN(temporaryLockUntil.getTime()) && temporaryLockUntil.getTime() > now) {
+      return null;
+    }
+
+    const driverPosition = await resolveLocationPosition({
+      label: normalizeText(row.driverAddress),
+      position: null,
+    });
+    const distanceKm = pickupPosition && driverPosition
+      ? calculateDistanceKm(pickupPosition, driverPosition)
+      : null;
+
+    return {
+      driverSystemAccountId,
+      driverAccountId: normalizeText(row.driverAccountId),
+      driverName: normalizeText(row.driverName),
+      driverPhone: normalizeText(row.driverPhone),
+      driverAddress: normalizeText(row.driverAddress),
+      distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(3)) : null,
+    };
+  }));
+
+  return normalizedCandidates
+    .filter(Boolean)
+    .sort((leftCandidate, rightCandidate) => {
+      const leftDistance = Number.isFinite(leftCandidate.distanceKm) ? leftCandidate.distanceKm : Number.POSITIVE_INFINITY;
+      const rightDistance = Number.isFinite(rightCandidate.distanceKm) ? rightCandidate.distanceKm : Number.POSITIVE_INFINITY;
+
+      if (leftDistance !== rightDistance) {
+        return leftDistance - rightDistance;
+      }
+
+      return leftCandidate.driverSystemAccountId.localeCompare(rightCandidate.driverSystemAccountId);
+    });
+}
+
+async function insertDriverDispatchAttempt(transaction, payload = {}) {
+  const bookingCode = normalizeText(payload.bookingCode);
+  const driverSystemAccountId = normalizeText(payload.driverSystemAccountId);
+  const driverAccountId = normalizeText(payload.driverAccountId);
+  const dispatchOrder = Number(payload.dispatchOrder);
+  const distanceKm = Number(payload.distanceKm);
+  const status = normalizeText(payload.status || DRIVER_DISPATCH_ATTEMPT_STATUS.pending).toLowerCase();
+  const dispatchPayload = normalizeText(payload.dispatchPayload || '');
+
+  if (!bookingCode || !driverSystemAccountId || !Number.isInteger(dispatchOrder) || dispatchOrder <= 0) {
+    return;
+  }
+
+  await new sql.Request(transaction)
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountId)
+    .input('driverAccountId', sql.VarChar(20), driverAccountId || null)
+    .input('dispatchOrder', sql.Int, dispatchOrder)
+    .input('status', sql.VarChar(20), status)
+    .input('distanceKm', sql.Decimal(10, 3), Number.isFinite(distanceKm) ? distanceKm : null)
+    .input('dispatchPayload', sql.NVarChar(1200), dispatchPayload || null)
+    .query(`
+      INSERT INTO dbo.DatXeDieuPhoi
+      (
+        MaChuyen,
+        MaTKTaiXe,
+        MaTX,
+        ThuTuDieuPhoi,
+        TrangThai,
+        KhoangCachKm,
+        DuLieuDieuPhoi
+      )
+      VALUES
+      (
+        @bookingCode,
+        @driverSystemAccountId,
+        NULLIF(@driverAccountId, ''),
+        @dispatchOrder,
+        @status,
+        @distanceKm,
+        NULLIF(@dispatchPayload, '')
+      );
+    `);
+}
+
+async function upsertDispatchViolation(transaction, payload = {}) {
+  const fingerprint = normalizeText(payload.fingerprint);
+
+  if (!fingerprint) {
+    return false;
+  }
+
+  await ensureDriverViolationSchema();
+
+  const result = await new sql.Request(transaction)
+    .input('fingerprint', sql.VarChar(150), fingerprint)
+    .input('bookingCode', sql.VarChar(30), normalizeText(payload.bookingCode) || null)
+    .input('driverAccountId', sql.VarChar(20), normalizeText(payload.driverAccountId) || null)
+    .input('driverSystemAccountId', sql.VarChar(20), normalizeText(payload.driverSystemAccountId) || null)
+    .input('driverName', sql.NVarChar(120), normalizeText(payload.driverName) || null)
+    .input('driverPhone', sql.VarChar(20), normalizeText(payload.driverPhone) || null)
+    .input('description', sql.NVarChar(1200), normalizeText(payload.description) || null)
+    .input('severity', sql.VarChar(20), normalizeText(payload.severity || 'medium').toLowerCase())
+    .input('detectedAt', sql.DateTime2(0), new Date())
+    .input('detectionPayload', sql.NVarChar(2000), normalizeText(payload.detectionPayload) || null)
+    .query(`
+      IF NOT EXISTS (SELECT 1 FROM dbo.ViPhamTaiXe WHERE Fingerprint = @fingerprint)
+      BEGIN
+        INSERT INTO dbo.ViPhamTaiXe
+        (
+          Fingerprint,
+          NguonPhatHien,
+          LoaiViPham,
+          TenLoaiViPham,
+          MoTa,
+          MucDo,
+          TrangThai,
+          MaChuyen,
+          MaTX,
+          MaTKTaiXe,
+          TenTaiXe,
+          driverPhone,
+          NgayPhatHien,
+          DuLieuPhatHien,
+          NgayTao,
+          NgayCapNhat
+        )
+        VALUES
+        (
+          @fingerprint,
+          'system',
+          'cancel-trip',
+          N'Hủy chuyến',
+          COALESCE(@description, N'Hệ thống ghi nhận tài xế từ chối cuốc liên tiếp.'),
+          @severity,
+          'pending',
+          NULLIF(@bookingCode, ''),
+          NULLIF(@driverAccountId, ''),
+          NULLIF(@driverSystemAccountId, ''),
+          NULLIF(@driverName, ''),
+          NULLIF(@driverPhone, ''),
+          @detectedAt,
+          NULLIF(@detectionPayload, ''),
+          SYSDATETIME(),
+          SYSDATETIME()
+        );
+
+        SELECT CAST(1 AS INT) AS inserted;
+      END
+      ELSE
+      BEGIN
+        SELECT CAST(0 AS INT) AS inserted;
+      END;
+    `);
+
+  return result.recordset?.[0]?.inserted > 0;
+}
+
+async function enforceDriverDispatchRejectPolicy(transaction, payload = {}) {
+  const driverSystemAccountId = normalizeText(payload.driverSystemAccountId);
+  const bookingCode = normalizeText(payload.bookingCode);
+
+  if (!driverSystemAccountId) {
+    return { warningTriggered: false, temporaryLockTriggered: false };
+  }
+
+  const driverResult = await new sql.Request(transaction)
+    .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountId)
+    .query(`
+      SELECT TOP 1
+        tx.CCCD AS driverAccountId,
+        tx.KhoaTamDen AS temporaryLockUntil,
+        tk.Ten AS driverName,
+        tk.SDT AS driverPhone
+      FROM dbo.TaiXe tx
+      LEFT JOIN dbo.TaiKhoan tk
+        ON tk.MaTK = tx.MaTK
+      WHERE tx.MaTK = @driverSystemAccountId;
+    `);
+
+  const driverRow = driverResult.recordset?.[0] ?? null;
+
+  if (!driverRow) {
+    return { warningTriggered: false, temporaryLockTriggered: false };
+  }
+
+  const historyResult = await new sql.Request(transaction)
+    .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountId)
+    .query(`
+      SELECT TOP (12)
+        dp.TrangThai AS dispatchStatus,
+        dp.NgayPhanHoi AS respondedAt
+      FROM dbo.DatXeDieuPhoi dp
+      WHERE dp.MaTKTaiXe = @driverSystemAccountId
+        AND dp.TrangThai IN ('rejected', 'accepted')
+        AND dp.NgayPhanHoi IS NOT NULL
+      ORDER BY dp.NgayPhanHoi DESC, dp.MaDieuPhoi DESC;
+    `);
+
+  const historyRows = historyResult.recordset ?? [];
+  let rejectionStreak = 0;
+
+  for (const row of historyRows) {
+    if (normalizeText(row.dispatchStatus).toLowerCase() !== DRIVER_DISPATCH_ATTEMPT_STATUS.rejected) {
+      break;
+    }
+
+    rejectionStreak += 1;
+  }
+
+  const warningTriggered = rejectionStreak >= DRIVER_DISPATCH_WARNING_REJECT_STREAK;
+  const topFiveRejectedRows = historyRows
+    .slice(0, DRIVER_DISPATCH_LOCK_REJECT_STREAK)
+    .filter((row) => normalizeText(row.dispatchStatus).toLowerCase() === DRIVER_DISPATCH_ATTEMPT_STATUS.rejected);
+  const firstRejectAt = topFiveRejectedRows[0]?.respondedAt ? new Date(topFiveRejectedRows[0].respondedAt) : null;
+  const fifthRejectAt = topFiveRejectedRows[DRIVER_DISPATCH_LOCK_REJECT_STREAK - 1]?.respondedAt
+    ? new Date(topFiveRejectedRows[DRIVER_DISPATCH_LOCK_REJECT_STREAK - 1].respondedAt)
+    : null;
+  const temporaryLockTriggered = topFiveRejectedRows.length === DRIVER_DISPATCH_LOCK_REJECT_STREAK
+    && firstRejectAt
+    && fifthRejectAt
+    && !Number.isNaN(firstRejectAt.getTime())
+    && !Number.isNaN(fifthRejectAt.getTime())
+    && (firstRejectAt.getTime() - fifthRejectAt.getTime()) <= DRIVER_DISPATCH_LOCK_WINDOW_MS;
+
+  if (warningTriggered) {
+    await upsertDispatchViolation(transaction, {
+      fingerprint: `dispatch-reject-warning:${driverSystemAccountId}:${bookingCode}`.slice(0, 150),
+      bookingCode,
+      driverAccountId: normalizeText(driverRow.driverAccountId),
+      driverSystemAccountId,
+      driverName: normalizeText(driverRow.driverName),
+      driverPhone: normalizeText(driverRow.driverPhone),
+      severity: rejectionStreak >= DRIVER_DISPATCH_LOCK_REJECT_STREAK ? 'high' : 'medium',
+      description: `Tài xế đã từ chối ${rejectionStreak} cuốc liên tiếp.`,
+      detectionPayload: JSON.stringify({
+        source: 'dispatch-rejection-policy',
+        streak: rejectionStreak,
+      }),
+    });
+
+    if (rejectionStreak === DRIVER_DISPATCH_WARNING_REJECT_STREAK) {
+      await createNotification({
+        accountId: driverSystemAccountId,
+        title: 'Cảnh cáo từ chối cuốc liên tiếp',
+        content: 'Bạn đã từ chối 3 cuốc liên tiếp. Hệ thống đã ghi nhận vi phạm, vui lòng nhận cuốc đúng quy định.',
+        recipient: 'driver',
+        status: 'sent',
+        sendAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (temporaryLockTriggered) {
+    await new sql.Request(transaction)
+      .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountId)
+      .query(`
+        UPDATE dbo.TaiXe
+        SET
+          KhoaTamDen = DATEADD(HOUR, 1, SYSDATETIME()),
+          LyDoKhoaTam = N'Từ chối 5 cuốc liên tiếp trong 1 giờ',
+          NgayCapNhat = SYSDATETIME()
+        WHERE MaTK = @driverSystemAccountId;
+      `);
+
+    await upsertDispatchViolation(transaction, {
+      fingerprint: `dispatch-reject-lock:${driverSystemAccountId}:${bookingCode}`.slice(0, 150),
+      bookingCode,
+      driverAccountId: normalizeText(driverRow.driverAccountId),
+      driverSystemAccountId,
+      driverName: normalizeText(driverRow.driverName),
+      driverPhone: normalizeText(driverRow.driverPhone),
+      severity: 'high',
+      description: 'Tài xế từ chối 5 cuốc liên tiếp trong 1 giờ, hệ thống tự động khóa nhận chuyến 1 giờ.',
+      detectionPayload: JSON.stringify({
+        source: 'dispatch-rejection-policy',
+        streak: rejectionStreak,
+        lockMinutes: 60,
+      }),
+    });
+
+    await createNotification({
+      accountId: driverSystemAccountId,
+      title: 'Tạm khóa nhận chuyến 1 giờ',
+      content: 'Bạn đã từ chối 5 cuốc liên tiếp trong 1 giờ. Chức năng nhận chuyến đã tạm khóa 1 giờ.',
+      recipient: 'driver',
+      status: 'sent',
+      sendAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    warningTriggered,
+    temporaryLockTriggered,
+    rejectionStreak,
+  };
+}
+
 function isDriverReadyStatus(driverStatus) {
   const normalizedDriverStatus = normalizeStatusToken(driverStatus);
 
-  return normalizedDriverStatus === 'hoatdong' || normalizedDriverStatus === 'hoantat';
+  return (
+    normalizedDriverStatus === 'hoatdong'
+    || normalizedDriverStatus === 'hoantat'
+    || normalizedDriverStatus === 'dangcho'
+    || normalizedDriverStatus === 'ranh'
+    || normalizedDriverStatus === 'active'
+    || normalizedDriverStatus === 'online'
+    || normalizedDriverStatus === 'sansang'
+    || normalizedDriverStatus === 'ready'
+    || normalizedDriverStatus === 'available'
+  );
 }
 
 function getVehiclePricing(vehicle) {
@@ -1667,6 +2344,8 @@ function buildRideResults(vehicle, distanceKm, baseDurationMinutes) {
     ? 'Đặt ghép theo chỗ ngồi, giá được tính theo bảng giá hiện hành.'
     : 'Giá được ước tính theo bảng giá hiện hành và quãng đường thực tế.';
 
+  const serviceFee = BOOKING_SERVICE_FEE[vehicle] ?? 5000;
+
   return vehiclePricing.tiers.map((tier, index) => {
     const estimateMinutes = Math.max(3, baseDurationMinutes + Math.max(-2, 1 - index));
     const price = calculateTierPrice(effectiveDistanceKm, vehiclePricing, tier);
@@ -1681,6 +2360,10 @@ function buildRideResults(vehicle, distanceKm, baseDurationMinutes) {
       eta: `${estimateMinutes} phút`,
       price,
       priceFormatted: formatCurrency(price),
+      serviceFee,
+      serviceFeeFormatted: formatCurrency(serviceFee),
+      totalPrice: price + serviceFee,
+      totalPriceFormatted: formatCurrency(price + serviceFee),
       note: commonNote,
       vehicleLabel: config.label,
     };
@@ -1698,6 +2381,10 @@ function normalizeContactPhone(value) {
 function normalizePaymentMethod(value) {
   const normalizedValue = normalizeText(value).toLowerCase();
 
+  if (normalizedValue === 'app_wallet') {
+    return 'wallet';
+  }
+
   if (normalizedValue === 'qr' || normalizedValue === 'wallet') {
     return normalizedValue;
   }
@@ -1708,11 +2395,11 @@ function normalizePaymentMethod(value) {
 function normalizePaymentProvider(value) {
   const normalizedValue = normalizeText(value).toLowerCase();
 
-  if (normalizedValue === 'momo' || normalizedValue === 'zalopay' || normalizedValue === 'vnpay') {
+  if (normalizedValue === 'momo' || normalizedValue === 'zalopay' || normalizedValue === 'app_wallet') {
     return normalizedValue;
   }
 
-  return 'vnpay';
+  return 'zalopay';
 }
 
 function getPaymentMethodLabel(paymentMethod) {
@@ -1723,12 +2410,47 @@ function getPaymentProviderLabel(paymentProvider) {
   return PAYMENT_PROVIDER_LABELS[paymentProvider] ?? '';
 }
 
-function getPaymentStatus(paymentMethod) {
-  return paymentMethod === 'cash' ? 'ChoThuTien' : 'ChoXacNhan';
+function getPaymentStatus(paymentMethod, paymentProvider = '') {
+  const normalizedMethod = normalizeText(paymentMethod).toLowerCase();
+  const normalizedProvider = normalizeText(paymentProvider).toLowerCase();
+
+  if (normalizedMethod === 'cash') {
+    return 'ChoThuTien';
+  }
+
+  if ((normalizedMethod === 'wallet' && normalizedProvider === 'app_wallet') || normalizedMethod === 'app_wallet') {
+    return 'DaThanhToan';
+  }
+
+  // Non-cash methods must be confirmed by payment gateway callback.
+  return 'ChoXacNhan';
+}
+
+function normalizePaymentStatusValue(value) {
+  const normalizedValue = normalizeText(value).toLowerCase();
+
+  if (normalizedValue === 'dathanhtoan') {
+    return 'DaThanhToan';
+  }
+
+  if (normalizedValue === 'chothutien') {
+    return 'ChoThuTien';
+  }
+
+  if (normalizedValue === 'thatbai') {
+    return 'ThatBai';
+  }
+
+  if (normalizedValue === 'choxacnhan' || normalizedValue === 'choxacthanh') {
+    return 'ChoXacNhan';
+  }
+
+  return 'ChoXacNhan';
 }
 
 function getPaymentStatusLabel(paymentStatus) {
-  return PAYMENT_STATUS_LABELS[paymentStatus] ?? PAYMENT_STATUS_LABELS.ChoXacNhan;
+  const normalizedPaymentStatus = normalizePaymentStatusValue(paymentStatus);
+  return PAYMENT_STATUS_LABELS[normalizedPaymentStatus] ?? PAYMENT_STATUS_LABELS.ChoXacNhan;
 }
 
 function generatePaymentCode(bookingCode) {
@@ -1740,6 +2462,535 @@ function generateBookingCode() {
   const dateStamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `SR-${dateStamp}-${randomSuffix}`;
+}
+
+function isZaloPayConfigured() {
+  return Boolean(normalizeText(env.zaloPayAppId) && normalizeText(env.zaloPayKey1) && normalizeText(env.zaloPayKey2));
+}
+
+function isMoMoConfigured() {
+  return Boolean(normalizeText(env.momoPartnerCode) && normalizeText(env.momoAccessKey) && normalizeText(env.momoSecretKey));
+}
+
+function isMoMoMockModeEnabled() {
+  return Boolean(env.momoMockMode);
+}
+
+function computeZaloPayHmac(data, secret) {
+  return createHmac('sha256', String(secret ?? ''))
+    .update(String(data ?? ''))
+    .digest('hex');
+}
+
+function computeMoMoHmac(data, secret) {
+  return createHmac('sha256', String(secret ?? ''))
+    .update(String(data ?? ''))
+    .digest('hex');
+}
+
+function encodeMoMoExtraData(payload = {}) {
+  try {
+    return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+  } catch {
+    return '';
+  }
+}
+
+function decodeMoMoExtraData(value = '') {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) {
+    return {};
+  }
+
+  try {
+    const decoded = Buffer.from(normalizedValue, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function safeCompareText(leftValue, rightValue) {
+  const left = Buffer.from(String(leftValue ?? ''), 'utf8');
+  const right = Buffer.from(String(rightValue ?? ''), 'utf8');
+
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return timingSafeEqual(left, right);
+}
+
+async function logPaymentGatewayAudit(payload = {}) {
+  if (!isSqlServerConfigured()) {
+    return;
+  }
+
+  try {
+    await ensureRideSchema();
+
+    const pool = await getSqlServerPool();
+    await pool
+      .request()
+      .input('paymentCode', sql.VarChar(30), normalizeText(payload.paymentCode) || null)
+      .input('bookingCode', sql.VarChar(30), normalizeText(payload.bookingCode) || null)
+      .input('provider', sql.VarChar(20), normalizeText(payload.provider).toLowerCase() || 'zalopay')
+      .input('eventType', sql.VarChar(40), normalizeText(payload.eventType).toLowerCase() || 'unknown')
+      .input('source', sql.VarChar(30), normalizeText(payload.source).toLowerCase() || 'server')
+      .input('verifyStatus', sql.VarChar(20), normalizeText(payload.verifyStatus).toLowerCase() || 'unknown')
+      .input('requestMac', sql.VarChar(128), normalizeText(payload.requestMac) || null)
+      .input('computedMac', sql.VarChar(128), normalizeText(payload.computedMac) || null)
+      .input('appTransId', sql.VarChar(80), normalizeText(payload.appTransId) || null)
+      .input('gatewayReturnCode', sql.Int, Number.isFinite(Number(payload.gatewayReturnCode)) ? Number(payload.gatewayReturnCode) : null)
+      .input('message', sql.NVarChar(500), normalizeText(payload.message) || null)
+      .input('requestPayload', sql.NVarChar(sql.MAX), payload.requestPayload ? JSON.stringify(payload.requestPayload) : null)
+      .input('responsePayload', sql.NVarChar(sql.MAX), payload.responsePayload ? JSON.stringify(payload.responsePayload) : null)
+      .query(`
+        INSERT INTO dbo.PaymentGatewayAudit
+        (
+          PaymentCode,
+          BookingCode,
+          Provider,
+          EventType,
+          Source,
+          VerifyStatus,
+          RequestMac,
+          ComputedMac,
+          AppTransId,
+          GatewayReturnCode,
+          Message,
+          RequestPayload,
+          ResponsePayload,
+          CreatedAt
+        )
+        VALUES
+        (
+          @paymentCode,
+          @bookingCode,
+          @provider,
+          @eventType,
+          @source,
+          @verifyStatus,
+          @requestMac,
+          @computedMac,
+          @appTransId,
+          @gatewayReturnCode,
+          @message,
+          @requestPayload,
+          @responsePayload,
+          SYSUTCDATETIME()
+        );
+      `);
+  } catch {
+    // Never break payment flow because audit logging fails.
+  }
+}
+
+async function queryZaloPayOrderStatus(appTransId) {
+  const normalizedAppTransId = normalizeText(appTransId);
+
+  if (!normalizedAppTransId) {
+    throw createValidationError('Thiếu app_trans_id để truy vấn trạng thái ZaloPay.');
+  }
+
+  if (!isZaloPayConfigured()) {
+    throw createValidationError('Hệ thống chưa cấu hình ZaloPay (APP_ID/KEY1/KEY2).');
+  }
+
+  if (typeof fetch !== 'function') {
+    throw createValidationError('Máy chủ hiện tại chưa hỗ trợ fetch để truy vấn ZaloPay.');
+  }
+
+  const appId = normalizeText(env.zaloPayAppId);
+  const key1 = normalizeText(env.zaloPayKey1);
+  const macData = `${appId}|${normalizedAppTransId}|${key1}`;
+  const mac = computeZaloPayHmac(macData, key1);
+
+  const body = new URLSearchParams({
+    app_id: appId,
+    app_trans_id: normalizedAppTransId,
+    mac,
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ZALOPAY_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(normalizeText(env.zaloPayQueryOrderUrl), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw createValidationError(`Không thể truy vấn trạng thái ZaloPay (HTTP ${response.status}).`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw createValidationError('Truy vấn trạng thái ZaloPay bị quá thời gian phản hồi.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function generateZaloPayAppTransId(bookingCode) {
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const datePrefix = `${yy}${mm}${dd}`;
+  const bookingToken = normalizeText(bookingCode)
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase()
+    .slice(-14);
+  const randomSuffix = Math.floor(100 + Math.random() * 900);
+  return `${datePrefix}_${bookingToken}${randomSuffix}`;
+}
+
+function generateMoMoOrderId(bookingCode) {
+  const normalizedBookingCode = normalizeText(bookingCode).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 22) || 'BOOKING';
+  return `SR_${normalizedBookingCode}_${Date.now()}`;
+}
+
+function extractBookingCodeFromMoMoOrderId(orderId = '') {
+  const normalizedOrderId = normalizeText(orderId);
+  const matched = /^SR_([a-zA-Z0-9_-]+)_\d+$/.exec(normalizedOrderId);
+
+  if (!matched?.[1]) {
+    return '';
+  }
+
+  return normalizeText(matched[1]);
+}
+
+async function createZaloPayOrder(booking) {
+  if (!isZaloPayConfigured()) {
+    throw createValidationError('Hệ thống chưa cấu hình ZaloPay (APP_ID/KEY1/KEY2).');
+  }
+
+  if (typeof fetch !== 'function') {
+    throw createValidationError('Máy chủ hiện tại chưa hỗ trợ fetch để gọi cổng thanh toán ZaloPay.');
+  }
+
+  const appId = normalizeText(env.zaloPayAppId);
+  const key1 = normalizeText(env.zaloPayKey1);
+  const appUser = normalizeText(booking.customerAccountId || booking.customerPhone || 'guest');
+  const amount = Number(booking.price ?? 0);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw createValidationError('Số tiền thanh toán ZaloPay không hợp lệ.');
+  }
+
+  const appTransId = generateZaloPayAppTransId(booking.bookingCode);
+  const appTime = Date.now();
+  const embedData = JSON.stringify({
+    bookingCode: booking.bookingCode,
+    accountId: booking.customerAccountId,
+    paymentProvider: 'zalopay',
+    redirectUrl: normalizeText(env.zaloPayRedirectUrl) || '',
+  });
+  const items = JSON.stringify([]);
+  const description = `Thanh toan chuyến ${booking.bookingCode} - SmartRide`;
+  const callbackUrl = normalizeText(env.zaloPayCallbackUrl);
+  const macData = `${appId}|${appTransId}|${appUser}|${amount}|${appTime}|${embedData}|${items}`;
+  const mac = computeZaloPayHmac(macData, key1);
+
+  const body = new URLSearchParams({
+    app_id: appId,
+    app_user: appUser,
+    app_time: String(appTime),
+    amount: String(amount),
+    app_trans_id: appTransId,
+    embed_data: embedData,
+    item: items,
+    description,
+    bank_code: '',
+    mac,
+  });
+
+  if (callbackUrl) {
+    body.set('callback_url', callbackUrl);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ZALOPAY_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(normalizeText(env.zaloPayCreateOrderUrl), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw createValidationError(`Không thể tạo đơn ZaloPay (HTTP ${response.status}).`);
+    }
+
+    const payload = await response.json();
+    const returnCode = Number(payload?.return_code ?? payload?.returncode ?? 0);
+
+    if (returnCode !== 1) {
+      const errorMessage = normalizeText(payload?.return_message ?? payload?.returnmessage) || 'ZaloPay từ chối tạo đơn.';
+      const subReturnCode = Number(payload?.sub_return_code ?? payload?.subreturncode ?? NaN);
+      const subReturnMessage = normalizeText(payload?.sub_return_message ?? payload?.subreturnmessage);
+
+      let detailedMessage = errorMessage;
+
+      if (subReturnMessage) {
+        detailedMessage = `${detailedMessage} - ${subReturnMessage}`;
+      }
+
+      if (Number.isFinite(subReturnCode)) {
+        detailedMessage = `${detailedMessage} (sub_return_code: ${subReturnCode})`;
+      }
+
+      throw createValidationError(detailedMessage);
+    }
+
+    return {
+      provider: 'zalopay',
+      appTransId,
+      amount,
+      orderUrl: normalizeText(payload?.order_url ?? payload?.orderurl),
+      deepLink: normalizeText(payload?.deeplink ?? payload?.deep_link ?? payload?.order_url ?? payload?.orderurl),
+      qrCodeUrl: normalizeText(payload?.qr_code ?? payload?.qrCode),
+      zpTransToken: normalizeText(payload?.zp_trans_token ?? payload?.zptranstoken),
+      gatewayTransToken: normalizeText(payload?.zp_trans_token ?? payload?.zptranstoken),
+      raw: payload,
+    };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw createValidationError('Kết nối ZaloPay bị quá thời gian phản hồi. Vui lòng thử lại.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function createMoMoOrder(booking) {
+  if (isMoMoMockModeEnabled()) {
+    const mockOrderId = generateMoMoOrderId(booking.bookingCode);
+    const amount = Number(booking.price ?? 0);
+    const redirectUrl = normalizeText(env.momoRedirectUrl) || 'http://localhost:5173/';
+    const orderUrl = `${redirectUrl.replace(/\/$/, '')}/?payment_provider=momo&mock=1&orderId=${encodeURIComponent(mockOrderId)}`;
+
+    momoMockPaidOrderIds.delete(mockOrderId);
+
+    return {
+      provider: 'momo',
+      appTransId: mockOrderId,
+      amount,
+      orderUrl,
+      payUrl: orderUrl,
+      deepLink: orderUrl,
+      qrCodeUrl: '',
+      gatewayTransToken: `MOCK-${Date.now()}`,
+      raw: {
+        mock: true,
+        resultCode: MOMO_SUCCESS_RESULT_CODE,
+        message: 'MoMo mock mode create-order success',
+      },
+    };
+  }
+
+  if (!isMoMoConfigured()) {
+    throw createValidationError('Hệ thống chưa cấu hình MoMo (PARTNER_CODE/ACCESS_KEY/SECRET_KEY).');
+  }
+
+  if (typeof fetch !== 'function') {
+    throw createValidationError('Máy chủ hiện tại chưa hỗ trợ fetch để gọi cổng thanh toán MoMo.');
+  }
+
+  const partnerCode = normalizeText(env.momoPartnerCode);
+  const accessKey = normalizeText(env.momoAccessKey);
+  const secretKey = normalizeText(env.momoSecretKey);
+  const orderId = generateMoMoOrderId(booking.bookingCode);
+  const requestId = `${orderId}_${Math.floor(100 + Math.random() * 900)}`;
+  const amount = Number(booking.price ?? 0);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw createValidationError('Số tiền thanh toán MoMo không hợp lệ.');
+  }
+
+  const redirectUrl = normalizeText(env.momoRedirectUrl) || 'http://localhost:5173/';
+  const ipnUrl = normalizeText(env.momoCallbackUrl);
+
+  if (!ipnUrl) {
+    throw createValidationError('Thiếu MOMO_CALLBACK_URL để nhận xác nhận thanh toán MoMo.');
+  }
+
+  const orderInfo = `Thanh toan chuyen ${booking.bookingCode} - SmartRide`;
+  const requestType = normalizeText(env.momoRequestType) || 'captureWallet';
+  const extraData = encodeMoMoExtraData({
+    bookingCode: booking.bookingCode,
+    accountId: booking.customerAccountId,
+    paymentProvider: 'momo',
+    redirectUrl,
+  });
+  const rawSignature = [
+    `accessKey=${accessKey}`,
+    `amount=${Math.round(amount)}`,
+    `extraData=${extraData}`,
+    `ipnUrl=${ipnUrl}`,
+    `orderId=${orderId}`,
+    `orderInfo=${orderInfo}`,
+    `partnerCode=${partnerCode}`,
+    `redirectUrl=${redirectUrl}`,
+    `requestId=${requestId}`,
+    `requestType=${requestType}`,
+  ].join('&');
+  const signature = computeMoMoHmac(rawSignature, secretKey);
+
+  const body = {
+    partnerCode,
+    partnerName: 'SmartRide',
+    storeId: 'SmartRide',
+    requestId,
+    amount: String(Math.round(amount)),
+    orderId,
+    orderInfo,
+    redirectUrl,
+    ipnUrl,
+    lang: 'vi',
+    requestType,
+    autoCapture: true,
+    extraData,
+    signature,
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), MOMO_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(normalizeText(env.momoCreateOrderUrl), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw createValidationError(`Không thể tạo đơn MoMo (HTTP ${response.status}).`);
+    }
+
+    const payload = await response.json();
+    const resultCode = Number(payload?.resultCode ?? payload?.result_code ?? NaN);
+
+    if (!Number.isFinite(resultCode) || resultCode !== MOMO_SUCCESS_RESULT_CODE) {
+      const errorMessage = normalizeText(payload?.message ?? payload?.localMessage) || 'MoMo từ chối tạo đơn.';
+      throw createValidationError(`${errorMessage} (resultCode: ${Number.isFinite(resultCode) ? resultCode : 'unknown'})`);
+    }
+
+    return {
+      provider: 'momo',
+      appTransId: orderId,
+      amount,
+      orderUrl: normalizeText(payload?.payUrl),
+      payUrl: normalizeText(payload?.payUrl),
+      deepLink: normalizeText(payload?.deeplink ?? payload?.deeplinkMiniApp),
+      qrCodeUrl: normalizeText(payload?.qrCodeUrl),
+      gatewayTransToken: normalizeText(payload?.transId),
+      raw: payload,
+    };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw createValidationError('Kết nối MoMo bị quá thời gian phản hồi. Vui lòng thử lại.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function queryMoMoOrderStatus(orderId) {
+  const normalizedOrderId = normalizeText(orderId);
+
+  if (!normalizedOrderId) {
+    throw createValidationError('Thiếu orderId để truy vấn trạng thái MoMo.');
+  }
+
+  if (isMoMoMockModeEnabled()) {
+    const isPaid = momoMockPaidOrderIds.has(normalizedOrderId);
+
+    return {
+      resultCode: isPaid ? MOMO_SUCCESS_RESULT_CODE : 1001,
+      message: isPaid ? 'MoMo mock mode payment success' : 'MoMo mock mode pending callback',
+      orderId: normalizedOrderId,
+      transId: isPaid ? `MOCK-${Date.now()}` : '',
+    };
+  }
+
+  if (!isMoMoConfigured()) {
+    throw createValidationError('Hệ thống chưa cấu hình MoMo (PARTNER_CODE/ACCESS_KEY/SECRET_KEY).');
+  }
+
+  if (typeof fetch !== 'function') {
+    throw createValidationError('Máy chủ hiện tại chưa hỗ trợ fetch để truy vấn MoMo.');
+  }
+
+  const partnerCode = normalizeText(env.momoPartnerCode);
+  const accessKey = normalizeText(env.momoAccessKey);
+  const secretKey = normalizeText(env.momoSecretKey);
+  const requestId = `${normalizedOrderId}_${Date.now()}`;
+  const rawSignature = [
+    `accessKey=${accessKey}`,
+    `orderId=${normalizedOrderId}`,
+    `partnerCode=${partnerCode}`,
+    `requestId=${requestId}`,
+  ].join('&');
+  const signature = computeMoMoHmac(rawSignature, secretKey);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), MOMO_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(normalizeText(env.momoQueryOrderUrl), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        partnerCode,
+        requestId,
+        orderId: normalizedOrderId,
+        lang: 'vi',
+        signature,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw createValidationError(`Không thể truy vấn trạng thái MoMo (HTTP ${response.status}).`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw createValidationError('Truy vấn trạng thái MoMo bị quá thời gian phản hồi.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function buildDriverRideRequestNotificationContent(booking) {
@@ -1758,6 +3009,8 @@ function buildDriverRideRequestNotificationContent(booking) {
     seatLabel: booking.seatLabel,
     etaMinutes: booking.etaMinutes,
     priceFormatted: booking.priceFormatted,
+    paymentMethod: booking.paymentMethod,
+    paymentMethodLabel: booking.paymentMethodLabel,
     paymentSummary: booking.paymentSummary,
     routeDistanceKm: booking.routeDistanceKm,
     routeProvider: booking.routeProvider,
@@ -1808,7 +3061,10 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
   const driverAccountId = normalizeText(
     tripStatusResult?.driverAccountId
       ?? currentRow?.driverAccountId
+      ?? currentRow?.dispatchedDriverSystemAccountId
       ?? resolvedBooking?.driverAccountId
+      ?? resolvedBooking?.dispatchedDriverSystemAccountId
+      ?? currentRow?.MaTKTaiXeDuocMoi
       ?? currentRow?.MaTX,
   );
   const driverVehicleLicensePlate = normalizeText(
@@ -1823,6 +3079,11 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
 
   if (driverVehicleName) {
     resolvedBooking.driverVehicleName = driverVehicleName;
+  }
+
+  if (driverAccountId) {
+    resolvedBooking.driverAccountId = driverAccountId;
+    resolvedBooking.dispatchedDriverSystemAccountId = driverAccountId;
   }
 
   const driverRequestNotificationId = Number(
@@ -1849,6 +3110,67 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
     booking: resolvedBooking,
     source: 'status-update',
     createdAt: tripStatusResult?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function buildRidePaymentUpdatedEvent(bookingCode, paymentResult = {}, currentRow = null, bookingSnapshot = null) {
+  const resolvedBooking = cloneRideBookingSnapshot(bookingSnapshot ?? findRecentBookingByCode(bookingCode)) ?? {};
+  const customerAccountId = normalizeText(currentRow?.MaTK ?? currentRow?.customerAccountId ?? resolvedBooking?.customerAccountId);
+  const driverAccountId = normalizeText(
+    currentRow?.driverAccountId
+      ?? resolvedBooking?.driverAccountId
+      ?? currentRow?.MaTX,
+  );
+  const paymentStatus = normalizeText(paymentResult?.paymentStatus ?? currentRow?.paymentStatus ?? currentRow?.bookingPaymentStatus);
+  const paymentMethod = normalizeText(paymentResult?.paymentMethod ?? currentRow?.paymentMethod ?? resolvedBooking?.paymentMethod).toLowerCase();
+  const paymentProvider = normalizeText(paymentResult?.paymentProvider ?? currentRow?.paymentProvider ?? resolvedBooking?.paymentProvider).toLowerCase();
+  const paymentCode = normalizeText(paymentResult?.paymentCode ?? currentRow?.paymentCode ?? resolvedBooking?.paymentCode);
+
+  if (paymentStatus) {
+    resolvedBooking.paymentStatus = paymentStatus;
+    resolvedBooking.paymentStatusLabel = getPaymentStatusLabel(paymentStatus);
+  }
+
+  if (paymentMethod) {
+    resolvedBooking.paymentMethod = paymentMethod;
+    resolvedBooking.paymentMethodLabel = getPaymentMethodLabel(paymentMethod);
+  }
+
+  if (paymentProvider) {
+    resolvedBooking.paymentProvider = paymentProvider;
+    resolvedBooking.paymentProviderLabel = getPaymentProviderLabel(paymentProvider);
+  }
+
+  if (paymentCode) {
+    resolvedBooking.paymentCode = paymentCode;
+  }
+
+  if (resolvedBooking.paymentMethodLabel) {
+    resolvedBooking.paymentSummary = resolvedBooking.paymentProviderLabel
+      ? `${resolvedBooking.paymentMethodLabel} - ${resolvedBooking.paymentProviderLabel}`
+      : resolvedBooking.paymentMethodLabel;
+  }
+
+  if (paymentResult?.paidAt) {
+    resolvedBooking.paidAt = paymentResult.paidAt;
+  }
+
+  return {
+    type: 'ride.payment.updated',
+    routingKey: 'ride.payment.updated',
+    bookingCode: normalizeText(bookingCode),
+    customerAccountId,
+    driverAccountId,
+    paymentCode,
+    paymentMethod,
+    paymentProvider,
+    paymentStatus,
+    paymentStatusLabel: getPaymentStatusLabel(paymentStatus),
+    paidAt: normalizeText(paymentResult?.paidAt ?? currentRow?.paymentPaidAt ?? resolvedBooking?.paidAt),
+    audience: ['customer', ...(driverAccountId ? ['driver'] : []), 'admin'],
+    booking: resolvedBooking,
+    source: normalizeText(paymentResult?.source) || 'payment-update',
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -1968,6 +3290,8 @@ function updateRecentBookingTripStatus(bookingCode, tripStatus, driverAccountId 
     booking.cancelledByAccountId = normalizedCancellationMeta.cancelledByAccountId;
     booking.cancelledByRoleCode = normalizedCancellationMeta.cancelledByRoleCode;
     booking.cancelReason = normalizedCancellationMeta.cancelReason;
+    booking.paymentStatus = 'ThatBai';
+    booking.paymentStatusLabel = getPaymentStatusLabel('ThatBai');
   }
 
   return booking;
@@ -2006,15 +3330,31 @@ async function readTripStatusRow(transaction, bookingCode) {
         dx.MaChuyen,
         dx.MaTK,
         dx.MaTX,
+        dx.LoaiXe AS vehicle,
+        dx.DiemDon AS pickupLabel,
+        dx.MaTKTaiXeDuocMoi AS dispatchedDriverSystemAccountId,
+        dx.LanDieuPhoiHienTai AS dispatchAttemptOrder,
         dx.MaTBThongBaoTaiXe AS driverRequestNotificationId,
         dx.LyDoHuy AS cancelReasonRaw,
+        dx.PhuongThucThanhToan AS paymentMethod,
+        dx.NhaCungCapThanhToan AS paymentProvider,
+        dx.TrangThaiThanhToan AS bookingPaymentStatus,
         dx.TrangThaiChuyen,
         dx.NgayCapNhat,
+        tt.MaTT AS paymentCode,
+        tt.SoTien AS paymentAmount,
+        tt.PhanTramPhiNenTang AS paymentPlatformFeePercent,
+        tt.TienPhiNenTang AS paymentPlatformFeeAmount,
+        tt.TienTaiXeNhan AS paymentDriverNetIncome,
+        tt.TrangThaiThanhToan AS paymentStatus,
+        tt.ThoiDiemThanhToan AS paymentPaidAt,
         tx.MaTK AS driverAccountId,
         tx.CCCD AS driverCccd,
         JSON_VALUE(tx.ThongTinXe, '$.licensePlate') AS driverVehicleLicensePlate,
         JSON_VALUE(tx.ThongTinXe, '$.name') AS driverVehicleName
       FROM DatXe dx WITH (UPDLOCK, ROWLOCK)
+      LEFT JOIN ThanhToan tt
+        ON tt.MaChuyen = dx.MaChuyen
       LEFT JOIN TaiXe tx
         ON LOWER(ISNULL(tx.CCCD, '')) = LOWER(ISNULL(dx.MaTX, ''))
       WHERE dx.MaChuyen = @bookingCode
@@ -2048,8 +3388,139 @@ async function resolveDriverRideRequestNotificationId(transaction, bookingCode, 
   return Number(queryResult.recordset?.[0]?.MaTB ?? 0) || null;
 }
 
+async function dispatchBookingToNextDriver(transaction, booking, excludedDriverSystemAccountIds = []) {
+  const bookingCode = normalizeText(booking?.bookingCode);
+
+  if (!bookingCode) {
+    return null;
+  }
+
+  const attemptedDriversResult = await new sql.Request(transaction)
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .query(`
+      SELECT dp.MaTKTaiXe AS driverSystemAccountId
+      FROM dbo.DatXeDieuPhoi dp
+      WHERE dp.MaChuyen = @bookingCode;
+    `);
+
+  const attemptedDriverIds = new Set(
+    (attemptedDriversResult.recordset ?? [])
+      .map((row) => normalizeText(row.driverSystemAccountId).toLowerCase())
+      .filter(Boolean),
+  );
+
+  for (const excludedDriverId of excludedDriverSystemAccountIds) {
+    const normalizedDriverId = normalizeText(excludedDriverId).toLowerCase();
+
+    if (normalizedDriverId) {
+      attemptedDriverIds.add(normalizedDriverId);
+    }
+  }
+
+  const candidates = await resolveDriverDispatchCandidates(
+    transaction,
+    booking?.pickup ?? {},
+    Array.from(attemptedDriverIds),
+  );
+
+  const nextCandidate = candidates[0] ?? null;
+
+  if (!nextCandidate) {
+    await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), bookingCode)
+      .query(`
+        UPDATE dbo.DatXe
+        SET
+          MaTKTaiXeDuocMoi = NULL,
+          MaTBThongBaoTaiXe = NULL
+        WHERE MaChuyen = @bookingCode;
+      `);
+
+    return null;
+  }
+
+  const dispatchOrder = Number((booking?.dispatchAttemptOrder ?? 0)) + 1;
+  const rideRequestBooking = {
+    ...booking,
+    driverAccountId: nextCandidate.driverSystemAccountId,
+    driverDistanceKm: nextCandidate.distanceKm,
+  };
+  const driverNotificationTitle = `${DRIVER_RIDE_REQUEST_NOTIFICATION_TITLE} ${bookingCode}`;
+  const driverNotificationContent = buildDriverRideRequestNotificationContent(rideRequestBooking);
+  const driverNotificationResult = await new sql.Request(transaction)
+    .input('title', sql.NVarChar(200), driverNotificationTitle)
+    .input('content', sql.NVarChar(sql.MAX), driverNotificationContent)
+    .input('accountId', sql.VarChar(20), nextCandidate.driverSystemAccountId)
+    .input('recipient', sql.VarChar(20), DRIVER_RIDE_REQUEST_NOTIFICATION_RECIPIENT)
+    .input('status', sql.VarChar(20), DRIVER_RIDE_REQUEST_NOTIFICATION_STATUS)
+    .input('sendAt', sql.DateTime2(0), new Date())
+    .input('createdAt', sql.DateTime2(0), new Date())
+    .query(`
+      INSERT INTO dbo.ThongBao
+      (
+        MaTK,
+        TieuDe,
+        NoiDung,
+        NguoiNhan,
+        TrangThai,
+        ThoiGianGuiDuKien,
+        NgayTao,
+        NgayCapNhat
+      )
+      OUTPUT INSERTED.MaTB
+      VALUES
+      (
+        @accountId,
+        @title,
+        @content,
+        @recipient,
+        @status,
+        @sendAt,
+        @createdAt,
+        @createdAt
+      );
+    `);
+
+  const driverNotificationId = Number(driverNotificationResult.recordset?.[0]?.MaTB ?? 0) || null;
+
+  await insertDriverDispatchAttempt(transaction, {
+    bookingCode,
+    driverSystemAccountId: nextCandidate.driverSystemAccountId,
+    driverAccountId: nextCandidate.driverAccountId,
+    dispatchOrder,
+    status: DRIVER_DISPATCH_ATTEMPT_STATUS.pending,
+    distanceKm: nextCandidate.distanceKm,
+    dispatchPayload: JSON.stringify({
+      source: 'dispatch',
+      distanceKm: nextCandidate.distanceKm,
+      driverAddress: nextCandidate.driverAddress,
+    }),
+  });
+
+  await new sql.Request(transaction)
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .input('driverSystemAccountId', sql.VarChar(20), nextCandidate.driverSystemAccountId)
+    .input('dispatchOrder', sql.Int, dispatchOrder)
+    .input('notificationId', sql.Int, driverNotificationId)
+    .query(`
+      UPDATE dbo.DatXe
+      SET
+        MaTKTaiXeDuocMoi = @driverSystemAccountId,
+        LanDieuPhoiHienTai = @dispatchOrder,
+        MaTBThongBaoTaiXe = @notificationId
+      WHERE MaChuyen = @bookingCode;
+    `);
+
+  return {
+    ...nextCandidate,
+    dispatchOrder,
+    notificationId: driverNotificationId,
+  };
+}
+
 async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccountId = '', cancelMeta = {}) {
   await ensureRideSchema();
+  await ensureDriverSchema();
 
   const pool = await getSqlServerPool();
   const transaction = new sql.Transaction(pool);
@@ -2075,6 +3546,7 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       : { driverStatus: '', temporaryLockUntil: null, temporaryLockReason: '' };
     const resolvedDriverStatus = resolvedDriverDispatchState.driverStatus;
     const driverTripId = resolvedDriverCccd || normalizedDriverAccountId;
+    const dispatchedDriverSystemAccountId = normalizeText(currentRow.dispatchedDriverSystemAccountId);
 
     if (!normalizedTripStatus) {
       throw createValidationError('Trang thai chuyen khong hop le.');
@@ -2099,6 +3571,15 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
 
     if (normalizedTripStatus === 'DaNhanChuyen' && !driverTripId) {
       throw createValidationError('Vui lòng cung cấp tài khoản tài xế để nhận chuyến.');
+    }
+
+    if (
+      normalizedTripStatus === 'DaNhanChuyen'
+      && dispatchedDriverSystemAccountId
+      && normalizedDriverAccountId
+      && dispatchedDriverSystemAccountId.toLowerCase() !== normalizedDriverAccountId.toLowerCase()
+    ) {
+      throw createValidationError('Chuyến này đang được gửi cho tài xế khác.');
     }
 
     if (normalizedTripStatus === 'DaNhanChuyen' && !isDriverReadyStatus(resolvedDriverStatus)) {
@@ -2127,6 +3608,8 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       throw createValidationError('Đã có tài xế khác nhận đơn');
     }
 
+    const beforePaymentStatus = normalizeText(currentRow.paymentStatus || currentRow.bookingPaymentStatus);
+
     await buildTripStatusSqlRequest(transaction, bookingCode, normalizedTripStatus, driverTripId || null, cancelMeta)
       .query(`
         UPDATE DatXe
@@ -2134,11 +3617,16 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
           TrangThaiChuyen = @tripStatus,
           TrangThaiThanhToan = CASE
             WHEN @tripStatus = N'HoanThanh' AND PhuongThucThanhToan = 'cash' THEN N'DaThanhToan'
+            WHEN @tripStatus = N'DaHuy' THEN N'ThatBai'
             ELSE TrangThaiThanhToan
           END,
           MaTX = CASE
             WHEN @tripStatus = N'DaNhanChuyen' THEN COALESCE(MaTX, @driverAccountId)
             ELSE MaTX
+          END,
+          MaTKTaiXeDuocMoi = CASE
+            WHEN @tripStatus IN (N'DaNhanChuyen', N'DaHuy') THEN NULL
+            ELSE MaTKTaiXeDuocMoi
           END,
           LyDoHuy = CASE
             WHEN @tripStatus = N'DaHuy' THEN NULLIF(@cancelReasonPayload, '')
@@ -2152,7 +3640,31 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
           WHERE MaChuyen = @bookingCode
             AND PhuongThucThanhToan = 'cash'
             AND TrangThaiThanhToan = N'ChoThuTien';
+
+        IF @tripStatus = N'DaHuy'
+          UPDATE ThanhToan
+          SET
+            TrangThaiThanhToan = N'ThatBai',
+            GatewayLastReturnCode = COALESCE(GatewayLastReturnCode, -1)
+          WHERE MaChuyen = @bookingCode
+            AND TrangThaiThanhToan <> N'ThatBai';
       `);
+
+      if (normalizedTripStatus === 'DaNhanChuyen' && normalizedDriverAccountId) {
+        await new sql.Request(transaction)
+          .input('bookingCode', sql.VarChar(30), bookingCode)
+          .input('driverSystemAccountId', sql.VarChar(20), normalizedDriverAccountId)
+          .query(`
+            UPDATE dbo.DatXeDieuPhoi
+            SET
+              TrangThai = 'accepted',
+              NgayPhanHoi = SYSDATETIME(),
+              NgayCapNhat = SYSDATETIME()
+            WHERE MaChuyen = @bookingCode
+              AND MaTKTaiXe = @driverSystemAccountId
+              AND TrangThai = 'pending';
+          `);
+      }
 
       if (normalizedTripStatus === 'DaNhanChuyen' || normalizedTripStatus === 'DaHuy') {
         const driverRequestNotificationId = await resolveDriverRideRequestNotificationId(
@@ -2172,6 +3684,31 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       }
 
     const updatedRow = await readTripStatusRow(transaction, bookingCode);
+
+    if (normalizedTripStatus === 'HoanThanh') {
+      await applyDriverWalletSettlement(transaction, {
+        bookingCode,
+        currentRow,
+        updatedRow,
+      });
+    }
+
+    if (normalizedTripStatus === 'DaHuy') {
+      const refundPaymentMethod = normalizePaymentMethod(currentRow.paymentMethod);
+      const refundPaymentProvider = normalizePaymentProvider(currentRow.paymentProvider);
+      const normalizedBeforePaymentStatus = normalizePaymentStatusValue(beforePaymentStatus);
+      const isWalletProviderRefund = refundPaymentProvider === 'app_wallet'
+        || refundPaymentProvider === 'zalopay'
+        || refundPaymentProvider === 'momo';
+
+      if (refundPaymentMethod === 'wallet' && isWalletProviderRefund && normalizedBeforePaymentStatus === 'DaThanhToan') {
+        const refundCustomerMaTK = normalizeText(currentRow.MaTK);
+        const refundAmount = Number(currentRow.paymentAmount ?? 0);
+        if (refundCustomerMaTK && refundAmount > 0) {
+          await refundCustomerWalletForRide(refundCustomerMaTK, refundAmount, bookingCode, transaction);
+        }
+      }
+    }
 
     await transaction.commit();
 
@@ -2205,6 +3742,32 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       ),
     );
 
+    const afterPaymentStatus = normalizeText(updatedRow?.paymentStatus || updatedRow?.bookingPaymentStatus);
+
+    if (
+      afterPaymentStatus
+      && (!beforePaymentStatus || beforePaymentStatus.toLowerCase() !== afterPaymentStatus.toLowerCase())
+    ) {
+      publishRideEventSafely(
+        buildRidePaymentUpdatedEvent(
+          bookingCode,
+          {
+            paymentCode: normalizeText(updatedRow?.paymentCode),
+            paymentMethod: normalizeText(updatedRow?.paymentMethod),
+            paymentProvider: normalizeText(updatedRow?.paymentProvider),
+            paymentStatus: afterPaymentStatus,
+            paidAt: updatedRow?.paymentPaidAt ? new Date(updatedRow.paymentPaidAt).toISOString() : '',
+            source: 'trip-status-update',
+          },
+          {
+            ...currentRow,
+            ...updatedRow,
+          },
+          updatedBooking,
+        ),
+      );
+    }
+
     if (normalizedTripStatus === 'DaHuy') {
       const canceledByRoleCode = normalizeText(normalizedCancellationMeta.cancelledByRoleCode).toLowerCase();
 
@@ -2233,6 +3796,135 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
   }
 }
 
+async function rejectTripDispatchInDatabase(payload = {}) {
+  await ensureRideSchema();
+
+  const bookingCode = normalizeText(payload.bookingCode);
+  const driverSystemAccountId = normalizeText(payload.driverAccountId ?? payload.driverId);
+  const rejectReason = normalizeText(
+    payload.reasonText
+      ?? payload.reasonLabel
+      ?? payload.cancelReason
+      ?? payload.note
+      ?? '',
+  );
+
+  if (!bookingCode) {
+    throw createValidationError('Vui lòng cung cấp mã chuyến để từ chối cuốc.');
+  }
+
+  if (!driverSystemAccountId) {
+    throw createValidationError('Vui lòng cung cấp tài khoản tài xế.');
+  }
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+
+  await transaction.begin();
+
+  try {
+    const currentRow = await readTripStatusRow(transaction, bookingCode);
+
+    if (!currentRow) {
+      throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
+    }
+
+    const currentTripStatus = normalizeTripStatus(currentRow.TrangThaiChuyen);
+    const currentDispatchedDriverSystemAccountId = normalizeText(currentRow.dispatchedDriverSystemAccountId);
+
+    if (currentTripStatus !== 'ChoTaiXe') {
+      throw createValidationError('Chuyến không còn ở trạng thái chờ nhận nên không thể từ chối cuốc.');
+    }
+
+    if (!currentDispatchedDriverSystemAccountId) {
+      throw createValidationError('Hiện chưa có tài xế đang được mời nhận cuốc.');
+    }
+
+    if (currentDispatchedDriverSystemAccountId.toLowerCase() !== driverSystemAccountId.toLowerCase()) {
+      throw createValidationError('Bạn không phải tài xế đang được mời nhận cuốc này.');
+    }
+
+    await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), bookingCode)
+      .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountId)
+      .input('rejectReason', sql.NVarChar(500), rejectReason || null)
+      .query(`
+        UPDATE dbo.DatXeDieuPhoi
+        SET
+          TrangThai = 'rejected',
+          LyDoTuChoi = NULLIF(@rejectReason, ''),
+          NgayPhanHoi = SYSDATETIME(),
+          NgayCapNhat = SYSDATETIME()
+        WHERE MaChuyen = @bookingCode
+          AND MaTKTaiXe = @driverSystemAccountId
+          AND TrangThai = 'pending';
+      `);
+
+    const currentNotificationId = Number(currentRow?.driverRequestNotificationId ?? 0);
+
+    if (currentNotificationId > 0) {
+      await new sql.Request(transaction)
+        .input('notificationId', sql.Int, currentNotificationId)
+        .query(`
+          DELETE FROM dbo.ThongBao
+          WHERE MaTB = @notificationId;
+        `);
+    }
+
+    const policyResult = await enforceDriverDispatchRejectPolicy(transaction, {
+      driverSystemAccountId,
+      bookingCode,
+    });
+
+    const recentBooking = findRecentBookingByCode(bookingCode);
+
+    const nextDispatch = await dispatchBookingToNextDriver(
+      transaction,
+      {
+        ...(recentBooking ?? {}),
+        bookingCode,
+        customerAccountId: normalizeText(currentRow?.MaTK ?? recentBooking?.customerAccountId),
+        pickup: recentBooking?.pickup ?? {
+          label: normalizeText(currentRow?.pickupLabel),
+          position: null,
+        },
+        dispatchAttemptOrder: Number(currentRow?.dispatchAttemptOrder ?? 0),
+      },
+      [driverSystemAccountId],
+    );
+
+    await transaction.commit();
+
+    if (nextDispatch) {
+      if (recentBooking) {
+        recentBooking.driverAccountId = normalizeText(nextDispatch.driverSystemAccountId);
+        recentBooking.driverRequestNotificationId = Number(nextDispatch.notificationId ?? 0) || null;
+      }
+
+      publishRideEventSafely(buildRideBookingCreatedEvent({
+        ...(recentBooking ?? { bookingCode }),
+        bookingCode,
+        driverAccountId: normalizeText(nextDispatch.driverSystemAccountId),
+        driverRequestNotificationId: Number(nextDispatch.notificationId ?? 0) || null,
+      }));
+    }
+
+    return {
+      success: true,
+      bookingCode,
+      message: nextDispatch
+        ? 'Đã từ chối cuốc và chuyển cho tài xế kế tiếp.'
+        : 'Đã từ chối cuốc. Hiện chưa còn tài xế phù hợp để chuyển tiếp.',
+      dispatchedToNextDriver: Boolean(nextDispatch),
+      nextDriverAccountId: normalizeText(nextDispatch?.driverSystemAccountId),
+      rejectionPolicy: policyResult,
+    };
+  } catch (error) {
+    await transaction.rollback().catch(() => {});
+    throw error;
+  }
+}
+
 async function persistBookingToDatabase(booking) {
   if (!isSqlServerConfigured()) {
     return null;
@@ -2242,7 +3934,7 @@ async function persistBookingToDatabase(booking) {
   await ensureRideSchema();
 
   const paymentCode = generatePaymentCode(booking.bookingCode);
-  const paymentStatus = getPaymentStatus(booking.paymentMethod);
+  const paymentStatus = getPaymentStatus(booking.paymentMethod, booking.paymentProvider);
   const pool = await getSqlServerPool();
   const transaction = new sql.Transaction(pool);
 
@@ -2269,6 +3961,9 @@ async function persistBookingToDatabase(booking) {
       .input('price', sql.Int, booking.price)
       .input('originalPrice', sql.Int, booking.originalPrice ?? booking.price)
       .input('discountAmount', sql.Int, booking.discountAmount ?? 0)
+      .input('platformFeePercent', sql.Decimal(5, 2), Number(booking.platformFeePercent ?? 0) || 0)
+      .input('platformFeeAmount', sql.Int, booking.platformFeeAmount ?? 0)
+      .input('driverNetIncome', sql.Int, booking.driverNetIncome ?? booking.price ?? 0)
       .input('promotionCode', sql.VarChar(40), booking.promotionCode || null)
       .input('promotionTitle', sql.NVarChar(120), booking.promotionTitle || null)
       .input('paymentMethod', sql.VarChar(20), booking.paymentMethod)
@@ -2298,6 +3993,9 @@ async function persistBookingToDatabase(booking) {
           GiaTien,
           GiaGoc,
           TienGiam,
+          PhanTramPhiNenTang,
+          TienPhiNenTang,
+          TienTaiXeNhan,
           MaUuDai,
           TenUuDai,
           PhuongThucThanhToan,
@@ -2328,6 +4026,9 @@ async function persistBookingToDatabase(booking) {
           @price,
           @originalPrice,
           @discountAmount,
+          @platformFeePercent,
+          @platformFeeAmount,
+          @driverNetIncome,
           @promotionCode,
           @promotionTitle,
           @paymentMethod,
@@ -2345,11 +4046,20 @@ async function persistBookingToDatabase(booking) {
       .input('amount', sql.Int, booking.price)
       .input('originalAmount', sql.Int, booking.originalPrice ?? booking.price)
       .input('discountAmount', sql.Int, booking.discountAmount ?? 0)
+      .input('platformFeePercent', sql.Decimal(5, 2), Number(booking.platformFeePercent ?? 0) || 0)
+      .input('platformFeeAmount', sql.Int, booking.platformFeeAmount ?? 0)
+      .input('driverNetIncome', sql.Int, booking.driverNetIncome ?? booking.price ?? 0)
       .input('promotionCode', sql.VarChar(40), booking.promotionCode || null)
       .input('promotionTitle', sql.NVarChar(120), booking.promotionTitle || null)
       .input('note', sql.NVarChar(255), booking.promotionSummary || null)
       .input('paymentMethod', sql.VarChar(20), booking.paymentMethod)
       .input('paymentProvider', sql.VarChar(20), booking.paymentProvider || null)
+      .input('gatewayAppTransId', sql.VarChar(80), normalizeText(booking?.paymentGateway?.appTransId) || null)
+      .input(
+        'gatewayTransToken',
+        sql.VarChar(120),
+        normalizeText(booking?.paymentGateway?.gatewayTransToken ?? booking?.paymentGateway?.zpTransToken) || null,
+      )
       .input('paymentStatus', sql.NVarChar(20), paymentStatus)
       .input('createdAt', sql.DateTime2(0), new Date(booking.createdAt))
       .query(`
@@ -2360,10 +4070,15 @@ async function persistBookingToDatabase(booking) {
           SoTien,
           GiaGoc,
           TienGiam,
+          PhanTramPhiNenTang,
+          TienPhiNenTang,
+          TienTaiXeNhan,
           MaUuDai,
           TenUuDai,
           PhuongThucThanhToan,
           NhaCungCapThanhToan,
+          GatewayAppTransId,
+          GatewayTransToken,
           TrangThaiThanhToan,
           ThoiDiemThanhToan,
           GhiChu,
@@ -2377,10 +4092,15 @@ async function persistBookingToDatabase(booking) {
           @amount,
           @originalAmount,
           @discountAmount,
+          @platformFeePercent,
+          @platformFeeAmount,
+          @driverNetIncome,
           @promotionCode,
           @promotionTitle,
           @paymentMethod,
           @paymentProvider,
+          @gatewayAppTransId,
+          @gatewayTransToken,
           @paymentStatus,
           NULL,
           @note,
@@ -2389,55 +4109,13 @@ async function persistBookingToDatabase(booking) {
         )
       `);
 
-    const driverNotificationTitle = `${DRIVER_RIDE_REQUEST_NOTIFICATION_TITLE} ${booking.bookingCode}`;
-    const driverNotificationContent = buildDriverRideRequestNotificationContent(booking);
-    const driverNotificationResult = await new sql.Request(transaction)
-      .input('title', sql.NVarChar(200), driverNotificationTitle)
-      .input('content', sql.NVarChar(sql.MAX), driverNotificationContent)
-      .input('accountId', sql.VarChar(20), booking.customerAccountId || null)
-      .input('recipient', sql.VarChar(20), DRIVER_RIDE_REQUEST_NOTIFICATION_RECIPIENT)
-      .input('status', sql.VarChar(20), DRIVER_RIDE_REQUEST_NOTIFICATION_STATUS)
-      .input('sendAt', sql.DateTime2(0), new Date(booking.createdAt))
-      .input('createdAt', sql.DateTime2(0), new Date(booking.createdAt))
-      .query(`
-        INSERT INTO dbo.ThongBao
-        (
-          MaTK,
-          TieuDe,
-          NoiDung,
-          NguoiNhan,
-          TrangThai,
-          ThoiGianGuiDuKien,
-          NgayTao,
-          NgayCapNhat
-        )
-        OUTPUT INSERTED.MaTB
-        VALUES
-        (
-          @accountId,
-          @title,
-          @content,
-          @recipient,
-          @status,
-          @sendAt,
-          @createdAt,
-          @createdAt
-        )
-      `);
+    const dispatchResult = await dispatchBookingToNextDriver(transaction, {
+      ...booking,
+      dispatchAttemptOrder: 0,
+    });
 
-    const driverNotificationRow = driverNotificationResult.recordset?.[0];
-    booking.driverRequestNotificationId = Number(driverNotificationRow?.MaTB ?? 0) || null;
-
-    if (booking.driverRequestNotificationId) {
-      await new sql.Request(transaction)
-        .input('bookingCode', sql.VarChar(30), booking.bookingCode)
-        .input('notificationId', sql.Int, booking.driverRequestNotificationId)
-        .query(`
-          UPDATE DatXe
-          SET MaTBThongBaoTaiXe = @notificationId
-          WHERE MaChuyen = @bookingCode;
-        `);
-    }
+    booking.driverAccountId = normalizeText(dispatchResult?.driverSystemAccountId) || '';
+    booking.driverRequestNotificationId = Number(dispatchResult?.notificationId ?? 0) || null;
 
     await transaction.commit();
 
@@ -2445,6 +4123,8 @@ async function persistBookingToDatabase(booking) {
       paymentCode,
       paymentStatus,
       paymentStatusLabel: getPaymentStatusLabel(paymentStatus),
+      dispatchedDriverAccountId: booking.driverAccountId,
+      driverRequestNotificationId: booking.driverRequestNotificationId,
     };
   } catch (error) {
     await transaction.rollback().catch(() => {});
@@ -2500,6 +4180,8 @@ export async function searchRides(payload) {
     estimatedDurationMinutes,
     estimatedFare,
     estimatedFareFormatted: formatCurrency(estimatedFare),
+    bookingServiceFee: BOOKING_SERVICE_FEE[vehicle] ?? 5000,
+    bookingServiceFeeFormatted: formatCurrency(BOOKING_SERVICE_FEE[vehicle] ?? 5000),
     routeProvider: routeMetrics.provider,
     results: buildRideResults(
       vehicle,
@@ -2546,6 +4228,13 @@ export async function bookRide(payload) {
   }
 
   const promotionSummary = buildPromotionSummaryText(appliedPromotion, promotionPricing.discountAmount);
+  const bookingPrice = Number(promotionPricing.finalPrice ?? 0);
+  const normalizedBookingPrice = Number.isFinite(bookingPrice) ? Math.max(0, Math.round(bookingPrice)) : 0;
+  const serviceFeeAmount = Math.max(0, Math.round(selectedRide.serviceFee ?? BOOKING_SERVICE_FEE[quoteResult.vehicle] ?? BOOKING_SERVICE_FEE.motorbike ?? 5000));
+  const totalBookingPrice = Math.max(0, normalizedBookingPrice + serviceFeeAmount);
+  const platformFeePercent = normalizeFeePercent(env.driverPlatformFeePercent);
+  const platformFeeAmount = Math.round(totalBookingPrice * platformFeePercent / 100);
+  const driverNetIncome = Math.max(0, Math.round(totalBookingPrice * ((100 - platformFeePercent) / 100)) - serviceFeeAmount);
 
   const booking = {
     bookingCode: generateBookingCode(),
@@ -2566,8 +4255,15 @@ export async function bookRide(payload) {
     rideTitle: selectedRide.title,
     seatLabel: selectedRide.seatLabel,
     etaMinutes: selectedRide.etaMinutes,
-    price: promotionPricing.finalPrice,
-    priceFormatted: formatCurrency(promotionPricing.finalPrice),
+    price: totalBookingPrice,
+    priceFormatted: formatCurrency(totalBookingPrice),
+    platformFeePercent,
+    platformFeeAmount,
+    platformFeeAmountFormatted: formatCurrency(platformFeeAmount),
+    serviceFeeAmount,
+    serviceFeeAmountFormatted: formatCurrency(serviceFeeAmount),
+    driverNetIncome,
+    driverNetIncomeFormatted: formatCurrency(driverNetIncome),
     originalPrice: promotionPricing.originalPrice,
     originalPriceFormatted: formatCurrency(promotionPricing.originalPrice),
     discountAmount: promotionPricing.discountAmount,
@@ -2592,12 +4288,26 @@ export async function bookRide(payload) {
     paymentSummary: paymentProvider ? `${getPaymentMethodLabel(paymentMethod)} - ${getPaymentProviderLabel(paymentProvider)}` : getPaymentMethodLabel(paymentMethod),
   };
 
+  let paymentGateway = null;
+
+  if (paymentMethod === 'wallet' && paymentProvider === 'app_wallet') {
+    await deductCustomerWalletForRide(customerAccountId, totalBookingPrice, booking.bookingCode);
+  } else if (paymentMethod === 'wallet' && paymentProvider === 'zalopay') {
+    paymentGateway = await createZaloPayOrder(booking);
+  } else if (paymentMethod === 'wallet' && paymentProvider === 'momo') {
+    paymentGateway = await createMoMoOrder(booking);
+  }
+
+  if (paymentGateway) {
+    booking.paymentGateway = paymentGateway;
+  }
+
   booking.tripStatus = 'ChoTaiXe';
   booking.tripStatusLabel = getTripStatusLabel(booking.tripStatus);
   booking.tripStatusTone = getTripStatusTone(booking.tripStatus);
 
   booking.paymentCode = generatePaymentCode(booking.bookingCode);
-  booking.paymentStatus = getPaymentStatus(paymentMethod);
+  booking.paymentStatus = getPaymentStatus(paymentMethod, paymentProvider);
   booking.paymentStatusLabel = getPaymentStatusLabel(booking.paymentStatus);
 
   const persistedPayment = await persistBookingToDatabase(booking);
@@ -2606,6 +4316,11 @@ export async function bookRide(payload) {
     booking.paymentCode = persistedPayment.paymentCode;
     booking.paymentStatus = persistedPayment.paymentStatus;
     booking.paymentStatusLabel = persistedPayment.paymentStatusLabel;
+    booking.driverAccountId = normalizeText(persistedPayment.dispatchedDriverAccountId);
+
+    if (persistedPayment.driverRequestNotificationId) {
+      booking.driverRequestNotificationId = persistedPayment.driverRequestNotificationId;
+    }
   }
 
   saveRecentBooking(booking);
@@ -2615,6 +4330,7 @@ export async function bookRide(payload) {
     success: true,
     message: `Dat xe thanh cong. Ma chuyen: ${booking.bookingCode}`,
     booking,
+    paymentGateway,
   };
 }
 
@@ -2727,7 +4443,9 @@ function getTripHistoryStatus(row = {}) {
   const tripStatus = normalizeTripStatus(row.tripStatus ?? row.TrangThaiChuyen);
   const paymentStatus = normalizeText(row.paymentStatus ?? row.TrangThaiThanhToan).toLowerCase();
 
-  if (tripStatus === 'HoanThanh' || paymentStatus === 'dathanhtoan') {
+  // A trip is completed only when the trip lifecycle reaches HoanThanh.
+  // Paid wallet orders can still be waiting for driver acceptance/execution.
+  if (tripStatus === 'HoanThanh') {
     return 'completed';
   }
 
@@ -2992,6 +4710,9 @@ function buildTripHistorySelectClause() {
       dx.GiaTien AS basePrice,
       dx.GiaGoc AS originalPrice,
       dx.TienGiam AS discountAmount,
+      dx.PhanTramPhiNenTang AS platformFeePercent,
+      dx.TienPhiNenTang AS platformFeeAmount,
+      dx.TienTaiXeNhan AS driverNetIncome,
       dx.MaUuDai AS promotionCode,
       dx.TenUuDai AS promotionTitle,
       dx.PhuongThucThanhToan AS paymentMethod,
@@ -3004,6 +4725,9 @@ function buildTripHistorySelectClause() {
       tt.SoTien AS paymentAmount,
       tt.GiaGoc AS paymentOriginalAmount,
       tt.TienGiam AS paymentDiscountAmount,
+      tt.PhanTramPhiNenTang AS paymentPlatformFeePercent,
+      tt.TienPhiNenTang AS paymentPlatformFeeAmount,
+      tt.TienTaiXeNhan AS paymentDriverNetIncome,
       tt.MaUuDai AS paymentPromotionCode,
       tt.TenUuDai AS paymentPromotionTitle,
       tt.PhuongThucThanhToan AS paymentMethodFromPayment,
@@ -3116,7 +4840,7 @@ async function enrichTripHistoryRow(row, account = null) {
 
   const paymentMethod = normalizeText(row.paymentMethodFromPayment ?? row.paymentMethod).toLowerCase();
   const paymentProvider = normalizeText(row.paymentProviderFromPayment ?? row.paymentProvider).toLowerCase();
-  const paymentStatus = normalizeText(row.paymentStatus ?? row.bookingPaymentStatus).toLowerCase();
+  const paymentStatus = normalizePaymentStatusValue(row.paymentStatus ?? row.bookingPaymentStatus);
   const tripStatus = normalizeTripStatus(row.tripStatus ?? row.TrangThaiChuyen);
   const status = getTripHistoryStatus(row);
   const finalPrice = Number(row.paymentAmount ?? row.basePrice ?? row.price ?? 0);
@@ -3136,13 +4860,27 @@ async function enrichTripHistoryRow(row, account = null) {
   const vehicleLabel = getTripHistoryVehicleLabel(vehicle);
   const routeProvider = getTripHistoryRouteProvider(row.routeProvider);
   const paymentLabel = getTripHistoryPaymentLabel(paymentMethod, paymentProvider);
-  const paymentStatusLabel = getPaymentStatusLabel(paymentStatus || row.bookingPaymentStatus);
+  const paymentStatusLabel = getPaymentStatusLabel(paymentStatus);
   const platformFeePercent = normalizeFeePercent(env.driverPlatformFeePercent);
+  const storedPlatformFeePercent = Number(row.paymentPlatformFeePercent ?? row.platformFeePercent);
+  const normalizedPlatformFeePercent = Number.isFinite(storedPlatformFeePercent)
+    ? normalizeFeePercent(storedPlatformFeePercent, platformFeePercent)
+    : platformFeePercent;
+  const storedPlatformFeeAmount = Number(row.paymentPlatformFeeAmount ?? row.platformFeeAmount);
   const platformFeeAmount = status === 'completed'
-    ? Math.round(Math.max(0, finalPrice) * platformFeePercent / 100)
+    ? (
+      Number.isFinite(storedPlatformFeeAmount)
+        ? Math.max(0, Math.round(storedPlatformFeeAmount))
+        : Math.round(Math.max(0, finalPrice) * normalizedPlatformFeePercent / 100)
+    )
     : 0;
+  const storedDriverNetIncome = Number(row.paymentDriverNetIncome ?? row.driverNetIncome);
   const driverNetIncome = status === 'completed'
-    ? Math.max(0, Math.round(finalPrice) - platformFeeAmount)
+    ? (
+      Number.isFinite(storedDriverNetIncome)
+        ? Math.max(0, Math.round(storedDriverNetIncome))
+        : Math.max(0, Math.round(finalPrice) - platformFeeAmount)
+    )
     : 0;
   const driverVehicleLicensePlate = normalizeText(row.driverVehicleLicensePlate);
   const driverVehicleName = normalizeText(row.driverVehicleName);
@@ -3177,7 +4915,7 @@ async function enrichTripHistoryRow(row, account = null) {
     paymentProvider,
     paymentStatus,
     paymentStatusLabel,
-    platformFeePercent,
+    platformFeePercent: normalizedPlatformFeePercent,
     platformFeeAmount,
     platformFeeAmountFormatted: formatCurrency(platformFeeAmount),
     driverNetIncome,
@@ -3255,6 +4993,14 @@ export async function updateTripStatus(payload = {}) {
   }
 
   return updateTripStatusInDatabase(bookingCode, requestedTripStatus, normalizedDriverAccountId, cancelMeta);
+}
+
+export async function rejectTripDispatch(payload = {}) {
+  if (!isSqlServerConfigured()) {
+    throw createValidationError('Từ chối cuốc cần kết nối cơ sở dữ liệu để đồng bộ điều phối.');
+  }
+
+  return rejectTripDispatchInDatabase(payload);
 }
 
 export async function submitRideRating(payload = {}) {
@@ -3587,6 +5333,1059 @@ export async function getTripInvoice(payload = {}) {
     item: {
       ...item,
       invoiceCode,
+    },
+  };
+}
+
+async function applyDriverWalletSettlement(transaction, payload = {}) {
+  const bookingCode = normalizeText(payload.bookingCode);
+  const currentRow = payload.currentRow ?? {};
+  const updatedRow = payload.updatedRow ?? {};
+  const driverSystemAccountId = normalizeText(updatedRow.driverAccountId ?? currentRow.driverAccountId);
+
+  if (!bookingCode || !driverSystemAccountId) {
+    return null;
+  }
+
+  const paymentAmountValue = Number(updatedRow.paymentAmount ?? currentRow.paymentAmount);
+  const paymentAmount = Number.isFinite(paymentAmountValue) ? Math.max(0, Math.round(paymentAmountValue)) : 0;
+  const vehicle = normalizeText(updatedRow.vehicle ?? currentRow.vehicle).toLowerCase();
+  const serviceFeeAmount = Math.max(0, Math.round(BOOKING_SERVICE_FEE[vehicle] ?? BOOKING_SERVICE_FEE.motorbike ?? 5000));
+  const distanceFareAmount = Math.max(0, paymentAmount - serviceFeeAmount);
+  const paymentMethod = normalizePaymentMethod(updatedRow.paymentMethod ?? currentRow.paymentMethod);
+  const platformFeePercent = 30;
+  const platformFeeAmount = Math.round(distanceFareAmount * 0.3);
+  const driverNetIncome = Math.round(distanceFareAmount * 0.7);
+  const cashSettlementCharge = Math.max(0, Math.round(distanceFareAmount * 0.3));
+  const walletDelta = paymentMethod === 'wallet'
+    ? driverNetIncome
+    : -cashSettlementCharge;
+  const receiveAmount = walletDelta > 0 ? walletDelta : 0;
+  const transferAmount = walletDelta < 0 ? Math.abs(walletDelta) : 0;
+
+  if (receiveAmount <= 0 && transferAmount <= 0) {
+    return null;
+  }
+
+  const payoutReferenceCode = `TRIPPAYIN-${bookingCode}`.slice(0, 40);
+  const feeReferenceCode = `TRIPFEE-${bookingCode}`.slice(0, 40);
+  const payoutDescription = `Thu nhập chuyến ${bookingCode}`;
+  const feeDescription = paymentMethod === 'cash'
+    ? `Khấu trừ ví chuyến ${bookingCode} `
+    : `Điều chỉnh ví chuyến ${bookingCode} `;
+  const pendingFeeDescription = paymentMethod === 'cash'
+    ? `${feeDescription} - ví không đủ số dư, chờ xử lý sau`
+    : feeDescription;
+
+  await new sql.Request(transaction)
+    .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountId)
+    .input('receiveAmount', sql.Int, receiveAmount)
+    .input('transferAmount', sql.Int, transferAmount)
+    .input('payoutReferenceCode', sql.VarChar(40), payoutReferenceCode)
+    .input('feeReferenceCode', sql.VarChar(40), feeReferenceCode)
+    .input('payoutDescription', sql.NVarChar(255), payoutDescription)
+    .input('feeDescription', sql.NVarChar(255), feeDescription)
+    .input('pendingFeeDescription', sql.NVarChar(255), pendingFeeDescription)
+    .query(`
+      IF NOT EXISTS (SELECT 1 FROM dbo.Vi WHERE MaTK = @driverSystemAccountId)
+      BEGIN
+        INSERT INTO dbo.Vi (MaTK, SoDu)
+        VALUES (@driverSystemAccountId, 0);
+      END
+
+      IF @receiveAmount > 0
+        AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.GiaoDichVi
+        WHERE MaTK = @driverSystemAccountId
+          AND MaThamChieu = @payoutReferenceCode
+      )
+      BEGIN
+        DECLARE @walletBeforeReceive INT;
+        DECLARE @walletAfterReceive INT;
+
+        SELECT @walletBeforeReceive = SoDu
+        FROM dbo.Vi
+        WHERE MaTK = @driverSystemAccountId;
+
+        UPDATE dbo.Vi
+        SET
+          SoDu = SoDu + @receiveAmount,
+          NgayCapNhat = SYSDATETIME()
+        WHERE MaTK = @driverSystemAccountId;
+
+        SELECT @walletAfterReceive = SoDu
+        FROM dbo.Vi
+        WHERE MaTK = @driverSystemAccountId;
+
+        INSERT INTO dbo.GiaoDichVi
+        (
+          MaTK,
+          LoaiGiaoDich,
+          SoTien,
+          SoDuTruoc,
+          SoDuSau,
+          MoTa,
+          MaThamChieu,
+          TrangThai
+        )
+        VALUES
+        (
+          @driverSystemAccountId,
+          'receive',
+          @receiveAmount,
+          @walletBeforeReceive,
+          @walletAfterReceive,
+          @payoutDescription,
+          @payoutReferenceCode,
+          'completed'
+        );
+      END
+
+      IF @transferAmount > 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM dbo.GiaoDichVi
+          WHERE MaTK = @driverSystemAccountId
+            AND MaThamChieu = @feeReferenceCode
+        )
+      BEGIN
+        DECLARE @walletBeforeFee INT;
+        DECLARE @walletAfterFee INT;
+
+        SELECT @walletBeforeFee = SoDu
+        FROM dbo.Vi
+        WHERE MaTK = @driverSystemAccountId;
+
+        IF COALESCE(@walletBeforeFee, 0) >= @transferAmount
+        BEGIN
+          UPDATE dbo.Vi
+          SET
+            SoDu = SoDu - @transferAmount,
+            NgayCapNhat = SYSDATETIME()
+          WHERE MaTK = @driverSystemAccountId;
+
+          SELECT @walletAfterFee = SoDu
+          FROM dbo.Vi
+          WHERE MaTK = @driverSystemAccountId;
+
+          INSERT INTO dbo.GiaoDichVi
+          (
+            MaTK,
+            LoaiGiaoDich,
+            SoTien,
+            SoDuTruoc,
+            SoDuSau,
+            MoTa,
+            MaThamChieu,
+            TrangThai
+          )
+          VALUES
+          (
+            @driverSystemAccountId,
+            'transfer',
+            -@transferAmount,
+            @walletBeforeFee,
+            @walletAfterFee,
+            @feeDescription,
+            @feeReferenceCode,
+            'completed'
+          );
+        END
+        ELSE
+        BEGIN
+          SET @walletAfterFee = COALESCE(@walletBeforeFee, 0);
+
+          INSERT INTO dbo.GiaoDichVi
+          (
+            MaTK,
+            LoaiGiaoDich,
+            SoTien,
+            SoDuTruoc,
+            SoDuSau,
+            MoTa,
+            MaThamChieu,
+            TrangThai
+          )
+          VALUES
+          (
+            @driverSystemAccountId,
+            'transfer',
+            -@transferAmount,
+            COALESCE(@walletBeforeFee, 0),
+            @walletAfterFee,
+            @pendingFeeDescription,
+            @feeReferenceCode,
+            'pending'
+          );
+        END
+      END
+    `);
+
+  return {
+    driverSystemAccountId,
+    paymentAmount,
+    paymentMethod,
+    serviceFeeAmount,
+    platformFeePercent,
+    platformFeeAmount,
+    driverNetIncome,
+    cashSettlementCharge,
+  };
+}
+
+async function markBookingPaidByGateway({
+  bookingCode,
+  paidAt = new Date(),
+  appTransId = '',
+  zpTransToken = '',
+  gatewayTransToken = '',
+  gatewayReturnCode = null,
+}) {
+  const normalizedBookingCode = normalizeText(bookingCode);
+
+  if (!normalizedBookingCode) {
+    throw createValidationError('Thiếu mã chuyến để cập nhật thanh toán.');
+  }
+
+  await ensureRideSchema();
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+
+  try {
+    const request = new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), normalizedBookingCode)
+      .input('paidAt', sql.DateTime2(0), paidAt instanceof Date ? paidAt : new Date(paidAt))
+      .input('gatewayAppTransId', sql.VarChar(80), normalizeText(appTransId) || null)
+      .input('gatewayTransToken', sql.VarChar(120), normalizeText(gatewayTransToken || zpTransToken) || null)
+      .input('gatewayReturnCode', sql.Int, Number.isFinite(Number(gatewayReturnCode)) ? Number(gatewayReturnCode) : null);
+
+    const bookingResult = await request.query(`
+      SELECT TOP 1
+        dx.MaChuyen AS bookingCode,
+        dx.MaTK AS accountId,
+        dx.MaTX AS driverAccountId,
+        dx.TrangThaiThanhToan AS bookingPaymentStatus,
+        tt.TrangThaiThanhToan AS paymentStatus,
+        tt.MaTT AS paymentCode,
+        tt.ThoiDiemThanhToan AS paidAt
+      FROM dbo.DatXe dx
+      LEFT JOIN dbo.ThanhToan tt ON tt.MaChuyen = dx.MaChuyen
+      WHERE dx.MaChuyen = @bookingCode;
+    `);
+
+    const currentRow = bookingResult.recordset?.[0] ?? null;
+
+    if (!currentRow?.bookingCode) {
+      throw createNotFoundError(`Khong tim thay chuyen ${normalizedBookingCode}.`);
+    }
+
+    await request.query(`
+      UPDATE dbo.DatXe
+      SET
+        TrangThaiThanhToan = N'DaThanhToan',
+        NgayCapNhat = SYSUTCDATETIME()
+      WHERE MaChuyen = @bookingCode
+        AND TrangThaiThanhToan <> N'DaThanhToan';
+
+      UPDATE dbo.ThanhToan
+      SET
+        TrangThaiThanhToan = N'DaThanhToan',
+        ThoiDiemThanhToan = COALESCE(ThoiDiemThanhToan, @paidAt),
+        GatewayAppTransId = COALESCE(GatewayAppTransId, @gatewayAppTransId),
+        GatewayTransToken = COALESCE(GatewayTransToken, @gatewayTransToken),
+        GatewayLastQueryAt = SYSUTCDATETIME(),
+        GatewayLastReturnCode = COALESCE(@gatewayReturnCode, GatewayLastReturnCode),
+        NgayCapNhat = SYSUTCDATETIME()
+      WHERE MaChuyen = @bookingCode
+        AND (TrangThaiThanhToan <> N'DaThanhToan' OR GatewayLastReturnCode IS NULL);
+    `);
+
+    await transaction.commit();
+
+    const updatedBooking = findRecentBookingByCode(normalizedBookingCode);
+    if (updatedBooking) {
+      updatedBooking.paymentStatus = 'DaThanhToan';
+      updatedBooking.paymentStatusLabel = getPaymentStatusLabel('DaThanhToan');
+      updatedBooking.updatedAt = new Date().toISOString();
+    }
+
+    publishRideEventSafely(
+      buildRidePaymentUpdatedEvent(
+        normalizedBookingCode,
+        {
+          paymentCode: normalizeText(currentRow.paymentCode),
+          paymentStatus: 'DaThanhToan',
+          paidAt: (paidAt instanceof Date ? paidAt : new Date(paidAt)).toISOString(),
+          source: 'gateway-callback',
+        },
+        currentRow,
+        updatedBooking,
+      ),
+    );
+
+    return {
+      success: true,
+      bookingCode: normalizedBookingCode,
+      paymentCode: normalizeText(currentRow.paymentCode),
+      paymentStatus: 'DaThanhToan',
+      paymentStatusLabel: getPaymentStatusLabel('DaThanhToan'),
+      paidAt: (paidAt instanceof Date ? paidAt : new Date(paidAt)).toISOString(),
+      booking: updatedBooking ?? null,
+    };
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch {
+      // Ignore rollback failures.
+    }
+
+    throw error;
+  }
+}
+
+export async function handleZaloPayCallback(payload = {}) {
+  const callbackData = normalizeText(payload?.data);
+  const callbackMac = normalizeText(payload?.mac).toLowerCase();
+
+  if (!isZaloPayConfigured()) {
+    return {
+      return_code: 0,
+      return_message: 'zalopay_not_configured',
+    };
+  }
+
+  if (!callbackData || !callbackMac) {
+    await logPaymentGatewayAudit({
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_payload',
+      requestPayload: payload,
+      message: 'missing_data_or_mac',
+    });
+
+    return {
+      return_code: -1,
+      return_message: 'invalid_payload',
+    };
+  }
+
+  const expectedMac = computeZaloPayHmac(callbackData, normalizeText(env.zaloPayKey2)).toLowerCase();
+
+  if (!safeCompareText(expectedMac, callbackMac)) {
+    await logPaymentGatewayAudit({
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_mac',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      requestPayload: payload,
+      message: 'mac_mismatch',
+    });
+
+    return {
+      return_code: -1,
+      return_message: 'invalid_mac',
+    };
+  }
+
+  let parsedCallback = null;
+
+  try {
+    parsedCallback = JSON.parse(callbackData);
+  } catch {
+    await logPaymentGatewayAudit({
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_data_json',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      requestPayload: payload,
+      message: 'invalid_data_json',
+    });
+
+    return {
+      return_code: 0,
+      return_message: 'invalid_data_json',
+    };
+  }
+
+  let embedData = {};
+
+  try {
+    embedData = parsedCallback?.embed_data ? JSON.parse(parsedCallback.embed_data) : {};
+  } catch {
+    embedData = {};
+  }
+
+  const bookingCode = normalizeText(embedData?.bookingCode);
+  const appTransId = normalizeText(parsedCallback?.app_trans_id);
+  const zpTransToken = normalizeText(parsedCallback?.zp_trans_id ?? parsedCallback?.zp_trans_token);
+  const appId = normalizeText(parsedCallback?.app_id);
+  const amount = Number(parsedCallback?.amount ?? 0);
+  const serverTime = Number(parsedCallback?.server_time ?? 0);
+  const paidAt = Number.isFinite(serverTime) && serverTime > 0 ? new Date(serverTime) : new Date();
+
+  if (!appId || appId !== normalizeText(env.zaloPayAppId)) {
+    await logPaymentGatewayAudit({
+      bookingCode,
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_appid',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      appTransId,
+      requestPayload: parsedCallback,
+      message: 'appid_mismatch',
+    });
+
+    return {
+      return_code: 0,
+      return_message: 'invalid_appid',
+    };
+  }
+
+  if (!bookingCode) {
+    await logPaymentGatewayAudit({
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'missing_booking_code',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      appTransId,
+      requestPayload: parsedCallback,
+      message: 'missing_booking_code',
+    });
+
+    return {
+      return_code: 0,
+      return_message: 'missing_booking_code',
+    };
+  }
+
+  try {
+    const pool = await getSqlServerPool();
+    const paymentLookupResult = await pool
+      .request()
+      .input('bookingCode', sql.VarChar(30), bookingCode)
+      .query(`
+        SELECT TOP 1
+          tt.MaTT AS paymentCode,
+          tt.SoTien AS paymentAmount,
+          tt.GatewayAppTransId AS gatewayAppTransId,
+          tt.TrangThaiThanhToan AS paymentStatus
+        FROM dbo.ThanhToan tt
+        WHERE tt.MaChuyen = @bookingCode;
+      `);
+
+    const paymentRow = paymentLookupResult.recordset?.[0] ?? null;
+
+    if (!paymentRow) {
+      await logPaymentGatewayAudit({
+        bookingCode,
+        provider: 'zalopay',
+        eventType: 'callback',
+        source: 'webhook',
+        verifyStatus: 'payment_not_found',
+        requestMac: callbackMac,
+        computedMac: expectedMac,
+        appTransId,
+        requestPayload: parsedCallback,
+        message: 'payment_not_found',
+      });
+
+      return {
+        return_code: 0,
+        return_message: 'payment_not_found',
+      };
+    }
+
+    if (appTransId && normalizeText(paymentRow.gatewayAppTransId) && !safeCompareText(appTransId, normalizeText(paymentRow.gatewayAppTransId))) {
+      await logPaymentGatewayAudit({
+        paymentCode: normalizeText(paymentRow.paymentCode),
+        bookingCode,
+        provider: 'zalopay',
+        eventType: 'callback',
+        source: 'webhook',
+        verifyStatus: 'app_trans_id_mismatch',
+        requestMac: callbackMac,
+        computedMac: expectedMac,
+        appTransId,
+        requestPayload: parsedCallback,
+        message: 'app_trans_id_mismatch',
+      });
+
+      return {
+        return_code: 0,
+        return_message: 'app_trans_id_mismatch',
+      };
+    }
+
+    if (Number.isFinite(amount) && amount > 0 && Number(paymentRow.paymentAmount ?? 0) !== amount) {
+      await logPaymentGatewayAudit({
+        paymentCode: normalizeText(paymentRow.paymentCode),
+        bookingCode,
+        provider: 'zalopay',
+        eventType: 'callback',
+        source: 'webhook',
+        verifyStatus: 'amount_mismatch',
+        requestMac: callbackMac,
+        computedMac: expectedMac,
+        appTransId,
+        requestPayload: parsedCallback,
+        message: 'amount_mismatch',
+      });
+
+      return {
+        return_code: 0,
+        return_message: 'amount_mismatch',
+      };
+    }
+  } catch {
+    await logPaymentGatewayAudit({
+      bookingCode,
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'lookup_error',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      appTransId,
+      requestPayload: parsedCallback,
+      message: 'lookup_error',
+    });
+  }
+
+  try {
+    await markBookingPaidByGateway({
+      bookingCode,
+      paidAt,
+      appTransId,
+      zpTransToken,
+      gatewayReturnCode: Number(parsedCallback?.status ?? 1) || 1,
+    });
+
+    await logPaymentGatewayAudit({
+      bookingCode,
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'success',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      appTransId,
+      gatewayReturnCode: Number(parsedCallback?.status ?? 1) || 1,
+      requestPayload: parsedCallback,
+      responsePayload: { return_code: 1, return_message: 'success' },
+      message: 'callback_verified_and_applied',
+    });
+
+    return {
+      return_code: 1,
+      return_message: 'success',
+    };
+  } catch {
+    await logPaymentGatewayAudit({
+      bookingCode,
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'processing_error',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      appTransId,
+      requestPayload: parsedCallback,
+      message: 'processing_error',
+    });
+
+    return {
+      return_code: 0,
+      return_message: 'processing_error',
+    };
+  }
+}
+
+export async function handleMoMoCallback(payload = {}) {
+  if (isMoMoMockModeEnabled()) {
+    const orderId = normalizeText(payload?.orderId);
+    const bookingCodeFromExtraData = normalizeText(decodeMoMoExtraData(payload?.extraData)?.bookingCode);
+    const bookingCode = bookingCodeFromExtraData || extractBookingCodeFromMoMoOrderId(orderId);
+
+    if (orderId) {
+      momoMockPaidOrderIds.add(orderId);
+    }
+
+    if (bookingCode) {
+      try {
+        await markBookingPaidByGateway({
+          bookingCode,
+          paidAt: new Date(),
+          appTransId: orderId,
+          gatewayTransToken: normalizeText(payload?.transId) || `MOCK-${Date.now()}`,
+          gatewayReturnCode: MOMO_SUCCESS_RESULT_CODE,
+        });
+      } catch {
+        // Keep callback idempotent in mock mode.
+      }
+    }
+
+    return {
+      resultCode: 0,
+      message: 'received',
+      mock: true,
+    };
+  }
+
+  if (!isMoMoConfigured()) {
+    return {
+      resultCode: 0,
+      message: 'momo_not_configured',
+    };
+  }
+
+  const signature = normalizeText(payload?.signature).toLowerCase();
+  const partnerCode = normalizeText(payload?.partnerCode);
+  const orderId = normalizeText(payload?.orderId);
+  const requestId = normalizeText(payload?.requestId);
+  const amount = Number(payload?.amount ?? 0);
+  const resultCode = Number(payload?.resultCode ?? payload?.errorCode ?? NaN);
+  const message = normalizeText(payload?.message ?? payload?.localMessage);
+  const accessKey = normalizeText(env.momoAccessKey);
+  const secretKey = normalizeText(env.momoSecretKey);
+  const expectedPartnerCode = normalizeText(env.momoPartnerCode);
+
+  if (!signature || !orderId || !requestId || !partnerCode) {
+    await logPaymentGatewayAudit({
+      provider: 'momo',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_payload',
+      requestPayload: payload,
+      message: 'missing_required_fields',
+    });
+
+    return {
+      resultCode: 0,
+      message: 'received',
+    };
+  }
+
+  const rawSignatures = [
+    [
+      `accessKey=${accessKey}`,
+      `amount=${Number.isFinite(amount) ? Math.round(amount) : normalizeText(payload?.amount)}`,
+      `extraData=${normalizeText(payload?.extraData)}`,
+      `message=${message}`,
+      `orderId=${orderId}`,
+      `orderInfo=${normalizeText(payload?.orderInfo)}`,
+      `orderType=${normalizeText(payload?.orderType)}`,
+      `partnerCode=${partnerCode}`,
+      `payType=${normalizeText(payload?.payType)}`,
+      `requestId=${requestId}`,
+      `responseTime=${normalizeText(payload?.responseTime)}`,
+      `resultCode=${Number.isFinite(resultCode) ? resultCode : normalizeText(payload?.resultCode)}`,
+      `transId=${normalizeText(payload?.transId)}`,
+    ].join('&'),
+    [
+      `accessKey=${accessKey}`,
+      `amount=${Number.isFinite(amount) ? Math.round(amount) : normalizeText(payload?.amount)}`,
+      `extraData=${normalizeText(payload?.extraData)}`,
+      `message=${message}`,
+      `orderId=${orderId}`,
+      `orderInfo=${normalizeText(payload?.orderInfo)}`,
+      `partnerCode=${partnerCode}`,
+      `requestId=${requestId}`,
+      `responseTime=${normalizeText(payload?.responseTime)}`,
+      `resultCode=${Number.isFinite(resultCode) ? resultCode : normalizeText(payload?.resultCode)}`,
+      `transId=${normalizeText(payload?.transId)}`,
+    ].join('&'),
+  ];
+
+  const matchedSignature = rawSignatures.some((rawData) => {
+    const expectedSignature = computeMoMoHmac(rawData, secretKey).toLowerCase();
+    return safeCompareText(expectedSignature, signature);
+  });
+
+  if (!matchedSignature) {
+    await logPaymentGatewayAudit({
+      provider: 'momo',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_signature',
+      requestMac: signature,
+      requestPayload: payload,
+      message: 'signature_mismatch',
+    });
+
+    return {
+      resultCode: 0,
+      message: 'received',
+    };
+  }
+
+  if (!safeCompareText(partnerCode, expectedPartnerCode)) {
+    await logPaymentGatewayAudit({
+      provider: 'momo',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'invalid_partner_code',
+      appTransId: orderId,
+      requestPayload: payload,
+      message: 'partner_code_mismatch',
+    });
+
+    return {
+      resultCode: 0,
+      message: 'received',
+    };
+  }
+
+  const extraData = decodeMoMoExtraData(payload?.extraData);
+  const bookingCode = normalizeText(extraData?.bookingCode) || extractBookingCodeFromMoMoOrderId(orderId);
+
+  if (!bookingCode) {
+    await logPaymentGatewayAudit({
+      provider: 'momo',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'missing_booking_code',
+      appTransId: orderId,
+      requestPayload: payload,
+      message: 'missing_booking_code',
+    });
+
+    return {
+      resultCode: 0,
+      message: 'received',
+    };
+  }
+
+  await logPaymentGatewayAudit({
+    bookingCode,
+    provider: 'momo',
+    eventType: 'callback',
+    source: 'webhook',
+    verifyStatus: Number.isFinite(resultCode) && resultCode === MOMO_SUCCESS_RESULT_CODE ? 'paid' : 'pending',
+    appTransId: orderId,
+    gatewayReturnCode: Number.isFinite(resultCode) ? resultCode : null,
+    message,
+    requestPayload: payload,
+  });
+
+  if (!Number.isFinite(resultCode) || resultCode !== MOMO_SUCCESS_RESULT_CODE) {
+    return {
+      resultCode: 0,
+      message: 'received',
+    };
+  }
+
+  try {
+    await markBookingPaidByGateway({
+      bookingCode,
+      paidAt: new Date(),
+      appTransId: orderId,
+      gatewayTransToken: normalizeText(payload?.transId),
+      gatewayReturnCode: resultCode,
+    });
+  } catch {
+    await logPaymentGatewayAudit({
+      bookingCode,
+      provider: 'momo',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'processing_error',
+      appTransId: orderId,
+      requestPayload: payload,
+      message: 'processing_error',
+    });
+  }
+
+  return {
+    resultCode: 0,
+    message: 'received',
+  };
+}
+
+export async function triggerMoMoMockPaymentCallback(payload = {}) {
+  if (!isMoMoMockModeEnabled()) {
+    throw createValidationError('MoMo mock mode chưa bật. Không thể giả lập callback.');
+  }
+
+  const bookingCode = normalizeText(payload?.bookingCode);
+  const accountId = normalizeText(payload?.accountId);
+
+  if (!bookingCode) {
+    throw createValidationError('Thiếu mã chuyến để giả lập callback MoMo.');
+  }
+
+  await ensureRideSchema();
+
+  const pool = await getSqlServerPool();
+  const result = await pool
+    .request()
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .query(`
+      SELECT TOP 1
+        dx.MaChuyen AS bookingCode,
+        dx.MaTK AS accountId,
+        dx.PhuongThucThanhToan AS paymentMethod,
+        dx.NhaCungCapThanhToan AS paymentProvider,
+        tt.SoTien AS paymentAmount,
+        tt.GatewayAppTransId AS gatewayAppTransId,
+        tt.TrangThaiThanhToan AS paymentStatus
+      FROM dbo.DatXe dx
+      LEFT JOIN dbo.ThanhToan tt ON tt.MaChuyen = dx.MaChuyen
+      WHERE LOWER(ISNULL(dx.MaChuyen, '')) = LOWER(@bookingCode)
+      ORDER BY tt.NgayCapNhat DESC;
+    `);
+
+  const row = result.recordset?.[0] ?? null;
+
+  if (!row) {
+    throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
+  }
+
+  const ownerAccountId = normalizeText(row.accountId);
+
+  if (accountId && ownerAccountId && ownerAccountId.toLowerCase() !== accountId.toLowerCase()) {
+    throw createForbiddenError('Bạn không có quyền giả lập callback cho chuyến này.');
+  }
+
+  const paymentMethod = normalizeText(row.paymentMethod).toLowerCase();
+  const paymentProvider = normalizeText(row.paymentProvider).toLowerCase();
+
+  if (paymentMethod !== 'wallet' || paymentProvider !== 'momo') {
+    throw createValidationError('Chuyến này không sử dụng thanh toán ví MoMo.');
+  }
+
+  if (normalizeText(row.paymentStatus).toLowerCase() === 'dathanhtoan') {
+    return {
+      success: true,
+      message: 'Chuyến đã được thanh toán trước đó.',
+      bookingCode,
+      alreadyPaid: true,
+    };
+  }
+
+  const orderId = normalizeText(row.gatewayAppTransId) || generateMoMoOrderId(bookingCode);
+  const amount = Number(row.paymentAmount ?? 0);
+  const callbackPayload = {
+    partnerCode: normalizeText(env.momoPartnerCode) || 'MOCK_PARTNER',
+    orderId,
+    requestId: `${orderId}_MOCK_${Date.now()}`,
+    amount: Number.isFinite(amount) && amount > 0 ? amount : 1000,
+    orderInfo: `SmartRide MoMo mock callback ${bookingCode}`,
+    orderType: 'momo_wallet',
+    transId: `MOCK-${Date.now()}`,
+    resultCode: MOMO_SUCCESS_RESULT_CODE,
+    message: 'Successful.',
+    payType: 'qr',
+    responseTime: String(Date.now()),
+    extraData: encodeMoMoExtraData({ bookingCode, source: 'internal-mock-confirm' }),
+    signature: 'MOCK_SIGNATURE',
+  };
+
+  const callbackResult = await handleMoMoCallback(callbackPayload);
+
+  return {
+    success: true,
+    message: 'Đã giả lập callback MoMo thành công.',
+    bookingCode,
+    callbackResult,
+  };
+}
+
+export async function getTripPaymentStatus(payload = {}) {
+  const bookingCode = normalizeText(payload?.bookingCode);
+  const accountId = normalizeText(payload?.accountId);
+
+  if (!bookingCode) {
+    throw createValidationError('Thiếu mã chuyến để kiểm tra thanh toán.');
+  }
+
+  await ensureRideSchema();
+
+  const pool = await getSqlServerPool();
+  const queryResult = await pool
+    .request()
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .query(`
+      SELECT TOP 1
+        dx.MaChuyen AS bookingCode,
+        dx.MaTK AS accountId,
+        dx.PhuongThucThanhToan AS paymentMethod,
+        dx.NhaCungCapThanhToan AS paymentProvider,
+        dx.TrangThaiThanhToan AS bookingPaymentStatus,
+        dx.TrangThaiChuyen AS tripStatus,
+        tt.MaTT AS paymentCode,
+        tt.TrangThaiThanhToan AS paymentStatus,
+        tt.ThoiDiemThanhToan AS paidAt,
+        tt.NgayCapNhat AS paymentUpdatedAt,
+        tt.GatewayAppTransId AS gatewayAppTransId,
+        tt.GatewayTransToken AS gatewayTransToken,
+        tt.GatewayLastQueryAt AS gatewayLastQueryAt,
+        tt.GatewayLastReturnCode AS gatewayLastReturnCode
+      FROM dbo.DatXe dx
+      LEFT JOIN dbo.ThanhToan tt ON tt.MaChuyen = dx.MaChuyen
+      WHERE LOWER(ISNULL(dx.MaChuyen, '')) = LOWER(@bookingCode)
+      ORDER BY tt.NgayCapNhat DESC;
+    `);
+
+  const row = queryResult.recordset?.[0] ?? null;
+
+  if (!row) {
+    throw createNotFoundError(`Khong tim thay chuyen ${bookingCode}.`);
+  }
+
+  const ownerAccountId = normalizeText(row.accountId);
+
+  if (accountId && ownerAccountId && ownerAccountId.toLowerCase() !== accountId.toLowerCase()) {
+    throw createForbiddenError('Bạn không có quyền kiểm tra thanh toán cho chuyến này.');
+  }
+
+  let paymentStatus = normalizeText(row.paymentStatus || row.bookingPaymentStatus || 'ChoXacNhan');
+  let paidAt = row.paidAt ? new Date(row.paidAt) : null;
+  const paymentProvider = normalizeText(row.paymentProvider).toLowerCase();
+  const gatewayAppTransId = normalizeText(row.gatewayAppTransId);
+
+  // Callback can be delayed; query payment gateway directly for latest state when still pending.
+  if (paymentProvider === 'zalopay' && normalizeText(paymentStatus).toLowerCase() !== 'dathanhtoan' && gatewayAppTransId) {
+    try {
+      const gatewayResult = await queryZaloPayOrderStatus(gatewayAppTransId);
+      const gatewayReturnCode = Number(gatewayResult?.return_code ?? gatewayResult?.returncode ?? 0);
+      const isPaidByGateway = gatewayReturnCode === 1;
+
+      await pool
+        .request()
+        .input('bookingCode', sql.VarChar(30), bookingCode)
+        .input('gatewayReturnCode', sql.Int, Number.isFinite(gatewayReturnCode) ? gatewayReturnCode : null)
+        .query(`
+          UPDATE dbo.ThanhToan
+          SET
+            GatewayLastQueryAt = SYSUTCDATETIME(),
+            GatewayLastReturnCode = @gatewayReturnCode
+          WHERE MaChuyen = @bookingCode;
+        `);
+
+      await logPaymentGatewayAudit({
+        paymentCode: normalizeText(row.paymentCode),
+        bookingCode,
+        provider: 'zalopay',
+        eventType: 'query',
+        source: 'payment-status-api',
+        verifyStatus: isPaidByGateway ? 'paid' : 'pending',
+        appTransId: gatewayAppTransId,
+        gatewayReturnCode,
+        message: normalizeText(gatewayResult?.return_message ?? gatewayResult?.sub_return_message),
+        responsePayload: gatewayResult,
+      });
+
+      if (isPaidByGateway) {
+        const markResult = await markBookingPaidByGateway({
+          bookingCode,
+          paidAt: new Date(),
+          appTransId: gatewayAppTransId,
+          zpTransToken: normalizeText(gatewayResult?.zp_trans_id ?? gatewayResult?.zp_trans_token),
+          gatewayReturnCode,
+        });
+
+        paymentStatus = 'DaThanhToan';
+        paidAt = markResult?.paidAt ? new Date(markResult.paidAt) : new Date();
+      }
+    } catch (error) {
+      await logPaymentGatewayAudit({
+        paymentCode: normalizeText(row.paymentCode),
+        bookingCode,
+        provider: 'zalopay',
+        eventType: 'query',
+        source: 'payment-status-api',
+        verifyStatus: 'error',
+        appTransId: gatewayAppTransId,
+        message: normalizeText(error?.message) || 'query_failed',
+      });
+    }
+  }
+
+  if (paymentProvider === 'momo' && normalizeText(paymentStatus).toLowerCase() !== 'dathanhtoan' && gatewayAppTransId) {
+    try {
+      const gatewayResult = await queryMoMoOrderStatus(gatewayAppTransId);
+      const gatewayReturnCode = Number(gatewayResult?.resultCode ?? gatewayResult?.errorCode ?? NaN);
+      const isPaidByGateway = Number.isFinite(gatewayReturnCode) && gatewayReturnCode === MOMO_SUCCESS_RESULT_CODE;
+
+      await pool
+        .request()
+        .input('bookingCode', sql.VarChar(30), bookingCode)
+        .input('gatewayReturnCode', sql.Int, Number.isFinite(gatewayReturnCode) ? gatewayReturnCode : null)
+        .query(`
+          UPDATE dbo.ThanhToan
+          SET
+            GatewayLastQueryAt = SYSUTCDATETIME(),
+            GatewayLastReturnCode = @gatewayReturnCode
+          WHERE MaChuyen = @bookingCode;
+        `);
+
+      await logPaymentGatewayAudit({
+        paymentCode: normalizeText(row.paymentCode),
+        bookingCode,
+        provider: 'momo',
+        eventType: 'query',
+        source: 'payment-status-api',
+        verifyStatus: isPaidByGateway ? 'paid' : 'pending',
+        appTransId: gatewayAppTransId,
+        gatewayReturnCode,
+        message: normalizeText(gatewayResult?.message ?? gatewayResult?.localMessage),
+        responsePayload: gatewayResult,
+      });
+
+      if (isPaidByGateway) {
+        const markResult = await markBookingPaidByGateway({
+          bookingCode,
+          paidAt: new Date(),
+          appTransId: gatewayAppTransId,
+          gatewayTransToken: normalizeText(gatewayResult?.transId),
+          gatewayReturnCode,
+        });
+
+        paymentStatus = 'DaThanhToan';
+        paidAt = markResult?.paidAt ? new Date(markResult.paidAt) : new Date();
+      }
+    } catch (error) {
+      await logPaymentGatewayAudit({
+        paymentCode: normalizeText(row.paymentCode),
+        bookingCode,
+        provider: 'momo',
+        eventType: 'query',
+        source: 'payment-status-api',
+        verifyStatus: 'error',
+        appTransId: gatewayAppTransId,
+        message: normalizeText(error?.message) || 'query_failed',
+      });
+    }
+  }
+
+  return {
+    success: true,
+    message: 'Lấy trạng thái thanh toán thành công.',
+    payment: {
+      bookingCode: normalizeText(row.bookingCode),
+      paymentCode: normalizeText(row.paymentCode),
+      paymentMethod: normalizeText(row.paymentMethod).toLowerCase(),
+      paymentProvider,
+      paymentStatus,
+      paymentStatusLabel: getPaymentStatusLabel(paymentStatus),
+      tripStatus: normalizeText(row.tripStatus),
+      gatewayAppTransId,
+      gatewayTransToken: normalizeText(row.gatewayTransToken),
+      paidAt: paidAt && !Number.isNaN(paidAt.getTime()) ? paidAt.toISOString() : '',
+      updatedAt: row.paymentUpdatedAt ? new Date(row.paymentUpdatedAt).toISOString() : '',
+      isPaid: normalizeText(paymentStatus).toLowerCase() === 'dathanhtoan',
     },
   };
 }

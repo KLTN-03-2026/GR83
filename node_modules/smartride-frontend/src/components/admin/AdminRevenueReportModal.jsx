@@ -4,6 +4,7 @@ import DatePicker, { registerLocale } from 'react-datepicker';
 import { isValid, parse } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { rideService } from '../../services/rideService';
+import { connectRideEventStream } from '../../services/rideRealtimeService';
 
 registerLocale('vi-VN', vi);
 
@@ -295,7 +296,7 @@ function exportToPDF(rows, summary, dateFrom, dateTo) {
   }
 }
 
-export default function AdminRevenueReportModal({ open, onClose }) {
+export default function AdminRevenueReportModal({ open, onClose, accountId = '' }) {
   const defaults = useMemo(() => getDefaultDates(), []);
   const [dateFrom, setDateFrom] = useState(defaults.from);
   const [dateTo, setDateTo] = useState(defaults.to);
@@ -309,6 +310,8 @@ export default function AdminRevenueReportModal({ open, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const abortRef = useRef(null);
+  const lastRealtimeEventIdRef = useRef('');
+  const realtimeReloadTimerRef = useRef(null);
 
   const fetchData = useCallback(() => {
     if (abortRef.current) abortRef.current.abort();
@@ -332,6 +335,17 @@ export default function AdminRevenueReportModal({ open, onClose }) {
       .finally(() => setLoading(false));
   }, []);
 
+  const scheduleRealtimeReload = useCallback(() => {
+    if (realtimeReloadTimerRef.current) {
+      window.clearTimeout(realtimeReloadTimerRef.current);
+    }
+
+    realtimeReloadTimerRef.current = window.setTimeout(() => {
+      realtimeReloadTimerRef.current = null;
+      fetchData();
+    }, 220);
+  }, [fetchData]);
+
   useEffect(() => {
     if (open) {
       const d = getDefaultDates();
@@ -350,6 +364,51 @@ export default function AdminRevenueReportModal({ open, onClose }) {
       setError('');
     }
   }, [open, fetchData]);
+
+  useEffect(() => {
+    const normalizedAccountId = String(accountId ?? '').trim();
+
+    if (!open || !normalizedAccountId) {
+      return undefined;
+    }
+
+    const disconnectRideEventStream = connectRideEventStream({
+      accountId: normalizedAccountId,
+      roleCode: 'Q1',
+      onEvent: (eventPayload = {}) => {
+        const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
+
+        if (
+          eventType !== 'ride.booking.created'
+          && eventType !== 'ride.trip.status.updated'
+          && eventType !== 'ride.payment.updated'
+        ) {
+          return;
+        }
+
+        const eventId = String(eventPayload?.id ?? '').trim();
+
+        if (eventId && lastRealtimeEventIdRef.current === eventId) {
+          return;
+        }
+
+        if (eventId) {
+          lastRealtimeEventIdRef.current = eventId;
+        }
+
+        scheduleRealtimeReload();
+      },
+    });
+
+    return () => {
+      disconnectRideEventStream();
+
+      if (realtimeReloadTimerRef.current) {
+        window.clearTimeout(realtimeReloadTimerRef.current);
+        realtimeReloadTimerRef.current = null;
+      }
+    };
+  }, [accountId, open, scheduleRealtimeReload]);
 
   const handleFilter = useCallback(() => {
     setAppliedDateFrom(dateFrom);
@@ -530,6 +589,15 @@ export default function AdminRevenueReportModal({ open, onClose }) {
             ))}
           </select>
           <button className="revenue-modal__filter-btn" onClick={handleFilter}>Lọc</button>
+          <button
+            className="revenue-modal__reload-btn atm-toolbar__refresh"
+            onClick={fetchData}
+            disabled={loading}
+            aria-label="Tải lại dữ liệu doanh thu"
+            title="Tải lại dữ liệu doanh thu"
+          >
+            {loading ? '⟳' : '↺'}
+          </button>
         </div>
 
         {/* Summary cards */}

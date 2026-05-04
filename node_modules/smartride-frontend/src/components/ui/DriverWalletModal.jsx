@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { closeIcon } from '../../assets/icons';
 import { driverWalletService } from '../../services/driverWalletService';
+import { connectRideEventStream } from '../../services/rideRealtimeService';
+
+const WALLET_POLL_INTERVAL_MS = 8000;
 
 const TOPUP_OPTIONS = [100000, 200000, 300000, 500000, 1000000, 2000000];
 const TRANSFER_OPTIONS = [50000, 100000, 200000, 500000];
@@ -59,18 +62,18 @@ function sanitizeDigits(value) {
 }
 
 function formatDateTime(value) {
+  if (!value) return '';
   const date = new Date(value);
-
-  if (!value || Number.isNaN(date.getTime())) {
-    return '';
-  }
-
+  if (Number.isNaN(date.getTime())) return '';
+  // SQL Server dùng SYSDATETIME() (giờ địa phương UTC+7) nhưng tedious serialize thành chuỗi Z.
+  // Giá trị UTC trong Date thực ra chứa giờ Việt Nam → hiển thị theo UTC để tránh cộng thêm 7h.
   return date.toLocaleString('vi-VN', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'UTC',
   });
 }
 
@@ -126,16 +129,25 @@ export default function DriverWalletModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const walletLoadInFlightRef = useRef(false);
 
   const resolvedDriverId = String(driverId ?? '').trim();
 
-  const loadWalletData = async () => {
+  const loadWalletData = useCallback(async ({ silent = false } = {}) => {
     if (!resolvedDriverId) {
       return;
     }
 
-    setIsLoading(true);
-    setErrorMessage('');
+    if (walletLoadInFlightRef.current) {
+      return;
+    }
+
+    walletLoadInFlightRef.current = true;
+
+    if (!silent) {
+      setIsLoading(true);
+      setErrorMessage('');
+    }
 
     try {
       const response = await driverWalletService.getWallet(resolvedDriverId);
@@ -145,12 +157,18 @@ export default function DriverWalletModal({
       setTransactions(nextTransactions.map(mapTransactionToViewModel));
     } catch (error) {
       const message = error?.message || 'Không thể tải thông tin ví lúc này.';
-      setErrorMessage(message);
-      onNotify?.(message, 'error', 2800);
+      if (!silent) {
+        setErrorMessage(message);
+        onNotify?.(message, 'error', 2800);
+      }
     } finally {
-      setIsLoading(false);
+      walletLoadInFlightRef.current = false;
+
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, [onNotify, resolvedDriverId]);
 
   useEffect(() => {
     if (!open) {
@@ -189,7 +207,44 @@ export default function DriverWalletModal({
     }
 
     void loadWalletData();
-  }, [open, resolvedDriverId]);
+
+    const pollId = window.setInterval(() => {
+      void loadWalletData({ silent: true });
+    }, WALLET_POLL_INTERVAL_MS);
+
+    return () => {
+      clearInterval(pollId);
+    };
+  }, [loadWalletData, open, resolvedDriverId]);
+
+  useEffect(() => {
+    if (!open || !resolvedDriverId) {
+      return undefined;
+    }
+
+    const disconnect = connectRideEventStream({
+      accountId: resolvedDriverId,
+      roleCode: 'Q3',
+      onEvent: (eventPayload) => {
+        const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
+
+        if (!eventType.startsWith('ride.')) {
+          return;
+        }
+
+        const booking = eventPayload?.booking ?? eventPayload?.payload?.booking ?? {};
+        const bookingDriverId = String(booking?.driverAccountId ?? booking?.driverId ?? '').trim();
+
+        if (!bookingDriverId || bookingDriverId === resolvedDriverId) {
+          void loadWalletData({ silent: true });
+        }
+      },
+    });
+
+    return () => {
+      disconnect();
+    };
+  }, [loadWalletData, open, resolvedDriverId]);
 
   const filteredHistoryItems = useMemo(() => {
     if (historyFilter === 'all') {

@@ -1,11 +1,12 @@
 import { closeIcon } from '../../assets/icons';
 import { classNames } from '../../utils/classNames';
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { format, isValid, parse } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { rideService } from '../../services/rideService';
+import { connectRideEventStream } from '../../services/rideRealtimeService';
 
 registerLocale('vi-VN', vi);
 
@@ -187,63 +188,129 @@ export default function AdminPaymentManagementModal({
   const [paymentRows, setPaymentRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState('');
+  const requestAbortRef = useRef(null);
+  const lastRealtimeEventIdRef = useRef('');
+  const realtimeReloadTimerRef = useRef(null);
 
   const normalizedRoleCode = String(roleCode ?? '').trim().toUpperCase() === 'Q3' ? 'Q3' : 'Q1';
   const normalizedAccountId = String(accountId ?? '').trim();
   const normalizedIdentifier = String(accountIdentifier ?? '').trim();
+
+  const loadPayments = useCallback(async () => {
+    if (!open) {
+      return;
+    }
+
+    if (requestAbortRef.current) {
+      requestAbortRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    requestAbortRef.current = abortController;
+
+    setLoading(true);
+    setRequestError('');
+
+    try {
+      const response = await rideService.getTripHistory(
+        {
+          roleCode: normalizedRoleCode,
+          accountId: normalizedRoleCode === 'Q3' ? normalizedAccountId : '',
+          identifier: normalizedRoleCode === 'Q3' ? normalizedIdentifier : '',
+          limit: 40,
+        },
+        { signal: abortController.signal },
+      );
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      const rawItems = Array.isArray(response?.items) ? response.items : [];
+      setPaymentRows(rawItems.map((item, index) => mapPaymentRow(item, index)));
+    } catch (error) {
+      if (abortController.signal.aborted || error?.name === 'AbortError') {
+        return;
+      }
+
+      const message = error?.message || 'Không thể tải dữ liệu thanh toán lúc này.';
+      setPaymentRows([]);
+      setRequestError(message);
+      onNotify?.(message, 'error', 2800);
+    } finally {
+      if (!abortController.signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }, [normalizedAccountId, normalizedIdentifier, normalizedRoleCode, onNotify, open]);
+
+  const scheduleRealtimeReload = useCallback(() => {
+    if (realtimeReloadTimerRef.current) {
+      window.clearTimeout(realtimeReloadTimerRef.current);
+    }
+
+    realtimeReloadTimerRef.current = window.setTimeout(() => {
+      realtimeReloadTimerRef.current = null;
+      void loadPayments();
+    }, 220);
+  }, [loadPayments]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    let isActive = true;
-    const abortController = new AbortController();
-
-    const loadPayments = async () => {
-      setLoading(true);
-      setRequestError('');
-
-      try {
-        const response = await rideService.getTripHistory(
-          {
-            roleCode: normalizedRoleCode,
-            accountId: normalizedRoleCode === 'Q3' ? normalizedAccountId : '',
-            identifier: normalizedRoleCode === 'Q3' ? normalizedIdentifier : '',
-            limit: 40,
-          },
-          { signal: abortController.signal },
-        );
-
-        if (!isActive) {
-          return;
-        }
-
-        const rawItems = Array.isArray(response?.items) ? response.items : [];
-        setPaymentRows(rawItems.map((item, index) => mapPaymentRow(item, index)));
-      } catch (error) {
-        if (!isActive || error?.name === 'AbortError') {
-          return;
-        }
-
-        const message = error?.message || 'Không thể tải dữ liệu thanh toán lúc này.';
-        setPaymentRows([]);
-        setRequestError(message);
-        onNotify?.(message, 'error', 2800);
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    };
-
     void loadPayments();
 
     return () => {
-      isActive = false;
-      abortController.abort();
+      if (requestAbortRef.current) {
+        requestAbortRef.current.abort();
+      }
     };
-  }, [normalizedAccountId, normalizedIdentifier, normalizedRoleCode, onNotify, open]);
+  }, [loadPayments, open]);
+
+  useEffect(() => {
+    if (!open || !normalizedAccountId) {
+      return undefined;
+    }
+
+    const disconnectRideEventStream = connectRideEventStream({
+      accountId: normalizedAccountId,
+      roleCode: normalizedRoleCode,
+      onEvent: (eventPayload = {}) => {
+        const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
+
+        if (
+          eventType !== 'ride.booking.created'
+          && eventType !== 'ride.trip.status.updated'
+          && eventType !== 'ride.payment.updated'
+        ) {
+          return;
+        }
+
+        const eventId = String(eventPayload?.id ?? '').trim();
+
+        if (eventId && lastRealtimeEventIdRef.current === eventId) {
+          return;
+        }
+
+        if (eventId) {
+          lastRealtimeEventIdRef.current = eventId;
+        }
+
+        scheduleRealtimeReload();
+      },
+    });
+
+    return () => {
+      disconnectRideEventStream();
+
+      if (realtimeReloadTimerRef.current) {
+        window.clearTimeout(realtimeReloadTimerRef.current);
+        realtimeReloadTimerRef.current = null;
+      }
+    };
+  }, [normalizedAccountId, normalizedRoleCode, open, scheduleRealtimeReload]);
 
   const filteredPayments = useMemo(() => {
     const normalizedTransactionKeyword = normalizeToken(transactionKeyword);
@@ -490,6 +557,19 @@ export default function AdminPaymentManagementModal({
               ))}
             </select>
           </label>
+
+          <button
+            className="admin-payment-modal__reload-button atm-toolbar__refresh"
+            type="button"
+            onClick={() => {
+              void loadPayments();
+            }}
+            disabled={loading}
+            aria-label="Tải lại dữ liệu thanh toán"
+            title="Tải lại dữ liệu thanh toán"
+          >
+            {loading ? '⟳' : '↺'}
+          </button>
         </div>
 
         <div className="admin-payment-modal__meta">

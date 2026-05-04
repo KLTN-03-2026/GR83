@@ -100,11 +100,13 @@ const MOCKUP_ROUTE_PRESETS = {
 };
 
 const REMEMBER_LOGIN_STORAGE_KEY = 'smartride.rememberedLoginCredentials';
+const AUTH_SESSION_STORAGE_KEY = 'smartride.auth.session.v1';
+const ACTIVE_BOOKING_STORAGE_KEY_PREFIX = 'smartride.booking.active';
 const DRIVER_DISPATCH_SETTINGS_STORAGE_PREFIX = 'smartride.driver.dispatch.settings';
 const FORCE_TRIP_CANCELLED_EVENT_NAME = 'smartride:force-trip-cancelled';
 const FORCE_TRIP_CANCELLED_STORAGE_KEY = 'smartride.forceTripCancelled';
 const DEFAULT_DRIVER_DISPATCH_SETTINGS = {
-  checkedIn: false,
+  checkedIn: true,
   autoReceiveEnabled: true,
 };
 const DRIVER_TRIP_STAGE_TO_SERVER_STATUS = {
@@ -136,7 +138,10 @@ function readDriverDispatchSettings(accountId = '') {
     const parsedValue = JSON.parse(storedValue);
 
     return {
-      checkedIn: Boolean(parsedValue?.checkedIn),
+      checkedIn:
+        parsedValue && Object.prototype.hasOwnProperty.call(parsedValue, 'checkedIn')
+          ? Boolean(parsedValue?.checkedIn)
+          : true,
       autoReceiveEnabled: true,
     };
   } catch {
@@ -239,6 +244,161 @@ function saveRememberedLoginCredentials(email, password) {
   }
 }
 
+function normalizePersistedUser(user = null) {
+  if (!user || typeof user !== 'object' || Array.isArray(user)) {
+    return null;
+  }
+
+  const normalizedAccountId = String(user.id ?? user.accountId ?? '').trim();
+  const normalizedEmail = String(user.email ?? user.username ?? '').trim();
+
+  if (!normalizedAccountId && !normalizedEmail) {
+    return null;
+  }
+
+  return {
+    ...user,
+    id: normalizedAccountId || null,
+  };
+}
+
+function readPersistedAuthSession() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    return normalizePersistedUser(parsedValue);
+  } catch {
+    return null;
+  } finally {
+    try {
+      window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore legacy storage cleanup failures.
+    }
+  }
+}
+
+function savePersistedAuthSession(user = null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalizedUser = normalizePersistedUser(user);
+
+  if (!normalizedUser) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(normalizedUser));
+    window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearPersistedAuthSession() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function getActiveBookingStorageKey(accountId = '') {
+  const normalizedAccountId = String(accountId ?? '').trim().toLowerCase();
+  return `${ACTIVE_BOOKING_STORAGE_KEY_PREFIX}.${normalizedAccountId || 'guest'}`;
+}
+
+function readPersistedActiveBooking(accountId = '') {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const normalizedAccountId = String(accountId ?? '').trim();
+
+  if (!normalizedAccountId) {
+    return null;
+  }
+
+  try {
+    const storageKey = getActiveBookingStorageKey(normalizedAccountId);
+    const rawValue = window.sessionStorage.getItem(storageKey);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    const bookingCode = String(parsedValue?.bookingCode ?? '').trim();
+
+    return bookingCode ? parsedValue : null;
+  } catch {
+    return null;
+  } finally {
+    try {
+      window.localStorage.removeItem(getActiveBookingStorageKey(normalizedAccountId));
+    } catch {
+      // Ignore legacy storage cleanup failures.
+    }
+  }
+}
+
+function savePersistedActiveBooking(accountId = '', booking = null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalizedAccountId = String(accountId ?? '').trim();
+  const normalizedBookingCode = String(booking?.bookingCode ?? '').trim();
+
+  if (!normalizedAccountId || !normalizedBookingCode) {
+    return;
+  }
+
+  try {
+    const storageKey = getActiveBookingStorageKey(normalizedAccountId);
+    window.sessionStorage.setItem(storageKey, JSON.stringify(booking));
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearPersistedActiveBooking(accountId = '') {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalizedAccountId = String(accountId ?? '').trim();
+
+  if (!normalizedAccountId) {
+    return;
+  }
+
+  try {
+    const storageKey = getActiveBookingStorageKey(normalizedAccountId);
+    window.sessionStorage.removeItem(storageKey);
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 const BOOKING_PAYMENT_METHODS = {
   cash: {
     id: 'cash',
@@ -256,14 +416,14 @@ const BOOKING_PAYMENT_METHODS = {
     id: 'wallet',
     label: 'Thanh toán bằng Ví điện tử',
     shortLabel: 'Ví điện tử',
-    description: 'Chọn VNPay, Zalo pay hoặc Momo để thanh toán.',
+    description: 'Chọn ZaloPay, MoMo hoặc Ví SmartRide để thanh toán.',
   },
 };
 
 const BOOKING_WALLET_PROVIDERS = [
-  { id: 'vnpay', label: 'VNPay' },
-  { id: 'zalopay', label: 'Zalo pay' },
-  { id: 'momo', label: 'Momo' },
+  { id: 'zalopay', label: 'ZaloPay' },
+  { id: 'momo', label: 'MoMo' },
+  { id: 'app_wallet', label: 'Ví SmartRide' },
 ];
 
 const BOOKING_OTHER_PAYMENT_METHODS = [BOOKING_PAYMENT_METHODS.qr, BOOKING_PAYMENT_METHODS.wallet];
@@ -752,10 +912,27 @@ function resolveRideStatusToken(value) {
     return normalizeRideStatusToken(value);
   }
 
-  const statusTokens = [
+  const tripStatusTokens = [
     normalizeRideStatusToken(value?.tripStatus),
-    normalizeRideStatusToken(value?.status),
     normalizeRideStatusToken(value?.tripStatusLabel),
+  ].filter(Boolean);
+
+  if (tripStatusTokens.length > 0) {
+    const explicitTripStatus = tripStatusTokens[0];
+
+    if (explicitTripStatus === 'hoanthanh' || explicitTripStatus === 'completed') {
+      return 'hoanthanh';
+    }
+
+    if (explicitTripStatus === 'dahuy' || explicitTripStatus === 'cancelled') {
+      return 'dahuy';
+    }
+
+    return explicitTripStatus;
+  }
+
+  const statusTokens = [
+    normalizeRideStatusToken(value?.status),
     normalizeRideStatusToken(value?.statusLabel),
   ].filter(Boolean);
 
@@ -1355,6 +1532,10 @@ function normalizeIdentityDocumentNumber(value = '') {
 function normalizeBookingPaymentMethod(value) {
   const normalizedValue = String(value ?? '').trim().toLowerCase();
 
+  if (normalizedValue === 'app_wallet') {
+    return 'wallet';
+  }
+
   if (normalizedValue === 'qr' || normalizedValue === 'wallet') {
     return normalizedValue;
   }
@@ -1365,11 +1546,17 @@ function normalizeBookingPaymentMethod(value) {
 function normalizeBookingPaymentProvider(value) {
   const normalizedValue = String(value ?? '').trim().toLowerCase();
 
-  if (normalizedValue === 'vnpay' || normalizedValue === 'zalopay' || normalizedValue === 'momo') {
+  if (normalizedValue === 'zalopay' || normalizedValue === 'momo' || normalizedValue === 'app_wallet') {
     return normalizedValue;
   }
 
-  return 'vnpay';
+  return 'zalopay';
+}
+
+function getBookingPaymentProviderLabel(value) {
+  const normalizedProvider = normalizeBookingPaymentProvider(value);
+  const providerEntry = BOOKING_WALLET_PROVIDERS.find((provider) => provider.id === normalizedProvider);
+  return providerEntry?.label ?? 'Ví điện tử';
 }
 
 function getCurrentPositionAsync(options = {}) {
@@ -1400,14 +1587,18 @@ function getCurrentPositionAsync(options = {}) {
 }
 
 export default function HomePage() {
-  const [locationPicker, setLocationPicker] = useState({ open: false, mode: 'destination' });
+  const [locationPicker, setLocationPicker] = useState({ open: false, mode: 'destination', returnToPreview: false });
   const [searchResult, setSearchResult] = useState(null);
   const [selectedRideId, setSelectedRideId] = useState(null);
   const [searchError, setSearchError] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState('');
-  const [bookingSuccess, setBookingSuccess] = useState(null);
+  const [bookingSuccess, setBookingSuccess] = useState(() => {
+    const persistedUser = readPersistedAuthSession();
+    const persistedAccountId = String(persistedUser?.id ?? '').trim();
+    return readPersistedActiveBooking(persistedAccountId);
+  });
   const [bookingTrackingModalOpen, setBookingTrackingModalOpen] = useState(false);
   const [bookingTrackingBubbleOpen, setBookingTrackingBubbleOpen] = useState(false);
   const [bookingRatingModalOpen, setBookingRatingModalOpen] = useState(false);
@@ -1421,7 +1612,7 @@ export default function HomePage() {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewSelectedRideId, setPreviewSelectedRideId] = useState(null);
   const [bookingPaymentMethod, setBookingPaymentMethod] = useState('cash');
-  const [bookingPaymentProvider, setBookingPaymentProvider] = useState('vnpay');
+  const [bookingPaymentProvider, setBookingPaymentProvider] = useState('zalopay');
   const [bookingPaymentPanelOpen, setBookingPaymentPanelOpen] = useState(false);
   const [bookingQrCodeDataUrl, setBookingQrCodeDataUrl] = useState('');
   const [bookingPromoPanelOpen, setBookingPromoPanelOpen] = useState(false);
@@ -1474,7 +1665,7 @@ export default function HomePage() {
   const [credentialLoginError, setCredentialLoginError] = useState('');
   const [credentialLockRemainingSeconds, setCredentialLockRemainingSeconds] = useState(0);
   const [miniToast, setMiniToast] = useState(null);
-  const [authenticatedUser, setAuthenticatedUser] = useState(null);
+  const [authenticatedUser, setAuthenticatedUser] = useState(() => readPersistedAuthSession());
   const driverRideRequestScanInFlightRef = useRef(false);
   const bookingSuccessRef = useRef(null);
   const dismissedCustomerTrackingBookingCodeRef = useRef('');
@@ -1488,6 +1679,7 @@ export default function HomePage() {
   const customerRideEventIdRef = useRef('');
   const customerRideSyncInFlightRef = useRef(false);
   const driverRideSyncInFlightRef = useRef(false);
+  const bookingPaymentPollingTimerRef = useRef(null);
   const normalizedUserRoleCode = normalizeAppRoleCode(authenticatedUser?.roleCode);
   const isDriverCheckedIn = Boolean(driverDispatchSettings.checkedIn);
   const isDriverAutoReceiveEnabled = true;
@@ -1568,12 +1760,26 @@ export default function HomePage() {
     .trim()
     .toLowerCase();
 
-  const openLocationPicker = (mode) => {
-    setLocationPicker({ open: true, mode });
+  const openLocationPicker = (mode, options = {}) => {
+    const shouldReturnToPreview = Boolean(options.returnToPreview);
+
+    if (shouldReturnToPreview) {
+      setPreviewModalOpen(false);
+    }
+
+    setLocationPicker({ open: true, mode, returnToPreview: shouldReturnToPreview });
   };
 
   const closeLocationPicker = () => {
-    setLocationPicker((current) => ({ ...current, open: false }));
+    setLocationPicker((current) => {
+      if (current.returnToPreview) {
+        requestAnimationFrame(() => {
+          setPreviewModalOpen(true);
+        });
+      }
+
+      return { ...current, open: false, returnToPreview: false };
+    });
   };
 
   const handleLocationSelect = (field, selection) => {
@@ -1911,9 +2117,13 @@ export default function HomePage() {
     }, 5000);
 
     const handleStorage = (event) => {
+      const storageKey = String(event?.key ?? '');
+
       if (
-        event.key === DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY ||
-        event.key === DRIVER_RIDE_REQUEST_SEEN_NOTIFICATION_IDS_STORAGE_KEY
+        storageKey === DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY ||
+        storageKey.startsWith(`${DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY}.`) ||
+        storageKey === DRIVER_RIDE_REQUEST_SEEN_NOTIFICATION_IDS_STORAGE_KEY ||
+        storageKey.startsWith(`${DRIVER_RIDE_REQUEST_SEEN_NOTIFICATION_IDS_STORAGE_KEY}.`)
       ) {
         void scanForDriverRideRequest();
       }
@@ -1935,6 +2145,62 @@ export default function HomePage() {
     driverRideRequestModalOpen,
     driverRideRejectModalOpen,
     driverTripActionModalOpen,
+    normalizedUserRoleCode,
+  ]);
+
+  useEffect(() => {
+    const driverAccountId = String(authenticatedUser?.id ?? '').trim();
+    const activeRequest = activeDriverRideRequest?.request ?? null;
+    const activeRequestCode = getRideBookingCode(activeRequest);
+
+    if (
+      normalizedUserRoleCode !== 'Q3'
+      || !driverAccountId
+      || !driverRideRequestModalOpen
+      || !activeRequest
+      || !activeRequestCode
+    ) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const validateActiveDriverRideRequest = async () => {
+      try {
+        const queue = await loadDriverRideRequestQueue({ accountId: driverAccountId });
+
+        if (!isMounted) {
+          return;
+        }
+
+        const isStillActionable = queue.some((request) => getRideBookingCode(request) === activeRequestCode);
+
+        if (isStillActionable) {
+          return;
+        }
+
+        cleanupDriverRideRequestLocally(activeRequest);
+        closeDriverRideRequestModal();
+        showMiniToast('Cuốc xe này không còn cần phản hồi nữa.', 'info', 2400);
+      } catch {
+        // Ignore transient validation failures and retry on the next interval.
+      }
+    };
+
+    void validateActiveDriverRideRequest();
+
+    const intervalId = window.setInterval(() => {
+      void validateActiveDriverRideRequest();
+    }, 3000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeDriverRideRequest,
+    authenticatedUser?.id,
+    driverRideRequestModalOpen,
     normalizedUserRoleCode,
   ]);
 
@@ -2172,7 +2438,11 @@ export default function HomePage() {
           }
         }
 
-        if (eventType === 'ride.booking.created' || eventType === 'ride.trip.status.updated') {
+        if (
+          eventType === 'ride.booking.created'
+          || eventType === 'ride.trip.status.updated'
+          || eventType === 'ride.payment.updated'
+        ) {
           void syncCustomerRideState(event);
         }
 
@@ -2299,6 +2569,29 @@ export default function HomePage() {
               updatedAt: event?.createdAt ?? event?.updatedAt ?? currentRequest.updatedAt,
             };
           });
+
+          void syncDriverRideState();
+          return;
+        }
+
+        if (eventType === 'ride.payment.updated') {
+          const eventBookingCode = getRideBookingCode(eventBooking ?? event);
+
+          setActiveDriverTripAction((currentRequest) => {
+            if (!currentRequest || getRideBookingCode(currentRequest) !== eventBookingCode) {
+              return currentRequest;
+            }
+
+            return {
+              ...currentRequest,
+              paymentStatus: event?.paymentStatus ?? eventBooking?.paymentStatus ?? currentRequest.paymentStatus,
+              paymentStatusLabel: event?.paymentStatusLabel ?? eventBooking?.paymentStatusLabel ?? currentRequest.paymentStatusLabel,
+              paidAt: event?.paidAt ?? eventBooking?.paidAt ?? currentRequest.paidAt,
+              updatedAt: event?.createdAt ?? event?.updatedAt ?? currentRequest.updatedAt,
+            };
+          });
+
+          void syncDriverRideState();
         }
       }
     };
@@ -2582,6 +2875,57 @@ export default function HomePage() {
   }, [miniToast]);
 
   useEffect(() => {
+    if (!authenticatedUser) {
+      clearPersistedAuthSession();
+      return;
+    }
+
+    savePersistedAuthSession(authenticatedUser);
+  }, [authenticatedUser]);
+
+  useEffect(() => {
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+
+    if (!accountId) {
+      return;
+    }
+
+    const persistedBooking = readPersistedActiveBooking(accountId);
+
+    if (!persistedBooking) {
+      return;
+    }
+
+    setBookingSuccess((currentBooking) => {
+      const currentBookingCode = String(currentBooking?.bookingCode ?? '').trim();
+      return currentBookingCode ? currentBooking : persistedBooking;
+    });
+  }, [authenticatedUser?.id]);
+
+  useEffect(() => {
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+
+    if (!accountId) {
+      return;
+    }
+
+    const bookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
+
+    if (!bookingCode) {
+      clearPersistedActiveBooking(accountId);
+      return;
+    }
+
+    savePersistedActiveBooking(accountId, bookingSuccess);
+  }, [authenticatedUser?.id, bookingSuccess]);
+
+  useEffect(() => {
+    if (authenticatedUser?.email) {
+      setLoginEmail(authenticatedUser.email);
+    }
+  }, [authenticatedUser?.email]);
+
+  useEffect(() => {
     if (!loginModalOpen) {
       return;
     }
@@ -2621,6 +2965,61 @@ export default function HomePage() {
 
   const closeDriverFeatureLockModal = () => {
     setDriverFeatureLockModalOpen(false);
+  };
+
+  const stopBookingPaymentPolling = () => {
+    if (bookingPaymentPollingTimerRef.current) {
+      clearTimeout(bookingPaymentPollingTimerRef.current);
+      bookingPaymentPollingTimerRef.current = null;
+    }
+  };
+
+  const pollBookingPaymentStatus = async (bookingCode, attempt = 0) => {
+    const normalizedBookingCode = String(bookingCode ?? '').trim();
+
+    if (!normalizedBookingCode || attempt >= 40) {
+      stopBookingPaymentPolling();
+      return;
+    }
+
+    try {
+      const response = await rideService.getTripPaymentStatus(normalizedBookingCode, {
+        accountId: authenticatedUser?.id ?? '',
+      });
+      const payment = response?.payment ?? null;
+      const isPaid = Boolean(payment?.isPaid);
+
+      if (payment) {
+        setBookingSuccess((current) => {
+          if (!current || String(current.bookingCode ?? '').trim() !== normalizedBookingCode) {
+            return current;
+          }
+
+          return {
+            ...current,
+            paymentStatus: payment.paymentStatus,
+            paymentStatusLabel: payment.paymentStatusLabel,
+            paymentSummary: current.paymentProviderLabel
+              ? `${current.paymentMethodLabel} - ${current.paymentProviderLabel}`
+              : current.paymentMethodLabel,
+            paidAt: payment.paidAt,
+          };
+        });
+      }
+
+      if (isPaid) {
+        stopBookingPaymentPolling();
+        const bookingProviderLabel = getBookingPaymentProviderLabel(bookingSuccessRef.current?.paymentProvider);
+        showMiniToast(`Thanh toán ${bookingProviderLabel} thành công.`, 'success', 2200);
+        return;
+      }
+    } catch {
+      // Ignore polling errors and retry.
+    }
+
+    bookingPaymentPollingTimerRef.current = setTimeout(() => {
+      void pollBookingPaymentStatus(normalizedBookingCode, attempt + 1);
+    }, 3000);
   };
 
   const maybeShowDriverFeatureLockedNotice = (userPayload, customMessage = '') => {
@@ -2745,6 +3144,42 @@ export default function HomePage() {
           enqueueDriverRideRequest(nextBooking, { accountId: authenticatedUser?.id ?? '' });
         }
 
+        if (normalizeBookingPaymentMethod(nextBooking.paymentMethod) === 'wallet') {
+          const paymentGateway = response?.paymentGateway ?? {};
+          const paymentProviderId = normalizeBookingPaymentProvider(nextBooking.paymentProvider);
+          const paymentProviderLabel = getBookingPaymentProviderLabel(nextBooking.paymentProvider);
+          const paymentUrl = String(paymentGateway.orderUrl ?? paymentGateway.payUrl ?? paymentGateway.deepLink ?? '').trim();
+          const isAppWalletProvider = paymentProviderId === 'app_wallet';
+          const isMoMoProvider = paymentProviderId === 'momo';
+          const isMoMoMockFlow = isMoMoProvider && Boolean(paymentGateway?.raw?.mock);
+
+          if (isAppWalletProvider) {
+            showMiniToast('Đặt xe thành công! Đã thanh toán bằng Ví SmartRide.', 'success', 2600);
+          } else if (isMoMoMockFlow) {
+            showMiniToast('Đang xác nhận thanh toán MoMo ngay trên phiên hiện tại...', 'success', 2400);
+            stopBookingPaymentPolling();
+            void pollBookingPaymentStatus(nextBooking.bookingCode, 0);
+
+            setTimeout(() => {
+              void rideService
+                .confirmMoMoMockPayment(nextBooking.bookingCode, {
+                  accountId: authenticatedUser?.id ?? '',
+                })
+                .catch(() => {
+                  // Ignore mock confirm errors; polling will keep checking current status.
+                });
+            }, 1200);
+          } else if (paymentUrl) {
+            window.location.assign(paymentUrl);
+
+            showMiniToast(`Đã mở ${paymentProviderLabel}. Vui lòng hoàn tất thanh toán để xác nhận chuyến.`, 'success', 2600);
+            stopBookingPaymentPolling();
+            void pollBookingPaymentStatus(nextBooking.bookingCode, 0);
+          } else {
+            showMiniToast(`Không lấy được liên kết thanh toán ${paymentProviderLabel}. Vui lòng thử đặt lại.`, 'error', 2600);
+          }
+        }
+
         setBookingTrackingModalOpen(true);
         closePreviewModal();
       }
@@ -2767,7 +3202,7 @@ export default function HomePage() {
     setBookingPromoPanelOpen(false);
 
     if (normalizedMethod !== 'wallet') {
-      setBookingPaymentProvider('vnpay');
+      setBookingPaymentProvider('zalopay');
     }
   };
 
@@ -2855,6 +3290,9 @@ export default function HomePage() {
           subtitle: item.note || item.driver || '',
           price: item.priceFormatted,
           priceRaw: Number(item.price ?? 0),
+          serviceFeeRaw: Number(item.serviceFee ?? 0),
+          serviceFeeFormatted: item.serviceFeeFormatted ?? '',
+          totalPriceFormatted: item.totalPriceFormatted ?? '',
           icon: activeVehicle === 'motorbike' ? motorbikeIcon : useBusIcon ? busIcon : carIcon,
         };
       });
@@ -3474,12 +3912,17 @@ export default function HomePage() {
   };
 
   const handleOpenBookingForm = () => {
+    if (locationPicker.open) {
+      setLocationPicker((current) => ({ ...current, open: false }));
+    }
+
     openPreviewForVehicle(activeVehicle, selectedRideId ?? previewSelectedRideId ?? null);
   };
 
   const closePreviewModal = () => {
+    stopBookingPaymentPolling();
     setBookingPaymentMethod('cash');
-    setBookingPaymentProvider('vnpay');
+    setBookingPaymentProvider('zalopay');
     setBookingPaymentPanelOpen(false);
     setBookingPromoPanelOpen(false);
     setBookingPromoSearchValue('');
@@ -3545,6 +3988,10 @@ export default function HomePage() {
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(false);
   };
+
+  useEffect(() => () => {
+    stopBookingPaymentPolling();
+  }, []);
 
   const closeCompletedBookingFlow = (bookingCode = '') => {
     const normalizedBookingCode = String(bookingCode ?? bookingSuccess?.bookingCode ?? '').trim();
@@ -3804,7 +4251,7 @@ export default function HomePage() {
       setBookingPaymentPanelOpen(false);
       setBookingPromoPanelOpen(false);
       setBookingPaymentMethod('cash');
-      setBookingPaymentProvider('vnpay');
+      setBookingPaymentProvider('zalopay');
       setBookingPromoSearchValue('');
       setBookingPromoFilterValue('');
       setBookingSelectedPromoId('');
@@ -3974,12 +4421,48 @@ export default function HomePage() {
     showMiniToast('Đã nhận cuốc xe và đã lưu lên máy chủ.', 'success', 1800);
   };
 
+  const isDriverRejectStaleBookingMessage = (message) => {
+    const normalized = String(message ?? '').trim().toLowerCase();
+
+    return (
+      normalized.includes('không còn ở trạng thái chờ nhận') ||
+      normalized.includes('khong con o trang thai cho nhan') ||
+      normalized.includes('không tìm thấy chuyến') ||
+      normalized.includes('khong tim thay chuyen') ||
+      normalized.includes('không phải tài xế đang được mời') ||
+      normalized.includes('khong phai tai xe dang duoc moi')
+    );
+  };
+
   const handleDriverRideRequestRejectConfirm = async ({ request, reasonLabel, note, summary }) => {
+    const rejectionSummary = String(summary ?? note ?? reasonLabel ?? '').trim();
+
+    try {
+      await rideService.rejectTripDispatch(request.bookingCode, {
+        driverAccountId: String(authenticatedUser?.id ?? '').trim(),
+        reasonLabel: String(reasonLabel ?? '').trim(),
+        reasonText: String(note ?? '').trim(),
+        summary: rejectionSummary,
+      });
+    } catch (error) {
+      const backendMessage = String(error?.message ?? '').trim();
+
+      if (isDriverRejectStaleBookingMessage(backendMessage)) {
+        // Booking is no longer actionable (cancelled, reassigned, etc.) — clean up locally and close.
+        cleanupDriverRideRequestLocally(request);
+        cleanupDriverRideRequestInBackground(request);
+        closeDriverRideRequestModal();
+        showMiniToast('Cuốc xe này không còn cần phản hồi nữa.', 'info', 2400);
+        return;
+      }
+
+      showMiniToast(backendMessage || 'Không thể gửi từ chối cuốc lên hệ thống. Vui lòng thử lại.', 'error', 2600);
+      return;
+    }
+
     cleanupDriverRideRequestLocally(request);
     cleanupDriverRideRequestInBackground(request);
-
     closeDriverRideRequestModal();
-    const rejectionSummary = String(summary ?? note ?? reasonLabel ?? '').trim();
 
     showMiniToast(
       rejectionSummary ? `Đã từ chối cuốc xe: ${rejectionSummary}.` : 'Đã từ chối cuốc xe.',
@@ -4622,10 +5105,14 @@ export default function HomePage() {
   };
 
   const handleLogout = () => {
+    const currentAccountId = String(authenticatedUser?.id ?? '').trim();
+
     clearLoginFormState();
     clearRegisterFormState();
     clearForgotPasswordFormState();
     clearChangePasswordFormState();
+    clearPersistedAuthSession();
+    clearPersistedActiveBooking(currentAccountId);
     setAuthenticatedUser(null);
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(false);
@@ -4639,13 +5126,13 @@ export default function HomePage() {
     setSearchLoading(false);
     setBookingPaymentPanelOpen(false);
     setBookingPaymentMethod('cash');
-    setBookingPaymentProvider('vnpay');
+    setBookingPaymentProvider('zalopay');
     setPreviewModalOpen(false);
     setDriverFeatureLockModalOpen(false);
     setDriverFeatureLockMessage(DRIVER_FEATURE_LOCK_DEFAULT_MESSAGE);
     clearDriverSignupDraftCache();
     setMiniToast(null);
-    setLocationPicker({ open: false, mode: 'destination' });
+    setLocationPicker({ open: false, mode: 'destination', returnToPreview: false });
     setRoute({
       pickup: createLocationRecord(DA_NANG_AIRPORT.label, {
         position: DA_NANG_AIRPORT.position,
@@ -9097,14 +9584,14 @@ export default function HomePage() {
                       </div>
 
                       <div className="booking-route-box" aria-label="Điểm đón và điểm đến">
-                        <button className="booking-route-row" type="button" onClick={() => openLocationPicker('pickup')}>
+                        <button className="booking-route-row" type="button" onClick={() => openLocationPicker('pickup', { returnToPreview: true })}>
                           <img className="booking-route-row__icon" src={originIcon} alt="" aria-hidden="true" />
                           <span>{mockupPickupLabel}</span>
                         </button>
 
                         <div className="booking-route-box__divider" />
 
-                        <button className="booking-route-row" type="button" onClick={() => openLocationPicker('destination')}>
+                        <button className="booking-route-row" type="button" onClick={() => openLocationPicker('destination', { returnToPreview: true })}>
                           <img className="booking-route-row__icon" src={pinIcon} alt="" aria-hidden="true" />
                           <span>{mockupDestinationLabel}</span>
                         </button>
@@ -9125,7 +9612,7 @@ export default function HomePage() {
                           aria-expanded={bookingPaymentPanelOpen}
                           aria-controls="booking-payment-panel"
                         >
-                          {bookingPaymentMethod === 'cash' ? 'Khác' : selectedBookingPaymentMethod.shortLabel}
+                          {bookingPaymentMethod === 'cash' ? 'Online' : selectedBookingPaymentMethod.shortLabel}
                         </button>
                         <button
                           className={classNames('booking-payment-chip', bookingPromoPanelOpen && 'is-active')}
@@ -9310,6 +9797,38 @@ export default function HomePage() {
                           <p className="booking-payment-panel__note">Đang chọn: {bookingPanelPaymentSummary}</p>
                         </section>
                       ) : null}
+
+                      {(() => {
+                        const selectedOption = displayedRideOptions.find((r) => r.id === previewSelectedRideId);
+                        if (!selectedOption || !selectedOption.serviceFeeRaw) return null;
+                        const promoSavings = selectedBookingPromotion
+                          ? computePromoSavings(selectedOption.priceRaw, selectedBookingPromotion)
+                          : 0;
+                        const discountedFare = Math.max(0, selectedOption.priceRaw - (promoSavings ?? 0));
+                        const total = discountedFare + selectedOption.serviceFeeRaw;
+                        return (
+                          <div className="booking-price-breakdown">
+                            <div className="booking-price-breakdown__row">
+                              <span>Cước chuyến</span>
+                              <span>{selectedOption.price}</span>
+                            </div>
+                            {promoSavings > 0 ? (
+                              <div className="booking-price-breakdown__row booking-price-breakdown__row--discount">
+                                <span>Giảm giá</span>
+                                <span>− {promoSavings.toLocaleString('vi-VN')}đ</span>
+                              </div>
+                            ) : null}
+                            <div className="booking-price-breakdown__row">
+                              <span>Phí dịch vụ</span>
+                              <span>{selectedOption.serviceFeeFormatted}</span>
+                            </div>
+                            <div className="booking-price-breakdown__row booking-price-breakdown__row--total">
+                              <strong>Tổng thanh toán</strong>
+                              <strong>{total.toLocaleString('vi-VN')}đ</strong>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       <button
                         className="booking-primary-button"

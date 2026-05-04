@@ -3,6 +3,7 @@ import { notificationService } from '../services/notificationService';
 export const DRIVER_RIDE_REQUEST_QUEUE_STORAGE_KEY = 'smartride.pendingDriverRideRequests';
 export const DRIVER_RIDE_REQUEST_SEEN_NOTIFICATION_IDS_STORAGE_KEY = 'smartride.seenDriverRideRequestNotificationIds';
 export const DRIVER_RIDE_REQUEST_NEARBY_DISTANCE_KM = 3;
+export const DRIVER_RIDE_REQUEST_MAX_AGE_MS = 15 * 60 * 1000;
 
 function normalizeStorageScopeKey(value) {
   const normalizedValue = String(value ?? '').trim().toLowerCase();
@@ -47,6 +48,25 @@ function normalizeIdentifier(value) {
   const identifier = Number(value);
 
   return Number.isInteger(identifier) && identifier > 0 ? identifier : null;
+}
+
+function parseTimestamp(value) {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = Date.parse(String(value));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isDriverRideRequestFresh(request) {
+  const createdAtTimestamp = parseTimestamp(request?.createdAt);
+
+  if (!createdAtTimestamp) {
+    return true;
+  }
+
+  return Date.now() - createdAtTimestamp <= DRIVER_RIDE_REQUEST_MAX_AGE_MS;
 }
 
 function parseRideRequestContent(content) {
@@ -100,6 +120,7 @@ function normalizeNotificationRideRequest(notification) {
     title: notification.title,
     content: notification.content,
     createdAt: notification.createdAt,
+    sendAt: notification.sendAt,
     status: notification.status,
   });
 }
@@ -163,7 +184,7 @@ function normalizeRideRequest(request) {
     driverAccountId: String(sourceRequest.driverAccountId ?? request.driverAccountId ?? '').trim() || null,
     notificationTitle: String(request.title ?? sourceRequest.notificationTitle ?? '').trim(),
     notificationContent: String(request.content ?? sourceRequest.notificationContent ?? '').trim(),
-    createdAt: String(sourceRequest.createdAt ?? request.createdAt ?? new Date().toISOString()),
+    createdAt: String(sourceRequest.createdAt ?? request.createdAt ?? request.sendAt ?? new Date().toISOString()),
     customerName: String(sourceRequest.customerName ?? request.customerName ?? '').trim(),
     customerPhone: String(sourceRequest.customerPhone ?? request.customerPhone ?? '').trim(),
     vehicleLabel: String(sourceRequest.vehicleLabel ?? sourceRequest.rideTitle ?? request.vehicleLabel ?? request.rideTitle ?? '').trim(),
@@ -181,6 +202,8 @@ function normalizeRideRequest(request) {
       ? Number(sourceRequest.etaMinutes ?? request.etaMinutes)
       : null,
     priceFormatted: String(sourceRequest.priceFormatted ?? request.priceFormatted ?? '').trim(),
+    paymentMethod: String(sourceRequest.paymentMethod ?? request.paymentMethod ?? '').trim().toLowerCase() || 'cash',
+    paymentMethodLabel: String(sourceRequest.paymentMethodLabel ?? request.paymentMethodLabel ?? '').trim(),
     paymentSummary: String(sourceRequest.paymentSummary ?? request.paymentSummary ?? '').trim(),
     source: String(sourceRequest.source ?? request.source ?? (notificationId ? 'notification' : 'manual')).trim() || 'manual',
     status: String(sourceRequest.status ?? request.status ?? 'pending').trim().toLowerCase() || 'pending',
@@ -289,7 +312,10 @@ function readStoredQueue(scopeKey = '') {
       return [];
     }
 
-    return parsedValue.map(normalizeRideRequest).filter(Boolean);
+    return parsedValue
+      .map(normalizeRideRequest)
+      .filter(Boolean)
+      .filter((request) => isDriverRideRequestFresh(request));
   } catch {
     try {
       window.localStorage.removeItem(getDriverRideRequestQueueStorageKey(scopeKey));
@@ -319,7 +345,7 @@ export function readDriverRideRequestQueue(scopeKey = '') {
 
 async function readDriverRideRequestQueueFromNotifications({ signal, accountId } = {}) {
   const response = await notificationService.listNotifications(
-    { recipient: 'driver', status: 'sent' },
+    { recipient: 'driver', status: 'sent', accountId },
     { signal },
   );
   const normalizedAccountId = normalizeAccountId(accountId);
@@ -329,6 +355,7 @@ async function readDriverRideRequestQueueFromNotifications({ signal, accountId }
   return notifications
     .map(normalizeNotificationRideRequest)
     .filter(Boolean)
+    .filter((request) => isDriverRideRequestFresh(request))
     .filter((request) => !request.notificationId || !seenNotificationIds.has(request.notificationId))
     .filter((request) => !normalizedAccountId || !isOwnRideRequest(request, normalizedAccountId));
 }
@@ -341,12 +368,26 @@ export async function loadDriverRideRequestQueue(options = {}) {
     const localQueue = readStoredQueue(accountId);
     const mergedQueue = [...remoteQueue];
 
+    // Remote is the source of truth. Items in local with a notificationId that are NOT
+    // returned by remote are stale (booking cancelled / reassigned while offline).
+    // Clean them up from localStorage and skip adding to the merged queue.
+    const remoteRequestIds = new Set(remoteQueue.map((item) => item.requestId));
+
     localQueue
       .filter((request) => !accountId || !isOwnRideRequest(request, accountId))
       .forEach((request) => {
-      if (!mergedQueue.some((item) => item.requestId === request.requestId)) {
-        mergedQueue.push(request);
-      }
+        // If the item has a notificationId but is no longer in remote, it is stale.
+        if (request.notificationId && !remoteRequestIds.has(request.requestId)) {
+          removeDriverRideRequest(request.requestId, accountId);
+          if (request.notificationId) {
+            markDriverRideRequestNotificationSeen(request.notificationId, accountId);
+          }
+          return;
+        }
+
+        if (!mergedQueue.some((item) => item.requestId === request.requestId)) {
+          mergedQueue.push(request);
+        }
       });
 
     return mergedQueue;

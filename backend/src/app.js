@@ -22,6 +22,35 @@ function isLocalhostOrigin(origin) {
 	return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 }
 
+function isPrivateNetworkOrigin(origin) {
+	try {
+		const parsedOrigin = new URL(origin);
+		const hostname = String(parsedOrigin.hostname ?? '').trim();
+
+		if (!/^https?:$/i.test(parsedOrigin.protocol)) {
+			return false;
+		}
+
+		if (hostname === '::1') {
+			return true;
+		}
+
+		const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+
+		if (!ipv4Match) {
+			return false;
+		}
+
+		const [firstOctet, secondOctet] = ipv4Match.slice(1, 3).map((value) => Number(value));
+
+		return firstOctet === 10
+			|| (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31)
+			|| (firstOctet === 192 && secondOctet === 168);
+	} catch {
+		return false;
+	}
+}
+
 app.use(
 	cors({
 		origin(origin, callback) {
@@ -30,7 +59,7 @@ app.use(
 				return;
 			}
 
-			if (allowedOrigins.includes(origin) || isLocalhostOrigin(origin)) {
+			if (allowedOrigins.includes(origin) || isLocalhostOrigin(origin) || isPrivateNetworkOrigin(origin)) {
 				callback(null, true);
 				return;
 			}

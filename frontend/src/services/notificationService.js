@@ -11,6 +11,10 @@ function buildQueryString(params = {}) {
     searchParams.set('recipient', String(params.recipient));
   }
 
+  if (params.accountId) {
+    searchParams.set('accountId', String(params.accountId));
+  }
+
   if (params.keyword) {
     searchParams.set('keyword', String(params.keyword));
   }

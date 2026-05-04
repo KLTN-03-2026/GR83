@@ -9,9 +9,10 @@
     "dev": "node scripts/dev.mjs",
     "build": "npm run build --workspace frontend && npm run build --workspace backend",
     "dev:frontend": "npm run dev --workspace frontend",
-    "dev:backend": "npm run dev --workspace backend"
+    "dev:backend": "npm run dev --workspace backend",
+    "probe:momo": "npm run probe:momo --workspace backend"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.2.1"
   }
 }

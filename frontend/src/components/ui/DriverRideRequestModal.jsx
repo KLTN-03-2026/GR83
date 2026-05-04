@@ -24,6 +24,26 @@ function formatMinutes(minutes) {
   return `${normalizedMinutes} phút`;
 }
 
+function normalizePaymentMethod(paymentMethod, paymentSummary = '') {
+  const method = String(paymentMethod ?? '').trim().toLowerCase();
+
+  if (method === 'wallet') {
+    return 'wallet';
+  }
+
+  if (method === 'cash') {
+    return 'cash';
+  }
+
+  const summaryText = String(paymentSummary ?? '').trim().toLowerCase();
+
+  if (summaryText.includes('ví') || summaryText.includes('wallet')) {
+    return 'wallet';
+  }
+
+  return 'cash';
+}
+
 export default function DriverRideRequestModal({
   open = false,
   request = null,
@@ -109,6 +129,9 @@ export default function DriverRideRequestModal({
   const bookingCode = String(request.bookingCode ?? request.requestId ?? '').trim();
   const rideTitle = String(request.rideTitle ?? request.vehicleLabel ?? '').trim() || 'Cuốc xe mới';
   const priceLabel = String(request.priceFormatted ?? '').trim();
+  const paymentMethod = normalizePaymentMethod(request.paymentMethod, request.paymentSummary);
+  const isWalletPayment = paymentMethod === 'wallet';
+  const driverVisiblePriceLabel = isWalletPayment ? '0đ' : priceLabel;
   const etaLabel = formatMinutes(request.etaMinutes);
   const routeDistanceLabel = formatKilometers(request.routeDistanceKm ?? distanceKm);
   const distanceToPickupLabel = formatKilometers(distanceKm);
@@ -182,9 +205,9 @@ export default function DriverRideRequestModal({
                   <strong>{etaLabel || '--'}</strong>
                 </div>
 
-                <div className="driver-ride-request-modal__detail-item">
+                <div className={classNames('driver-ride-request-modal__detail-item', isWalletPayment && 'driver-ride-request-modal__detail-item--wallet-price')}>
                   <span className="driver-ride-request-modal__detail-label">Giá tiền</span>
-                  <strong>{priceLabel || '--'}</strong>
+                  <strong className={classNames(isWalletPayment && 'driver-ride-request-modal__wallet-price')}>{driverVisiblePriceLabel || '--'}</strong>
                 </div>
 
                 <div className="driver-ride-request-modal__detail-item">

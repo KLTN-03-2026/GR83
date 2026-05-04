@@ -1,4 +1,16 @@
-import { bookRide, getTripHistory, getTripInvoice, searchRides, submitRideRating, updateTripStatus } from '../services/ride.service.js';
+import {
+  bookRide,
+  getTripHistory,
+  getTripInvoice,
+  getTripPaymentStatus,
+  handleMoMoCallback,
+  rejectTripDispatch,
+  handleZaloPayCallback,
+  searchRides,
+  submitRideRating,
+  triggerMoMoMockPaymentCallback,
+  updateTripStatus,
+} from '../services/ride.service.js';
 import {
   createTripIssueReport,
   getAdminComplaintDetail,
@@ -68,20 +80,20 @@ function shouldDeliverRideEventToClient(event, accountId, roleCode) {
 
   if (normalizedRoleCode === 'Q3') {
     if (eventType === 'ride.booking.created') {
-      if (!normalizedAccountId || !eventCustomerAccountId) {
-        return true;
+      if (!normalizedAccountId || !eventDriverAccountId) {
+        return false;
       }
 
-      return eventCustomerAccountId !== normalizedAccountId;
+      return eventDriverAccountId === normalizedAccountId;
     }
 
     if (eventType === 'ride.trip.status.updated') {
       if (eventTripStatus === 'danhanchuyen' || eventTripStatus === 'dahuy' || eventTripStatus === 'cancelled') {
-        if (!normalizedAccountId || !eventCustomerAccountId) {
-          return true;
+        if (!normalizedAccountId || !eventDriverAccountId) {
+          return false;
         }
 
-        return eventCustomerAccountId !== normalizedAccountId;
+        return eventDriverAccountId === normalizedAccountId;
       }
 
       if (!normalizedAccountId || !eventDriverAccountId) {
@@ -92,6 +104,14 @@ function shouldDeliverRideEventToClient(event, accountId, roleCode) {
     }
 
     if (eventType === 'ride.trip.rating.updated') {
+      if (!normalizedAccountId || !eventDriverAccountId) {
+        return false;
+      }
+
+      return eventDriverAccountId === normalizedAccountId;
+    }
+
+    if (eventType === 'ride.payment.updated') {
       if (!normalizedAccountId || !eventDriverAccountId) {
         return false;
       }
@@ -197,6 +217,50 @@ export async function bookRideController(request, response, next) {
   }
 }
 
+export async function getTripPaymentStatusController(request, response, next) {
+  try {
+    const result = await getTripPaymentStatus({
+      ...request.query,
+      bookingCode: request.params.bookingCode ?? request.query?.bookingCode,
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function zaloPayCallbackController(request, response) {
+  const result = await handleZaloPayCallback(request.body ?? {});
+  response.status(200).json(result);
+}
+
+export async function momoCallbackController(request, response) {
+  const result = await handleMoMoCallback(request.body ?? {});
+  response.status(200).json(result);
+}
+
+export async function momoMockConfirmController(request, response, next) {
+  try {
+    const result = await triggerMoMoMockPaymentCallback({
+      ...request.body,
+      bookingCode: request.params.bookingCode ?? request.body?.bookingCode,
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
 export async function getTripHistoryController(request, response, next) {
   try {
     const result = await getTripHistory(request.query);
@@ -230,6 +294,23 @@ export async function getTripInvoiceController(request, response, next) {
 export async function updateTripStatusController(request, response, next) {
   try {
     const result = await updateTripStatus({
+      ...request.body,
+      bookingCode: request.params.bookingCode ?? request.body?.bookingCode,
+    });
+
+    response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function rejectTripDispatchController(request, response, next) {
+  try {
+    const result = await rejectTripDispatch({
       ...request.body,
       bookingCode: request.params.bookingCode ?? request.body?.bookingCode,
     });

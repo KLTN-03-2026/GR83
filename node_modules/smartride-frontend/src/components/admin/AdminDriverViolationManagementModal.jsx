@@ -4,6 +4,8 @@ import { closeIcon } from '../../assets/icons';
 import { adminDriverViolationService } from '../../services/adminDriverViolationService';
 import { connectRideEventStream } from '../../services/rideRealtimeService';
 
+const VIOLATION_REFRESH_INTERVAL_MS = 12000;
+
 const STATUS_OPTIONS = [
   { value: 'all', label: 'Tất cả trạng thái' },
   { value: 'pending', label: 'Chưa xử lí' },
@@ -69,6 +71,43 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
   const [formAction, setFormAction] = useState('warning');
   const [formNote, setFormNote] = useState('');
   const listAbortRef = useRef(null);
+  const detailAbortRef = useRef(null);
+
+  const loadViolationDetail = useCallback(async (violationId, { retries = 1 } = {}) => {
+    if (!violationId) {
+      return null;
+    }
+
+    if (detailAbortRef.current) {
+      detailAbortRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    detailAbortRef.current = controller;
+
+    const loadOnce = async () => {
+      const response = await adminDriverViolationService.getViolationDetail(violationId, { signal: controller.signal });
+      return response?.item ?? null;
+    };
+
+    try {
+      return await loadOnce();
+    } catch (error) {
+      if (error?.name === 'AbortError' || retries <= 0) {
+        throw error;
+      }
+
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 220);
+      });
+
+      return loadViolationDetail(violationId, { retries: retries - 1 });
+    } finally {
+      if (detailAbortRef.current === controller) {
+        detailAbortRef.current = null;
+      }
+    }
+  }, []);
 
   const fetchViolations = useCallback(({ silent = false } = {}) => {
     if (listAbortRef.current) {
@@ -118,9 +157,25 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
 
     fetchViolations();
 
+    const refreshTimerId = window.setInterval(() => {
+      fetchViolations({ silent: true });
+    }, VIOLATION_REFRESH_INTERVAL_MS);
+
+    // Trigger one extra silent refresh shortly after open to avoid transient first-open empty state.
+    const warmupTimerId = window.setTimeout(() => {
+      fetchViolations({ silent: true });
+    }, 450);
+
     return () => {
+      clearInterval(refreshTimerId);
+      clearTimeout(warmupTimerId);
+
       if (listAbortRef.current) {
         listAbortRef.current.abort();
+      }
+
+      if (detailAbortRef.current) {
+        detailAbortRef.current.abort();
       }
     };
   }, [fetchViolations, open]);
@@ -147,9 +202,7 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
         fetchViolations({ silent: true });
 
         if (detailOpen && Number(eventPayload?.violationId ?? 0) === Number(detailItem?.id ?? 0)) {
-          adminDriverViolationService.getViolationDetail(detailItem.id).then((response) => {
-            const item = response?.item ?? null;
-
+          loadViolationDetail(detailItem.id, { retries: 0 }).then((item) => {
             if (!item) {
               return;
             }
@@ -168,7 +221,7 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
     return () => {
       disconnect();
     };
-  }, [accountId, detailItem?.id, detailOpen, fetchViolations, onNotify, open]);
+  }, [accountId, detailItem?.id, detailOpen, fetchViolations, loadViolationDetail, onNotify, open]);
 
   useEffect(() => {
     if (open) {
@@ -192,24 +245,41 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
     setFormNote('');
   }, [open]);
 
-  const openDetail = async (violationId) => {
-    if (!violationId) {
+  const openDetail = async (violationTarget) => {
+    const violationId = Number(
+      typeof violationTarget === 'object' && violationTarget !== null
+        ? violationTarget.id
+        : violationTarget,
+    );
+
+    if (!Number.isFinite(violationId) || violationId <= 0) {
       return;
     }
+
+    const previewItem = typeof violationTarget === 'object' && violationTarget !== null ? violationTarget : null;
 
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailError('');
-    setDetailItem(null);
+    setDetailItem(previewItem);
+
+    if (previewItem) {
+      setFormSeverity(previewItem?.severity || 'medium');
+      setFormAction(previewItem?.resolutionAction || 'warning');
+      setFormNote(previewItem?.adminNote || '');
+    }
 
     try {
-      const response = await adminDriverViolationService.getViolationDetail(violationId);
-      const item = response?.item ?? null;
+      const item = await loadViolationDetail(violationId, { retries: 1 });
       setDetailItem(item);
       setFormSeverity(item?.severity || 'medium');
       setFormAction(item?.resolutionAction || 'warning');
       setFormNote(item?.adminNote || '');
     } catch (loadError) {
+      if (loadError?.name === 'AbortError') {
+        return;
+      }
+
       setDetailError(loadError?.message || 'Không thể tải chi tiết vi phạm.');
     } finally {
       setDetailLoading(false);
@@ -357,7 +427,7 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
                       </span>
                     </td>
                     <td>
-                      <button type="button" className="admin-driver-violation-modal__action" onClick={() => openDetail(item.id)}>
+                      <button type="button" className="admin-driver-violation-modal__action" onClick={() => openDetail(item)}>
                         Xem
                       </button>
                     </td>

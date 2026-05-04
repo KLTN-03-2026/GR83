@@ -6,6 +6,7 @@ import { isSqlServerConfigured } from './services/database.service.js';
 import { ensureNotificationSchema } from './services/notification.service.js';
 import { ensurePromotionSchema } from './services/promotion.service.js';
 import { ensureDriverSchema } from './services/driver.service.js';
+import { ensureCustomerWalletSchema } from './services/customer.wallet.service.js';
 import { startNotificationScheduler } from './services/notification.scheduler.js';
 import { ensureRideSchema } from './services/ride.service.js';
 import { ensureDriverViolationSchema } from './services/driverViolation.service.js';
@@ -21,6 +22,35 @@ function isLocalhostOrigin(origin) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 }
 
+function isPrivateNetworkOrigin(origin) {
+  try {
+    const parsedOrigin = new URL(origin);
+    const hostname = String(parsedOrigin.hostname ?? '').trim();
+
+    if (!/^https?:$/i.test(parsedOrigin.protocol)) {
+      return false;
+    }
+
+    if (hostname === '::1') {
+      return true;
+    }
+
+    const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+
+    if (!ipv4Match) {
+      return false;
+    }
+
+    const [firstOctet, secondOctet] = ipv4Match.slice(1, 3).map((value) => Number(value));
+
+    return firstOctet === 10
+      || (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31)
+      || (firstOctet === 192 && secondOctet === 168);
+  } catch {
+    return false;
+  }
+}
+
 function createCorsOriginChecker() {
   return (origin, callback) => {
     if (!origin) {
@@ -28,7 +58,7 @@ function createCorsOriginChecker() {
       return;
     }
 
-    if (allowedOrigins.includes(origin) || isLocalhostOrigin(origin)) {
+    if (allowedOrigins.includes(origin) || isLocalhostOrigin(origin) || isPrivateNetworkOrigin(origin)) {
       callback(null, true);
       return;
     }
@@ -79,7 +109,9 @@ function bootstrapSqlServerSchemas() {
       { label: 'thông báo', setupFn: ensureNotificationSchema, onSuccess: startNotificationScheduler },
       { label: 'ưu đãi', setupFn: ensurePromotionSchema },
       { label: 'chuyến xe', setupFn: ensureRideSchema },
-      { label: 'tài xế', setupFn: ensureDriverSchema },      { label: 'vi phạm tài xế', setupFn: ensureDriverViolationSchema },    ];
+      { label: 'tài xế', setupFn: ensureDriverSchema },
+      { label: 'ví khách hàng', setupFn: ensureCustomerWalletSchema },
+      { label: 'vi phạm tài xế', setupFn: ensureDriverViolationSchema },    ];
 
     const failedResults = [];
 

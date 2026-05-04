@@ -77,6 +77,26 @@ function normalizeText(value) {
     .replace(/\s+/g, ' ');
 }
 
+function normalizePaymentMethod(paymentMethod, paymentSummary = '') {
+  const method = normalizeText(paymentMethod).toLowerCase();
+
+  if (method === 'wallet') {
+    return 'wallet';
+  }
+
+  if (method === 'cash') {
+    return 'cash';
+  }
+
+  const summaryText = normalizeText(paymentSummary).toLowerCase();
+
+  if (summaryText.includes('ví') || summaryText.includes('wallet')) {
+    return 'wallet';
+  }
+
+  return 'cash';
+}
+
 function formatDateTime(value) {
   const parsedDate = value ? new Date(value) : null;
 
@@ -441,13 +461,16 @@ export default function DriverTripActionModal({
   const customerName = normalizeText(request.customerName ?? '') || 'Khách hàng';
   const customerInitials = getCustomerInitials(customerName);
   const customerPhone = normalizeText(request.customerPhone ?? '') || 'Chưa có số liên hệ';
-  const priceLabel = normalizeText(request.priceFormatted ?? '') || formatCurrency(request.price);
+  const paymentSummary = normalizeText(request.paymentSummary ?? '') || 'Thanh toán theo chuyến';
+  const paymentMethod = normalizePaymentMethod(request.paymentMethod, paymentSummary);
+  const priceLabel = paymentMethod === 'wallet'
+    ? '0đ'
+    : (normalizeText(request.priceFormatted ?? '') || formatCurrency(request.price));
   const bookingTimeLabel = formatDateTime(request.createdAt);
   const lastUpdatedLabel = formatDateTime(updatedAt);
   const rideTitle = normalizeText(request.rideTitle ?? request.vehicleLabel ?? '') || 'Cuốc xe mới';
   const vehicleLabel = getVehicleLabel(request.vehicle, request.vehicleLabel);
   const seatLabel = normalizeText(request.seatLabel ?? '') || 'Đang cập nhật';
-  const paymentSummary = normalizeText(request.paymentSummary ?? '') || 'Thanh toán theo chuyến';
   const chatAccountId = String(authenticatedAccountId ?? request.driverAccountId ?? '').trim();
   const statusLabel = getStatusLabel(tripStage);
   const statusTone = getStageTone(tripStage);

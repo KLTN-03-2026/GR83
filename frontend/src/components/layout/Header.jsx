@@ -14,6 +14,7 @@ import AdminVehicleChangeRequestModal from '../admin/AdminVehicleChangeRequestMo
 import TripHistoryModal from '../ui/TripHistoryModal';
 import DriverReviewModal from '../ui/DriverReviewModal';
 import DriverWalletModal from '../ui/DriverWalletModal';
+import CustomerWalletModal from '../ui/CustomerWalletModal';
 import DriverPersonalInfoModal from '../ui/DriverPersonalInfoModal';
 import DriverIncomeReportModal from '../ui/DriverIncomeReportModal';
 import DriverRideReceiveSettingsModal from '../ui/DriverRideReceiveSettingsModal';
@@ -52,7 +53,7 @@ const ROLE_MENUS = {
     Q2: {
       columns: 2,
       rows: [
-        [{ id: 'customer-booking', label: 'Đặt xe', action: 'booking-form' }, null],
+        [{ id: 'customer-booking', label: 'Đặt xe', action: 'booking-form' }, { id: 'customer-wallet', label: 'Ví' }],
         [{ id: 'customer-history', label: 'Lịch sử chuyến', requiresAuth: true }, null],
         [{ id: 'customer-profile', label: 'Quản lý tài khoản cá nhân', action: 'profile', requiresAuth: true }, null],
         [{ id: 'customer-driver-signup', label: 'Đăng ký Tài xế', action: 'driver-signup' }, null],
@@ -70,7 +71,7 @@ const ROLE_MENUS = {
           { id: 'driver-income-report', label: 'Quản lý thu nhập' },
         ],
         [
-          { id: 'driver-trips', label: 'Quản lý chuyến đi' },
+          { id: 'driver-trips', label: 'Lịch sử chuyến đi' },
           { id: 'driver-support-safety', label: 'Hỗ trợ và an toàn' },
         ],
       ],
@@ -318,6 +319,7 @@ export default function Header({
   const [adminComplaintModalOpen, setAdminComplaintModalOpen] = useState(false);
   const [adminDriverViolationModalOpen, setAdminDriverViolationModalOpen] = useState(false);
   const [driverWalletModalOpen, setDriverWalletModalOpen] = useState(false);
+  const [customerWalletModalOpen, setCustomerWalletModalOpen] = useState(false);
   const [driverProfileModalOpen, setDriverProfileModalOpen] = useState(false);
   const [driverIncomeModalOpen, setDriverIncomeModalOpen] = useState(false);
   const [driverDispatchModalOpen, setDriverDispatchModalOpen] = useState(false);
@@ -414,6 +416,10 @@ export default function Header({
       setDriverWalletModalOpen(false);
     }
 
+    if (normalizedRoleCode !== 'Q2' && customerWalletModalOpen) {
+      setCustomerWalletModalOpen(false);
+    }
+
     if (normalizedRoleCode !== 'Q3' && driverProfileModalOpen) {
       setDriverProfileModalOpen(false);
     }
@@ -462,6 +468,7 @@ export default function Header({
     driverSupportModalOpen,
     driverResolutionPopup,
     driverWalletModalOpen,
+    customerWalletModalOpen,
     adminVehicleModalOpen,
     notificationMenuOpen,
     normalizedRoleCode,
@@ -481,6 +488,7 @@ export default function Header({
       !adminComplaintModalOpen &&
       !adminDriverViolationModalOpen &&
       !driverWalletModalOpen &&
+      !customerWalletModalOpen &&
       !driverProfileModalOpen &&
       !driverIncomeModalOpen &&
       !driverDispatchModalOpen &&
@@ -519,6 +527,7 @@ export default function Header({
       setAdminComplaintModalOpen(false);
       setAdminDriverViolationModalOpen(false);
       setDriverWalletModalOpen(false);
+      setCustomerWalletModalOpen(false);
       setDriverProfileModalOpen(false);
       setDriverIncomeModalOpen(false);
       setDriverDispatchModalOpen(false);
@@ -550,6 +559,7 @@ export default function Header({
     adminComplaintModalOpen,
     adminDriverViolationModalOpen,
     driverWalletModalOpen,
+    customerWalletModalOpen,
     driverProfileModalOpen,
     driverIncomeModalOpen,
     driverDispatchModalOpen,
@@ -593,7 +603,15 @@ export default function Header({
     setNotificationError('');
 
     notificationService
-      .listNotifications({ recipient: notificationRecipient }, { signal: abortController.signal })
+      .listNotifications(
+        {
+          recipient: notificationRecipient,
+          // For individual roles (Q2/Q3) filter by their own accountId so they don't see
+          // notifications targeted at other accounts (e.g. warning notifications for other drivers).
+          ...(normalizedRoleCode !== 'Q1' && accountId ? { accountId } : {}),
+        },
+        { signal: abortController.signal },
+      )
       .then((response) => {
         if (!isActive) {
           return;
@@ -982,6 +1000,12 @@ export default function Header({
         setAdminRevenueModalOpen(true);
         return;
       }
+
+    if (normalizedRoleCode === 'Q2' && item.id === 'customer-wallet') {
+      setActiveRolePopupItem(null);
+      setCustomerWalletModalOpen(true);
+      return;
+    }
 
     if (normalizedRoleCode === 'Q3' && item.id === 'driver-wallet') {
       setActiveRolePopupItem(null);
@@ -1585,6 +1609,7 @@ export default function Header({
         <AdminRevenueReportModal
           open={adminRevenueModalOpen}
           onClose={() => setAdminRevenueModalOpen(false)}
+          accountId={accountId}
         />
 
       <DriverWalletModal
@@ -1597,6 +1622,14 @@ export default function Header({
           setDriverWalletModalOpen(false);
           setDriverIncomeModalOpen(true);
         }}
+      />
+
+      <CustomerWalletModal
+        open={customerWalletModalOpen}
+        onClose={() => setCustomerWalletModalOpen(false)}
+        customerId={accountId}
+        customerName={accountDisplayName}
+        onNotify={onNotify}
       />
 
       <DriverPersonalInfoModal

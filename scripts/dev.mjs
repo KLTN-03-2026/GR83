@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const services = [
   {
@@ -17,10 +18,82 @@ const services = [
 ];
 
 const children = new Map();
+const serviceStates = new Map();
 let shuttingDown = false;
+const MAX_RESTARTS_PER_SERVICE = 3;
+const RESTART_DELAY_MS = 1500;
 const FRONTEND_PORT = 5173;
 const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
 const AUTO_OPEN_CHROME = String(process.env.SMARTRIDE_AUTO_OPEN_CHROME ?? 'true').toLowerCase() !== 'false';
+const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
+const WORKSPACE_ROOT = join(SCRIPT_DIR, '..');
+const DEV_LOCK_FILE = join(WORKSPACE_ROOT, '.smartride-dev.lock');
+
+function isProcessAlive(pid) {
+  const numericPid = Number(pid);
+
+  if (!Number.isFinite(numericPid) || numericPid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(numericPid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireDevLock() {
+  if (existsSync(DEV_LOCK_FILE)) {
+    try {
+      const content = JSON.parse(readFileSync(DEV_LOCK_FILE, 'utf8'));
+
+      if (isProcessAlive(content?.pid)) {
+        console.error(
+          `A development session is already running (pid ${content.pid}). Stop that process first or remove ${DEV_LOCK_FILE}.`,
+        );
+        process.exit(1);
+      }
+    } catch {
+      // Ignore invalid lock content and replace it with a fresh lock.
+    }
+  }
+
+  writeFileSync(
+    DEV_LOCK_FILE,
+    JSON.stringify(
+      {
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+function releaseDevLock() {
+  if (!existsSync(DEV_LOCK_FILE)) {
+    return;
+  }
+
+  try {
+    const content = JSON.parse(readFileSync(DEV_LOCK_FILE, 'utf8'));
+
+    if (Number(content?.pid) !== process.pid) {
+      return;
+    }
+  } catch {
+    // If lock file is unreadable, still attempt to remove it.
+  }
+
+  try {
+    unlinkSync(DEV_LOCK_FILE);
+  } catch {
+    // Ignore if lock file already removed.
+  }
+}
 
 function sleep(milliseconds) {
   const sharedBuffer = new SharedArrayBuffer(4);
@@ -49,6 +122,59 @@ function parsePids(output) {
   return [...pids];
 }
 
+function parseNetstatListeningPids(output, port) {
+  const pids = new Set();
+  const escapedPort = String(port).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const listeningPattern = new RegExp(`:${escapedPort}\\s+.*LISTENING\\s+(\\d+)$`, 'i');
+
+  for (const line of String(output ?? '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const matched = listeningPattern.exec(trimmed);
+
+    if (!matched?.[1]) {
+      continue;
+    }
+
+    const pid = Number(matched[1]);
+
+    if (Number.isFinite(pid)) {
+      pids.add(pid);
+    }
+  }
+
+  return [...pids];
+}
+
+function listParentPids(pid, maxDepth = 6) {
+  if (process.platform !== 'win32') {
+    return [];
+  }
+
+  const numericPid = Number(pid);
+
+  if (!Number.isFinite(numericPid) || numericPid <= 0) {
+    return [];
+  }
+
+  const parentResult = spawnSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      `$pidValue=${numericPid}; $result=@(); for($i=0;$i -lt ${Number(maxDepth)} -and $pidValue -gt 0;$i++){ $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $pidValue" -ErrorAction SilentlyContinue; if(-not $proc){ break }; $parentId = [int]$proc.ParentProcessId; if($parentId -le 0){ break }; $result += $parentId; $pidValue = $parentId }; $result | ForEach-Object { $_ }`,
+    ],
+    { encoding: 'utf8' },
+  );
+
+  const parsedParents = parsePids(`${parentResult.stdout ?? ''}\n${parentResult.stderr ?? ''}`);
+  return parsedParents.filter((parentPid) => parentPid !== process.pid);
+}
+
 function listListeningPids(port) {
   if (process.platform === 'win32') {
     const powerShellResult = spawnSync(
@@ -71,7 +197,7 @@ function listListeningPids(port) {
       encoding: 'utf8',
     });
 
-    return parsePids(`${netstatResult.stdout ?? ''}\n${netstatResult.stderr ?? ''}`);
+    return parseNetstatListeningPids(`${netstatResult.stdout ?? ''}\n${netstatResult.stderr ?? ''}`, port);
   }
 
   const lsofResult = spawnSync('sh', ['-lc', `lsof -ti tcp:${port} 2>/dev/null || true`], { encoding: 'utf8' });
@@ -96,32 +222,54 @@ function killPid(pid) {
   }
 }
 
+function killPidWithParents(pid) {
+  const numericPid = Number(pid);
+
+  if (!Number.isFinite(numericPid) || numericPid <= 0) {
+    return;
+  }
+
+  const targets = new Set([numericPid, ...listParentPids(numericPid)]);
+
+  for (const targetPid of targets) {
+    if (targetPid === process.pid) {
+      continue;
+    }
+
+    killPid(targetPid);
+  }
+}
+
 function clearPort(port) {
   const pids = listListeningPids(port);
 
   for (const pid of pids) {
-    killPid(pid);
+    killPidWithParents(pid);
   }
 
   const deadline = Date.now() + 5000;
 
   while (Date.now() < deadline) {
     if (listListeningPids(port).length === 0) {
-      return;
+      return true;
     }
 
     sleep(200);
   }
 
-  console.warn(`Port ${port} is still busy after cleanup; starting anyway.`);
+  console.error(`Port ${port} is still busy after cleanup.`);
+  return false;
 }
 
 function clearDevPorts() {
+  let allPortsCleared = true;
+
   for (const port of [4000, FRONTEND_PORT]) {
-    clearPort(port);
+    allPortsCleared = clearPort(port) && allPortsCleared;
   }
 
   sleep(300);
+  return allPortsCleared;
 }
 
 function launchDetached(command, args, options = {}) {
@@ -251,6 +399,7 @@ function shutdown(exitCode = 0) {
   }
 
   shuttingDown = true;
+  releaseDevLock();
 
   for (const child of children.values()) {
     killProcessTree(child.pid);
@@ -261,9 +410,7 @@ function shutdown(exitCode = 0) {
   }, 200);
 }
 
-clearDevPorts();
-
-for (const service of services) {
+function spawnService(service) {
   const child = spawn(service.command, service.args, {
     shell: true,
     detached: process.platform !== 'win32',
@@ -277,8 +424,29 @@ for (const service of services) {
       return;
     }
 
+    children.delete(service.name);
+    const state = serviceStates.get(service.name) ?? { restartCount: 0 };
+
+    if (state.restartCount < MAX_RESTARTS_PER_SERVICE) {
+      state.restartCount += 1;
+      serviceStates.set(service.name, state);
+
+      console.warn(
+        `[${service.name}] exited unexpectedly${code !== null ? ` with code ${code}` : ''}${signal ? ` (${signal})` : ''}. Restarting (${state.restartCount}/${MAX_RESTARTS_PER_SERVICE})...`,
+      );
+
+      setTimeout(() => {
+        if (shuttingDown) {
+          return;
+        }
+
+        spawnService(service);
+      }, RESTART_DELAY_MS);
+      return;
+    }
+
     console.error(
-      `[${service.name}] exited unexpectedly${code !== null ? ` with code ${code}` : ''}${signal ? ` (${signal})` : ''}`,
+      `[${service.name}] exited unexpectedly${code !== null ? ` with code ${code}` : ''}${signal ? ` (${signal})` : ''}. Reached restart limit, stopping dev session.`,
     );
     shutdown(code ?? 1);
   });
@@ -291,6 +459,19 @@ for (const service of services) {
     console.error(`[${service.name}] failed to start`, error);
     shutdown(1);
   });
+}
+
+acquireDevLock();
+
+if (!clearDevPorts()) {
+  releaseDevLock();
+  console.error('Cannot start development servers because ports 4000/5173 are occupied. Stop old dev processes and try again.');
+  process.exit(1);
+}
+
+for (const service of services) {
+  serviceStates.set(service.name, { restartCount: 0 });
+  spawnService(service);
 }
 
 scheduleChromeOpen();

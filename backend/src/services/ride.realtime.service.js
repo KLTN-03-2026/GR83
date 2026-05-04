@@ -132,16 +132,74 @@ function getLatestRideLocation(bookingCode) {
   return latestRideLocationByBookingCode.get(normalizedBookingCode) ?? null;
 }
 
+function shouldDeliverRideEventToSocketClient(socket, event) {
+  const normalizedRoleCode = normalizeText(socket?.data?.roleCode).toUpperCase();
+  const normalizedAccountId = normalizeText(socket?.data?.accountId);
+  const eventType = normalizeText(event?.type).toLowerCase();
+  const eventCustomerAccountId = normalizeText(event?.customerAccountId ?? event?.booking?.customerAccountId);
+  const eventDriverAccountId = normalizeText(event?.driverAccountId ?? event?.booking?.driverAccountId);
+
+  if (normalizedRoleCode === 'Q1' || !normalizedRoleCode) {
+    return true;
+  }
+
+  if (normalizedRoleCode === 'Q2') {
+    return Boolean(normalizedAccountId && eventCustomerAccountId && normalizedAccountId === eventCustomerAccountId);
+  }
+
+  if (normalizedRoleCode === 'Q3') {
+    if (eventType === 'ride.booking.created') {
+      return Boolean(normalizedAccountId && eventDriverAccountId && normalizedAccountId === eventDriverAccountId);
+    }
+
+    return Boolean(normalizedAccountId && eventDriverAccountId && normalizedAccountId === eventDriverAccountId);
+  }
+
+  return false;
+}
+
 function broadcastRideEventToSocketClients(event) {
   if (!rideSocketServer || !event) {
     return;
   }
 
-  rideSocketServer.emit('ride.event', event);
+  for (const socket of rideSocketServer.sockets.sockets.values()) {
+    if (!shouldDeliverRideEventToSocketClient(socket, event)) {
+      continue;
+    }
+
+    socket.emit('ride.event', event);
+  }
 
   if (event.type === 'ride.location.updated') {
     storeLatestRideLocation(event);
   }
+}
+
+export function hasActiveRideSocketClient({ accountId = '', roleCode = '' } = {}) {
+  if (!rideSocketServer) {
+    return false;
+  }
+
+  const normalizedAccountId = normalizeText(accountId).toLowerCase();
+  const normalizedRoleCode = normalizeText(roleCode).toUpperCase();
+
+  for (const socket of rideSocketServer.sockets.sockets.values()) {
+    const socketAccountId = normalizeText(socket?.data?.accountId).toLowerCase();
+    const socketRoleCode = normalizeText(socket?.data?.roleCode).toUpperCase();
+
+    if (normalizedAccountId && socketAccountId !== normalizedAccountId) {
+      continue;
+    }
+
+    if (normalizedRoleCode && socketRoleCode !== normalizedRoleCode) {
+      continue;
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function normalizeRideEvent(event = {}) {

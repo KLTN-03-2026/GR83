@@ -7,6 +7,7 @@ import notificationRoutes from './notification.routes.js';
 import promotionRoutes from './promotion.routes.js';
 import placesRoutes from './places.routes.js';
 import rideRoutes from './ride.routes.js';
+import customerRoutes from './customer.routes.js';
 
 const router = Router();
 
@@ -14,6 +15,7 @@ router.use('/health', healthRoutes);
 router.use('/assistant', assistantRoutes);
 router.use('/auth', authRoutes);
 router.use('/drivers', driverRoutes);
+router.use('/customers', customerRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/promotions', promotionRoutes);
 router.use('/places', placesRoutes);

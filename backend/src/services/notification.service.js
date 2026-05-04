@@ -389,6 +389,7 @@ function buildNotificationListRequest(pool, filters = {}) {
   const conditions = [];
   const recipientFilter = parseRecipientFilter(filters.recipient);
   const statusFilter = parseStatusFilter(filters.status);
+  const accountIdFilter = normalizeText(filters.accountId);
   const keyword = normalizeText(filters.keyword);
 
   if (recipientFilter !== 'all') {
@@ -399,6 +400,11 @@ function buildNotificationListRequest(pool, filters = {}) {
   if (statusFilter !== 'all') {
     conditions.push('tb.TrangThai = @status');
     request.input('status', sql.VarChar(20), statusFilter);
+  }
+
+  if (accountIdFilter) {
+    conditions.push('LOWER(ISNULL(tb.MaTK, \'\')) = LOWER(@accountId)');
+    request.input('accountId', sql.VarChar(20), accountIdFilter);
   }
 
   if (keyword) {

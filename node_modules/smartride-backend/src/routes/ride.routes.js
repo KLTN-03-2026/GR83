@@ -9,18 +9,23 @@ import {
 	getTripIssueReportMetaController,
 	getTripHistoryController,
 	getTripInvoiceController,
+	getTripPaymentStatusController,
 	getTripMessagesController,
 	getAdminDriverViolationDetailController,
 	searchRideController,
 	streamRideEventsController,
 	sendTripMessageController,
 	listAdminDriverViolationsController,
+	momoCallbackController,
+	momoMockConfirmController,
+	rejectTripDispatchController,
 	submitRideRatingController,
 	updateTripStatusController,
 	getAdminComplaintDetailController,
 	listAdminComplaintRequestsController,
 	updateAdminComplaintDetailController,
 	updateAdminDriverViolationController,
+	zaloPayCallbackController,
 } from '../controllers/ride.controller.js';
 
 const router = Router();
@@ -78,9 +83,13 @@ function complaintUploadMiddleware(request, response, next) {
 }
 
 router.get('/stream', streamRideEventsController);
+router.post('/payments/zalopay/callback', zaloPayCallbackController);
+router.post('/payments/momo/callback', momoCallbackController);
+router.post('/:bookingCode/payments/momo/mock-confirm', momoMockConfirmController);
 router.get('/:bookingCode/issues/meta', getTripIssueReportMetaController);
 router.post('/:bookingCode/issues', complaintUploadMiddleware, createTripIssueReportController);
 router.get('/:bookingCode/invoice', getTripInvoiceController);
+router.get('/:bookingCode/payment-status', getTripPaymentStatusController);
 router.get('/issues/admin', listAdminComplaintRequestsController);
 router.get('/issues/admin/:complaintId', getAdminComplaintDetailController);
 router.patch('/issues/admin/:complaintId', updateAdminComplaintDetailController);
@@ -90,6 +99,7 @@ router.patch('/violations/admin/:violationId', updateAdminDriverViolationControl
 router.get('/:bookingCode/messages', getTripMessagesController);
 router.post('/:bookingCode/messages', sendTripMessageController);
 router.patch('/:bookingCode/status', updateTripStatusController);
+router.patch('/:bookingCode/dispatch/reject', rejectTripDispatchController);
 router.post('/:bookingCode/rating', submitRideRatingController);
 router.get('/history', getTripHistoryController);
 router.post('/search', searchRideController);

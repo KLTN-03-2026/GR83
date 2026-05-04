@@ -18,3 +18,8 @@ Xe liên tỉnh(đặt ghép theo chỗ ngồi)
 - MiniBus(16 chỗ):      120k/1 chỗ;    120k+24000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
 - Bus(30 chỗ):          110k/1 chỗ;    110k+22000/10km( không tính số lẻ, vd: 51km thì tính giá 50km, 56km thì tính giá 60km)
 
+Khách thanh toán: T: Tiền theo quãng đường, P:Phí theo loại xe
+                    S=T+P:Tổng tiền thanh toán
+Ví tài xế: V
+Tiền mặt: V=V-(S-P)*0,3
+Ví điện tử: V=V+(S-P)*0,7

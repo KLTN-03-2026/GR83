@@ -84,9 +84,13 @@ function DetailRow({ label, value }) {
 
 function TripDetailPanel({ trip, onClose }) {
   if (!trip) return null;
-  return (
-    <div className="atm-detail-overlay" onClick={onClose}>
-      <div className="atm-detail-panel" onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="atm-detail-layer" role="dialog" aria-modal="true" aria-label="Chi tiết chuyến đi" onClick={(event) => event.stopPropagation()}>
+      <div className="atm-detail-overlay" onClick={(event) => {
+        event.stopPropagation();
+        onClose?.();
+      }} />
+      <div className="atm-detail-panel" onClick={(event) => event.stopPropagation()}>
         <div className="atm-detail-panel__header">
           <h3>Chi tiết chuyến đi</h3>
           <button className="atm-detail-panel__close" onClick={onClose} aria-label="Đóng">
@@ -116,7 +120,8 @@ function TripDetailPanel({ trip, onClose }) {
           <DetailRow label="Hoàn thành lúc" value={formatDate(trip.completedAt)} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -142,6 +147,8 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
   const statusDropRef = useRef(null);
   const timeDropRef = useRef(null);
   const disconnectSocketRef = useRef(null);
+  const lastRideEventIdRef = useRef('');
+  const reloadTimerRef = useRef(null);
 
   const fetchData = useCallback(() => {
     if (abortRef.current) abortRef.current.abort();
@@ -165,6 +172,17 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
       .finally(() => setLoading(false));
   }, []);
 
+  const scheduleReload = useCallback(() => {
+    if (reloadTimerRef.current) {
+      window.clearTimeout(reloadTimerRef.current);
+    }
+
+    reloadTimerRef.current = window.setTimeout(() => {
+      reloadTimerRef.current = null;
+      fetchData();
+    }, 220);
+  }, [fetchData]);
+
   useEffect(() => {
     if (open) {
       fetchData();
@@ -182,26 +200,145 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
           roleCode: 'Q1',
           onEvent: (eventPayload) => {
             const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
-            if (eventType !== 'ride.trip.status.updated') return;
+            const eventId = String(eventPayload?.id ?? '').trim();
+
+            if (eventId && lastRideEventIdRef.current === eventId) {
+              return;
+            }
+
+            if (eventId) {
+              lastRideEventIdRef.current = eventId;
+            }
+
+            if (
+              eventType !== 'ride.trip.status.updated'
+              && eventType !== 'ride.payment.updated'
+              && eventType !== 'ride.booking.created'
+            ) {
+              return;
+            }
+
             const code = String(eventPayload?.bookingCode ?? '').trim();
-            if (!code) return;
+
+            if (!code) {
+              scheduleReload();
+              return;
+            }
+
+            if (eventType === 'ride.payment.updated') {
+              const newPaymentStatus = String(eventPayload?.paymentStatus ?? '').trim();
+              const newPaymentStatusLabel = String(eventPayload?.paymentStatusLabel ?? '').trim();
+
+              if (!newPaymentStatus) {
+                scheduleReload();
+                return;
+              }
+
+              setItems((prev) => prev.map((it) => {
+                if (it.bookingCode !== code) {
+                  return it;
+                }
+
+                const nextPaymentStatus = newPaymentStatus || it.paymentStatus;
+                const nextPaymentStatusLabel = newPaymentStatusLabel || it.paymentStatusLabel;
+
+                if (it.paymentStatus === nextPaymentStatus && it.paymentStatusLabel === nextPaymentStatusLabel) {
+                  return it;
+                }
+
+                return {
+                  ...it,
+                  paymentStatus: nextPaymentStatus,
+                  paymentStatusLabel: nextPaymentStatusLabel,
+                };
+              }));
+
+              setDetailTrip((prev) => {
+                if (!prev || prev.bookingCode !== code) {
+                  return prev;
+                }
+
+                const nextPaymentStatus = newPaymentStatus || prev.paymentStatus;
+                const nextPaymentStatusLabel = newPaymentStatusLabel || prev.paymentStatusLabel;
+
+                if (prev.paymentStatus === nextPaymentStatus && prev.paymentStatusLabel === nextPaymentStatusLabel) {
+                  return prev;
+                }
+
+                return {
+                  ...prev,
+                  paymentStatus: nextPaymentStatus,
+                  paymentStatusLabel: nextPaymentStatusLabel,
+                };
+              });
+
+              return;
+            }
+
             const newStatus = String(eventPayload?.tripStatus ?? '').trim();
             const newLabel = String(eventPayload?.tripStatusLabel ?? '').trim();
             const newTone = String(eventPayload?.tripStatusTone ?? '').trim();
-            if (!newStatus) return;
-            setItems((prev) =>
-              prev.map((it) =>
-                it.bookingCode === code
-                  ? { ...it, tripStatus: newStatus, tripStatusLabel: newLabel, tripStatusTone: newTone, status: newStatus, statusLabel: newLabel, statusTone: newTone }
-                  : it,
-              ),
-            );
-            // Also update detail panel if open
-            setDetailTrip((prev) =>
-              prev?.bookingCode === code
-                ? { ...prev, tripStatus: newStatus, tripStatusLabel: newLabel, tripStatusTone: newTone }
-                : prev,
-            );
+
+            if (!newStatus) {
+              scheduleReload();
+              return;
+            }
+
+            setItems((prev) => prev.map((it) => {
+              if (it.bookingCode !== code) {
+                return it;
+              }
+
+              const nextStatus = newStatus || it.tripStatus;
+              const nextLabel = newLabel || it.tripStatusLabel || it.statusLabel;
+              const nextTone = newTone || it.tripStatusTone || it.statusTone;
+
+              if (
+                it.tripStatus === nextStatus
+                && it.status === nextStatus
+                && it.tripStatusLabel === nextLabel
+                && it.statusLabel === nextLabel
+                && it.tripStatusTone === nextTone
+                && it.statusTone === nextTone
+              ) {
+                return it;
+              }
+
+              return {
+                ...it,
+                tripStatus: nextStatus,
+                tripStatusLabel: nextLabel,
+                tripStatusTone: nextTone,
+                status: nextStatus,
+                statusLabel: nextLabel,
+                statusTone: nextTone,
+              };
+            }));
+
+            setDetailTrip((prev) => {
+              if (!prev || prev.bookingCode !== code) {
+                return prev;
+              }
+
+              const nextStatus = newStatus || prev.tripStatus;
+              const nextLabel = newLabel || prev.tripStatusLabel;
+              const nextTone = newTone || prev.tripStatusTone;
+
+              if (
+                prev.tripStatus === nextStatus
+                && prev.tripStatusLabel === nextLabel
+                && prev.tripStatusTone === nextTone
+              ) {
+                return prev;
+              }
+
+              return {
+                ...prev,
+                tripStatus: nextStatus,
+                tripStatusLabel: nextLabel,
+                tripStatusTone: nextTone,
+              };
+            });
           },
         });
       }
@@ -215,6 +352,10 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
       setError('');
       setDetailTrip(null);
       setCancelTarget(null);
+      if (reloadTimerRef.current) {
+        window.clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
     }
 
     return () => {
@@ -222,8 +363,38 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
         disconnectSocketRef.current();
         disconnectSocketRef.current = null;
       }
+
+      if (reloadTimerRef.current) {
+        window.clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
     };
-  }, [open, fetchData, accountId]);
+  }, [open, fetchData, accountId, scheduleReload]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handler = (event) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      if (detailTrip) {
+        setDetailTrip(null);
+        return;
+      }
+
+      if (cancelTarget) {
+        setCancelTarget(null);
+        return;
+      }
+
+      onClose?.();
+    };
+
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [cancelTarget, detailTrip, onClose, open]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -406,8 +577,6 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
                     onClick={() => {
                       setDateFrom('');
                       setDateTo('');
-                      setDateFromPickerOpen(false);
-                      setDateToPickerOpen(false);
                       setPage(1);
                     }}
                   >

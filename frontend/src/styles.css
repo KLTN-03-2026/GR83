@@ -623,6 +623,71 @@ svg {
   color: #1a7d44;
 }
 
+/* Price breakdown in booking preview modal */
+.booking-price-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem;
+  background: #f4f8ef;
+  border: 1.5px solid #c8e6a0;
+  border-radius: 0.75rem;
+  font-size: 0.92rem;
+}
+
+.booking-price-breakdown__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  color: #444;
+}
+
+.booking-price-breakdown__row--discount {
+  color: #1a7d44;
+}
+
+.booking-price-breakdown__row--total {
+  padding-top: 0.4rem;
+  border-top: 1.5px solid #c8e6a0;
+  color: #111;
+  font-size: 1rem;
+}
+
+/* Price breakdown in homepage booking-results panel */
+.booking-results__item-fee {
+  color: #888;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.booking-results__price-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0.25rem;
+  padding: 0.6rem 0.85rem;
+  background: #f4f8ef;
+  border: 1.5px solid #c8e6a0;
+  border-radius: 0.65rem;
+  font-size: 0.9rem;
+}
+
+.booking-results__price-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  color: #555;
+}
+
+.booking-results__price-breakdown-row--total {
+  padding-top: 0.35rem;
+  border-top: 1.5px solid #c8e6a0;
+  color: #111;
+  font-size: 0.95rem;
+}
+
 .booking-top-tabs {
   display: flex;
   justify-content: flex-end;
@@ -5538,9 +5603,45 @@ svg {
 
 .trip-history-modal__toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(15rem, 0.7fr) minmax(14rem, 0.85fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(15rem, 0.7fr) minmax(14rem, 0.85fr) auto;
   gap: 0.55rem;
   align-items: end;
+}
+
+.trip-history-modal__reload-button {
+  min-height: 2.65rem;
+  border-radius: 0.82rem;
+  border: 1px solid rgba(15, 22, 30, 0.12);
+  background: linear-gradient(180deg, #ffffff 0%, #f3f8fd 100%);
+  color: #233244;
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(15, 22, 30, 0.08);
+}
+
+.trip-history-modal__reload-button:hover:not(:disabled) {
+  border-color: rgba(83, 112, 255, 0.35);
+  color: #304dd6;
+}
+
+.trip-history-modal__reload-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.trip-history-modal__reload-button,
+.admin-payment-modal__reload-button {
+  justify-self: end;
+}
+
+.trip-history-modal__reload-button.atm-toolbar__refresh,
+.admin-payment-modal__reload-button.atm-toolbar__refresh,
+.revenue-modal__reload-btn.atm-toolbar__refresh {
+  padding: 0;
+  min-height: 36px;
+  line-height: 1;
 }
 
 .trip-history-modal__field {
@@ -6770,6 +6871,28 @@ svg {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 0.58rem;
+}
+
+.admin-payment-modal__reload-button {
+  min-height: 2.95rem;
+  border-radius: 0.82rem;
+  border: 1px solid rgba(16, 24, 32, 0.14);
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
+  color: #1d4ed8;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 0.9rem;
+}
+
+.admin-payment-modal__reload-button:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: #edf4ff;
+}
+
+.admin-payment-modal__reload-button:disabled {
+  opacity: 0.64;
+  cursor: wait;
 }
 
 .admin-payment-modal__field {
@@ -10425,6 +10548,11 @@ svg {
   gap: 0.22rem;
 }
 
+.driver-ride-request-modal__detail-item--wallet-price {
+  border-color: rgba(15, 118, 110, 0.35);
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.92), rgba(236, 252, 203, 0.86));
+}
+
 .driver-ride-request-modal__detail-item--full {
   grid-column: 1 / -1;
 }
@@ -10437,6 +10565,17 @@ svg {
 
 .driver-ride-request-modal__status-text {
   color: #e83c3c !important;
+}
+
+.driver-ride-request-modal__wallet-price {
+  color: #0f766e !important;
+}
+
+.driver-ride-request-modal__wallet-note {
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .driver-ride-request-modal__right {
@@ -18151,6 +18290,27 @@ svg {
     background: #4f46e5;
   }
 
+  .revenue-modal__reload-btn {
+    background: #e2e8f8;
+    color: #1e3a8a;
+    border: 1px solid #c8d3f1;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    height: 36px;
+  }
+
+  .revenue-modal__reload-btn:hover:not(:disabled) {
+    background: #d6e4ff;
+  }
+
+  .revenue-modal__reload-btn:disabled {
+    opacity: 0.62;
+    cursor: wait;
+  }
+
   .revenue-modal__summary {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -21397,15 +21557,21 @@ svg {
 }
 
 /* Detail panel */
-.atm-detail-overlay {
+.atm-detail-layer {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
   z-index: 9100;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
+}
+
+.atm-detail-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 0;
 }
 
 .atm-detail-panel {
@@ -21418,6 +21584,8 @@ svg {
   flex-direction: column;
   overflow: hidden;
   box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  position: relative;
+  z-index: 1;
 }
 
 .atm-detail-panel__header {

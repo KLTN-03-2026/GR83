@@ -72,6 +72,17 @@ function buildTripIssueMetaQueryString(params = {}) {
   return queryString ? `?${queryString}` : '';
 }
 
+function buildTripPaymentStatusQueryString(params = {}) {
+  const searchParams = new URLSearchParams();
+
+  if (params.accountId) {
+    searchParams.set('accountId', String(params.accountId));
+  }
+
+  const queryString = searchParams.toString();
+  return queryString ? `?${queryString}` : '';
+}
+
 export const rideService = {
   getHealth() {
     return request('/health');
@@ -86,6 +97,18 @@ export const rideService = {
     return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/invoice${buildTripInvoiceQueryString(params)}`, {
       method: 'GET',
       signal,
+    });
+  },
+  getTripPaymentStatus(bookingCode, params = {}, { signal } = {}) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/payment-status${buildTripPaymentStatusQueryString(params)}`, {
+      method: 'GET',
+      signal,
+    });
+  },
+  confirmMoMoMockPayment(bookingCode, payload = {}) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/payments/momo/mock-confirm`, {
+      method: 'POST',
+      body: JSON.stringify(payload && typeof payload === 'object' ? payload : {}),
     });
   },
   searchRide(payload) {
@@ -119,6 +142,12 @@ export const rideService = {
         status,
         ...(metadata && typeof metadata === 'object' ? metadata : {}),
       }),
+    });
+  },
+  rejectTripDispatch(bookingCode, payload = {}) {
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/dispatch/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload && typeof payload === 'object' ? payload : {}),
     });
   },
   submitTripRating(bookingCode, payload = {}) {

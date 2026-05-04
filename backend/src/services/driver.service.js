@@ -889,14 +889,14 @@ async function ensureDriverWalletRow(driverId, transaction = null) {
   const queryResult = await request
     .input('driverId', sql.VarChar(20), normalizedDriverId)
     .query(`
-      IF NOT EXISTS (SELECT 1 FROM dbo.TaiXeVi WHERE MaTK = @driverId)
+      IF NOT EXISTS (SELECT 1 FROM dbo.Vi WHERE MaTK = @driverId)
       BEGIN
-        INSERT INTO dbo.TaiXeVi (MaTK, SoDu)
+        INSERT INTO dbo.Vi (MaTK, SoDu)
         VALUES (@driverId, 0);
       END
 
       SELECT TOP 1 MaVi, MaTK, SoDu, NgayTao, NgayCapNhat
-      FROM dbo.TaiXeVi
+      FROM dbo.Vi
       WHERE MaTK = @driverId;
     `);
 
@@ -932,19 +932,19 @@ async function appendWalletTransaction(transaction, payload = {}) {
       DECLARE @walletAfter INT;
 
       SELECT @walletBefore = SoDu
-      FROM dbo.TaiXeVi
+      FROM dbo.Vi
       WHERE MaTK = @driverId;
 
-      UPDATE dbo.TaiXeVi
+      UPDATE dbo.Vi
       SET SoDu = SoDu + @amount,
           NgayCapNhat = SYSDATETIME()
       WHERE MaTK = @driverId;
 
       SELECT @walletAfter = SoDu
-      FROM dbo.TaiXeVi
+      FROM dbo.Vi
       WHERE MaTK = @driverId;
 
-      INSERT INTO dbo.TaiXeGiaoDichVi
+      INSERT INTO dbo.GiaoDichVi
       (
         MaTK,
         LoaiGiaoDich,
@@ -996,7 +996,7 @@ async function getDriverWalletSnapshot(driverId) {
       .input('driverId', sql.VarChar(20), normalizedDriverId)
       .query(`
         SELECT TOP 30 *
-        FROM dbo.TaiXeGiaoDichVi
+        FROM dbo.GiaoDichVi
         WHERE MaTK = @driverId
         ORDER BY NgayTao DESC, MaGD DESC;
       `);
@@ -1686,28 +1686,28 @@ export async function ensureDriverSchema() {
   const pool = await getSqlServerPool();
 
   await pool.request().query(`
-    IF OBJECT_ID(N'dbo.TaiXeVi', N'U') IS NULL
+    IF OBJECT_ID(N'dbo.Vi', N'U') IS NULL
     BEGIN
-      CREATE TABLE dbo.TaiXeVi
+      CREATE TABLE dbo.Vi
       (
         MaVi         INT           IDENTITY(1,1) NOT NULL,
         MaTK         VARCHAR(20)   NOT NULL,
-        SoDu         INT           NOT NULL CONSTRAINT DF_TaiXeVi_SoDu DEFAULT 0,
-        NgayTao      DATETIME2(0)  NOT NULL CONSTRAINT DF_TaiXeVi_NgayTao DEFAULT SYSDATETIME(),
-        NgayCapNhat  DATETIME2(0)  NOT NULL CONSTRAINT DF_TaiXeVi_NgayCapNhat DEFAULT SYSDATETIME(),
-        CONSTRAINT PK_TaiXeVi PRIMARY KEY (MaVi),
-        CONSTRAINT UQ_TaiXeVi_MaTK UNIQUE (MaTK),
-        CONSTRAINT FK_TaiXeVi_TaiKhoan FOREIGN KEY (MaTK)
+        SoDu         INT           NOT NULL CONSTRAINT DF_Vi_SoDu DEFAULT 0,
+        NgayTao      DATETIME2(0)  NOT NULL CONSTRAINT DF_Vi_NgayTao DEFAULT SYSDATETIME(),
+        NgayCapNhat  DATETIME2(0)  NOT NULL CONSTRAINT DF_Vi_NgayCapNhat DEFAULT SYSDATETIME(),
+        CONSTRAINT PK_Vi PRIMARY KEY (MaVi),
+        CONSTRAINT UQ_Vi_MaTK UNIQUE (MaTK),
+        CONSTRAINT FK_Vi_TaiKhoan FOREIGN KEY (MaTK)
           REFERENCES dbo.TaiKhoan(MaTK)
           ON UPDATE CASCADE
           ON DELETE CASCADE,
-        CONSTRAINT CK_TaiXeVi_SoDu CHECK (SoDu >= 0)
+        CONSTRAINT CK_Vi_SoDu CHECK (SoDu >= 0)
       );
     END;
 
-    IF OBJECT_ID(N'dbo.TaiXeGiaoDichVi', N'U') IS NULL
+    IF OBJECT_ID(N'dbo.GiaoDichVi', N'U') IS NULL
     BEGIN
-      CREATE TABLE dbo.TaiXeGiaoDichVi
+      CREATE TABLE dbo.GiaoDichVi
       (
         MaGD            INT            IDENTITY(1,1) NOT NULL,
         MaTK            VARCHAR(20)    NOT NULL,
@@ -1719,28 +1719,28 @@ export async function ensureDriverSchema() {
         SoDTNguoiNhan   VARCHAR(20)    NULL,
         SoDTNguoiGui    VARCHAR(20)    NULL,
         MaThamChieu     VARCHAR(40)    NULL,
-        TrangThai       VARCHAR(20)    NOT NULL CONSTRAINT DF_TaiXeGiaoDichVi_TrangThai DEFAULT 'completed',
-        NgayTao         DATETIME2(0)   NOT NULL CONSTRAINT DF_TaiXeGiaoDichVi_NgayTao DEFAULT SYSDATETIME(),
-        CONSTRAINT PK_TaiXeGiaoDichVi PRIMARY KEY (MaGD),
-        CONSTRAINT FK_TaiXeGiaoDichVi_TaiKhoan FOREIGN KEY (MaTK)
+        TrangThai       VARCHAR(20)    NOT NULL CONSTRAINT DF_GiaoDichVi_TrangThai DEFAULT 'completed',
+        NgayTao         DATETIME2(0)   NOT NULL CONSTRAINT DF_GiaoDichVi_NgayTao DEFAULT SYSDATETIME(),
+        CONSTRAINT PK_GiaoDichVi PRIMARY KEY (MaGD),
+        CONSTRAINT FK_GiaoDichVi_TaiKhoan FOREIGN KEY (MaTK)
           REFERENCES dbo.TaiKhoan(MaTK)
           ON UPDATE CASCADE
           ON DELETE CASCADE,
-        CONSTRAINT CK_TaiXeGiaoDichVi_Loai CHECK (LoaiGiaoDich IN ('topup', 'transfer', 'receive', 'adjustment')),
-        CONSTRAINT CK_TaiXeGiaoDichVi_TrangThai CHECK (TrangThai IN ('completed', 'pending', 'failed')),
-        CONSTRAINT CK_TaiXeGiaoDichVi_SoTien CHECK (SoTien <> 0),
-        CONSTRAINT CK_TaiXeGiaoDichVi_SoDuTruoc CHECK (SoDuTruoc >= 0),
-        CONSTRAINT CK_TaiXeGiaoDichVi_SoDuSau CHECK (SoDuSau >= 0)
+        CONSTRAINT CK_GiaoDichVi_Loai CHECK (LoaiGiaoDich IN ('topup', 'transfer', 'receive', 'adjustment')),
+        CONSTRAINT CK_GiaoDichVi_TrangThai CHECK (TrangThai IN ('completed', 'pending', 'failed')),
+        CONSTRAINT CK_GiaoDichVi_SoTien CHECK (SoTien <> 0),
+        CONSTRAINT CK_GiaoDichVi_SoDuTruoc CHECK (SoDuTruoc >= 0),
+        CONSTRAINT CK_GiaoDichVi_SoDuSau CHECK (SoDuSau >= 0)
       );
     END;
 
-    INSERT INTO dbo.TaiXeVi (MaTK, SoDu)
+    INSERT INTO dbo.Vi (MaTK, SoDu)
     SELECT tk.MaTK, 0
     FROM dbo.TaiKhoan AS tk
     WHERE tk.MaQuyen = 'Q3'
       AND NOT EXISTS (
         SELECT 1
-        FROM dbo.TaiXeVi AS tv
+        FROM dbo.Vi AS tv
         WHERE tv.MaTK = tk.MaTK
       );
 
@@ -1778,12 +1778,12 @@ export async function ensureDriverSchema() {
     IF NOT EXISTS (
       SELECT 1
       FROM sys.indexes
-      WHERE name = N'IX_TaiXeGiaoDichVi_MaTK_NgayTao'
-        AND object_id = OBJECT_ID(N'dbo.TaiXeGiaoDichVi')
+      WHERE name = N'IX_GiaoDichVi_MaTK_NgayTao'
+        AND object_id = OBJECT_ID(N'dbo.GiaoDichVi')
     )
     BEGIN
-      CREATE INDEX IX_TaiXeGiaoDichVi_MaTK_NgayTao
-      ON dbo.TaiXeGiaoDichVi (MaTK, NgayTao DESC, MaGD DESC);
+      CREATE INDEX IX_GiaoDichVi_MaTK_NgayTao
+      ON dbo.GiaoDichVi (MaTK, NgayTao DESC, MaGD DESC);
     END;
 
     IF NOT EXISTS (
@@ -1809,17 +1809,17 @@ export async function ensureDriverSchema() {
       WHERE TrangThai = 'pending';
     END;
 
-    IF OBJECT_ID(N'dbo.TR_TaiXeVi_SetNgayCapNhat', N'TR') IS NULL
+    IF OBJECT_ID(N'dbo.TR_Vi_SetNgayCapNhat', N'TR') IS NULL
     BEGIN
-      EXEC('CREATE TRIGGER dbo.TR_TaiXeVi_SetNgayCapNhat
-      ON dbo.TaiXeVi
+      EXEC('CREATE TRIGGER dbo.TR_Vi_SetNgayCapNhat
+      ON dbo.Vi
       AFTER UPDATE
       AS
       BEGIN
         SET NOCOUNT ON;
         UPDATE target
         SET target.NgayCapNhat = SYSDATETIME()
-        FROM dbo.TaiXeVi AS target
+        FROM dbo.Vi AS target
         INNER JOIN inserted AS i ON i.MaVi = target.MaVi;
       END');
     END;
@@ -1868,7 +1868,7 @@ export async function listDriverWalletTransactions(driverId, filters = {}) {
 
   const queryResult = await request.query(`
     SELECT TOP 100 *
-    FROM dbo.TaiXeGiaoDichVi
+    FROM dbo.GiaoDichVi
     WHERE ${whereConditions.join(' AND ')}
     ORDER BY NgayTao DESC, MaGD DESC;
   `);

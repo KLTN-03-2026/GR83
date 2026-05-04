@@ -1,11 +1,12 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { format as formatDate, isValid, parse } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { closeIcon } from '../../assets/icons';
 import { rideService } from '../../services/rideService';
+import { connectRideEventStream } from '../../services/rideRealtimeService';
 import { classNames } from '../../utils/classNames';
 import CustomerTripIssueReportModal from './CustomerTripIssueReportModal';
 import TripHistoryDetailModal from './TripHistoryDetailModal';
@@ -573,6 +574,9 @@ export default function TripHistoryServerModal({
   const [historySummary, setHistorySummary] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const historyAbortRef = useRef(null);
+  const lastRealtimeEventIdRef = useRef('');
+  const realtimeReloadTimerRef = useRef(null);
 
   const resolvedAccountId = useMemo(() => normalizeText(accountId), [accountId]);
   const resolvedIdentifier = useMemo(() => normalizeText(accountIdentifier), [accountIdentifier]);
@@ -641,6 +645,72 @@ export default function TripHistoryServerModal({
     [historyItems, historySummary, normalizedMode],
   );
 
+  const loadHistory = useCallback(async ({ resetData = false } = {}) => {
+    if (!open) {
+      return;
+    }
+
+    if (historyAbortRef.current) {
+      historyAbortRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    historyAbortRef.current = controller;
+
+    setHistoryLoading(true);
+    setHistoryError('');
+
+    if (resetData) {
+      setHistoryItems([]);
+      setHistorySummary(null);
+    }
+
+    try {
+      const response = await rideService.getTripHistory(
+        {
+          accountId: resolvedAccountId,
+          identifier: resolvedIdentifier,
+          roleCode: normalizedMode === 'driver' ? 'Q3' : 'Q2',
+          limit: 24,
+        },
+        { signal: controller.signal },
+      );
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      const normalizedItems = extractTripHistoryItems(response).map((item, index) => normalizeTripHistoryItem(item, index + 1));
+      const normalizedSummary = normalizeTripHistorySummary(response?.summary ?? response?.data?.summary ?? {}, normalizedItems);
+
+      setHistoryItems(normalizedItems);
+      setHistorySummary(normalizedSummary);
+    } catch (error) {
+      if (error?.name === 'AbortError' || controller.signal.aborted) {
+        return;
+      }
+
+      setHistoryItems([]);
+      setHistorySummary(null);
+      setHistoryError(error?.message || 'Không thể tải lịch sử chuyến từ server.');
+    } finally {
+      if (!controller.signal.aborted) {
+        setHistoryLoading(false);
+      }
+    }
+  }, [normalizedMode, open, resolvedAccountId, resolvedIdentifier]);
+
+  const scheduleRealtimeReload = useCallback(() => {
+    if (realtimeReloadTimerRef.current) {
+      window.clearTimeout(realtimeReloadTimerRef.current);
+    }
+
+    realtimeReloadTimerRef.current = window.setTimeout(() => {
+      realtimeReloadTimerRef.current = null;
+      void loadHistory();
+    }, 220);
+  }, [loadHistory]);
+
   useEffect(() => {
     if (!open) {
       return undefined;
@@ -654,54 +724,68 @@ export default function TripHistoryServerModal({
     setIssueReportTripId('');
     setInvoiceTrip(null);
     setInvoiceLoading(false);
-    setHistoryItems([]);
-    setHistorySummary(null);
     setHistoryError('');
-    setHistoryLoading(true);
 
-    const controller = new AbortController();
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    void loadHistory({ resetData: true });
 
-    const loadHistory = async () => {
-      try {
-        const response = await rideService.getTripHistory(
-          {
-            accountId: resolvedAccountId,
-            identifier: resolvedIdentifier,
-            roleCode: normalizedMode === 'driver' ? 'Q3' : 'Q2',
-            limit: 24,
-          },
-          { signal: controller.signal },
-        );
+    return () => {
+      if (historyAbortRef.current) {
+        historyAbortRef.current.abort();
+      }
 
-        const normalizedItems = extractTripHistoryItems(response).map((item, index) => normalizeTripHistoryItem(item, index + 1));
-        const normalizedSummary = normalizeTripHistorySummary(response?.summary ?? response?.data?.summary ?? {}, normalizedItems);
+      if (realtimeReloadTimerRef.current) {
+        window.clearTimeout(realtimeReloadTimerRef.current);
+        realtimeReloadTimerRef.current = null;
+      }
 
-        setHistoryItems(normalizedItems);
-        setHistorySummary(normalizedSummary);
-      } catch (error) {
-        if (error?.name === 'AbortError') {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [loadHistory, open]);
+
+  useEffect(() => {
+    if (!open || !resolvedAccountId) {
+      return undefined;
+    }
+
+    const disconnectRideEventStream = connectRideEventStream({
+      accountId: resolvedAccountId,
+      roleCode: normalizedMode === 'driver' ? 'Q3' : 'Q2',
+      onEvent: (eventPayload = {}) => {
+        const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
+
+        if (
+          eventType !== 'ride.booking.created'
+          && eventType !== 'ride.trip.status.updated'
+          && eventType !== 'ride.payment.updated'
+        ) {
           return;
         }
 
-        setHistoryItems([]);
-        setHistorySummary(null);
-        setHistoryError(error?.message || 'Không thể tải lịch sử chuyến từ server.');
-      } finally {
-        if (!controller.signal.aborted) {
-          setHistoryLoading(false);
-        }
-      }
-    };
+        const eventId = String(eventPayload?.id ?? '').trim();
 
-    loadHistory();
+        if (eventId && lastRealtimeEventIdRef.current === eventId) {
+          return;
+        }
+
+        if (eventId) {
+          lastRealtimeEventIdRef.current = eventId;
+        }
+
+        scheduleRealtimeReload();
+      },
+    });
 
     return () => {
-      controller.abort();
-      document.body.style.overflow = previousOverflow;
+      disconnectRideEventStream();
+
+      if (realtimeReloadTimerRef.current) {
+        window.clearTimeout(realtimeReloadTimerRef.current);
+        realtimeReloadTimerRef.current = null;
+      }
     };
-  }, [normalizedMode, onClose, open, resolvedAccountId, resolvedIdentifier]);
+  }, [normalizedMode, open, resolvedAccountId, scheduleRealtimeReload]);
 
   useEffect(() => {
     if (!open) {
@@ -886,6 +970,19 @@ export default function TripHistoryServerModal({
               ))}
             </select>
           </label>
+
+          <button
+            className="trip-history-modal__reload-button atm-toolbar__refresh"
+            type="button"
+            onClick={() => {
+              void loadHistory();
+            }}
+            disabled={historyLoading}
+            aria-label="Tải lại dữ liệu lịch sử chuyến"
+            title="Tải lại dữ liệu lịch sử chuyến"
+          >
+            {historyLoading ? '⟳' : '↺'}
+          </button>
         </section>
 
         {selectedTrip ? (

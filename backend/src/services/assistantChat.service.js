@@ -449,6 +449,34 @@ async function ensureAssistantChatSchema() {
           );
         END;
 
+        -- Add FK on ChatbotConversation → TaiKhoan if missing (table existed before FK was defined)
+        IF OBJECT_ID(N'dbo.ChatbotConversation', N'U') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM sys.foreign_keys
+            WHERE name = N'FK_ChatbotConversation_TaiKhoan'
+              AND parent_object_id = OBJECT_ID(N'dbo.ChatbotConversation')
+          )
+        BEGIN
+          ALTER TABLE dbo.ChatbotConversation
+            ADD CONSTRAINT FK_ChatbotConversation_TaiKhoan
+            FOREIGN KEY (AccountId) REFERENCES dbo.TaiKhoan(MaTK)
+            ON UPDATE CASCADE ON DELETE CASCADE;
+        END;
+
+        -- Add FK on ChatbotMessage → ChatbotConversation if missing
+        IF OBJECT_ID(N'dbo.ChatbotMessage', N'U') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM sys.foreign_keys
+            WHERE name = N'FK_ChatbotMessage_Conversation'
+              AND parent_object_id = OBJECT_ID(N'dbo.ChatbotMessage')
+          )
+        BEGIN
+          ALTER TABLE dbo.ChatbotMessage
+            ADD CONSTRAINT FK_ChatbotMessage_Conversation
+            FOREIGN KEY (ConversationId) REFERENCES dbo.ChatbotConversation(ConversationId)
+            ON DELETE CASCADE;
+        END;
+
         IF NOT EXISTS (
           SELECT 1
           FROM sys.indexes

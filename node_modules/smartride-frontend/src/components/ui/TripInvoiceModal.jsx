@@ -26,16 +26,6 @@ function formatCurrency(value) {
   return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(Math.max(0, amount))} VND`;
 }
 
-const SERVICE_FEE_BY_VEHICLE = {
-  motorbike: 5000,
-  car: 7000,
-  intercity: 10000,
-};
-
-function getServiceFee(vehicle) {
-  return SERVICE_FEE_BY_VEHICLE[vehicle] ?? SERVICE_FEE_BY_VEHICLE.motorbike;
-}
-
 function openPrintDialog() {
   if (typeof window === 'undefined') {
     return;
@@ -56,10 +46,9 @@ export default function TripInvoiceModal({ open = false, invoice = null, onClose
   const pickupTime = bookedAt && !Number.isNaN(bookedAt.getTime()) ? format(bookedAt, 'HH:mm') : '--:--';
   const destinationTime = completedAt && !Number.isNaN(completedAt.getTime()) ? format(completedAt, 'HH:mm') : '--:--';
 
-  const serviceFee = getServiceFee(invoice.vehicle);
   const basePrice = Number(invoice.originalPrice || invoice.price || 0);
   const discountAmount = Number(invoice.discountAmount || 0);
-  const totalPrice = basePrice + serviceFee - discountAmount;
+  const totalPrice = Math.max(0, Number(invoice.totalPrice || invoice.amount || invoice.finalAmount || (basePrice - discountAmount) || 0));
 
   return createPortal(
     <div className="trip-invoice-modal" role="dialog" aria-modal="true" aria-label="Hóa đơn chuyến đi">
@@ -97,7 +86,6 @@ export default function TripInvoiceModal({ open = false, invoice = null, onClose
                 <h4>Chi tiết</h4>
                 <dl className="trip-invoice-modal__detail-list">
                   <div><dt>Giá theo quãng đường:</dt><dd>{formatCurrency(basePrice)}</dd></div>
-                  <div><dt>Phí dịch vụ:</dt><dd>{formatCurrency(serviceFee)}</dd></div>
                   <div><dt>Khuyến mãi:</dt><dd>- {formatCurrency(discountAmount)}</dd></div>
                 </dl>
               </section>
