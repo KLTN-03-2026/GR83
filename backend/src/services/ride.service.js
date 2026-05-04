@@ -127,6 +127,9 @@ const ZALOPAY_TIMEOUT_MS = 12000;
 const MOMO_TIMEOUT_MS = 12000;
 const MOMO_SUCCESS_RESULT_CODE = 0;
 const momoMockPaidOrderIds = new Set();
+const SQL_DEADLOCK_ERROR_NUMBER = 1205;
+const SQL_DEADLOCK_RETRY_ATTEMPTS = 3;
+const SQL_DEADLOCK_RETRY_BASE_DELAY_MS = 120;
 
 const DEFAULT_PRICING_TABLE = {
   motorbike: {
@@ -936,6 +939,46 @@ function createForbiddenError(message) {
   return error;
 }
 
+function isSqlDeadlockError(error) {
+  const normalizedMessage = normalizeText(error?.message).toLowerCase();
+  const directErrorNumber = Number(error?.number);
+  const originalErrorNumber = Number(error?.originalError?.number ?? error?.originalError?.info?.number);
+
+  return (
+    directErrorNumber === SQL_DEADLOCK_ERROR_NUMBER
+    || originalErrorNumber === SQL_DEADLOCK_ERROR_NUMBER
+    || normalizedMessage.includes('deadlock')
+  );
+}
+
+function waitForRetryDelay(delayMs) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(delayMs) || 0));
+  });
+}
+
+async function runWithSqlDeadlockRetry(task, operationName = 'sql-transaction') {
+  let attempt = 0;
+
+  while (attempt < SQL_DEADLOCK_RETRY_ATTEMPTS) {
+    attempt += 1;
+
+    try {
+      return await task();
+    } catch (error) {
+      if (!isSqlDeadlockError(error) || attempt >= SQL_DEADLOCK_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      const retryDelayMs = SQL_DEADLOCK_RETRY_BASE_DELAY_MS * (2 ** (attempt - 1));
+      console.warn(`[sql] Deadlock detected in ${operationName}. Retrying (${attempt}/${SQL_DEADLOCK_RETRY_ATTEMPTS})...`);
+      await waitForRetryDelay(retryDelayMs);
+    }
+  }
+
+  return task();
+}
+
 function parseTripStatus(value) {
   const normalizedToken = normalizeStatusToken(value);
 
@@ -1693,6 +1736,27 @@ async function resolveDriverStatus(transaction, driverIdentifier) {
   return normalizeText(queryResult.recordset?.[0]?.DriverStatus);
 }
 
+async function countDriverActiveTrips(transaction, driverCccd, excludeBookingCode = '') {
+  const normalizedDriverCccd = normalizeText(driverCccd);
+
+  if (!normalizedDriverCccd) {
+    return 0;
+  }
+
+  const queryResult = await new sql.Request(transaction)
+    .input('driverCccd', sql.VarChar(20), normalizedDriverCccd)
+    .input('excludeBookingCode', sql.VarChar(30), normalizeText(excludeBookingCode) || null)
+    .query(`
+      SELECT COUNT(1) AS activeTripCount
+      FROM dbo.DatXe dx
+      WHERE LOWER(ISNULL(dx.MaTX, '')) = LOWER(@driverCccd)
+        AND (@excludeBookingCode IS NULL OR dx.MaChuyen <> @excludeBookingCode)
+        AND dx.TrangThaiChuyen IN (N'DaNhanChuyen', N'DangDen', N'DaDon', N'DangThucHien');
+    `);
+
+  return Number(queryResult.recordset?.[0]?.activeTripCount ?? 0) || 0;
+}
+
 async function resolveDriverDispatchState(transaction, driverIdentifier) {
   const normalizedDriverIdentifier = normalizeText(driverIdentifier);
 
@@ -1737,12 +1801,19 @@ async function resolveDriverDispatchCandidates(transaction, pickup = {}, exclude
       tx.TrangThai AS driverStatus,
       tx.KhoaTamDen AS temporaryLockUntil,
       tx.LyDoKhoaTam AS temporaryLockReason,
+      activeTrips.activeTripCount,
       tk.Ten AS driverName,
       tk.SDT AS driverPhone,
       tk.TrangThai AS accountStatus
     FROM dbo.TaiXe tx
     INNER JOIN dbo.TaiKhoan tk
       ON tk.MaTK = tx.MaTK
+    OUTER APPLY (
+      SELECT COUNT(1) AS activeTripCount
+      FROM dbo.DatXe dxActive
+      WHERE LOWER(ISNULL(dxActive.MaTX, '')) = LOWER(ISNULL(tx.CCCD, ''))
+        AND dxActive.TrangThaiChuyen IN (N'DaNhanChuyen', N'DangDen', N'DaDon', N'DangThucHien')
+    ) activeTrips
     WHERE tx.MaTK IS NOT NULL
       AND NULLIF(tx.CCCD, '') IS NOT NULL;
   `);
@@ -1770,8 +1841,14 @@ async function resolveDriverDispatchCandidates(transaction, pickup = {}, exclude
 
     const accountStatus = normalizeStatusToken(row.accountStatus);
     const driverStatus = normalizeStatusToken(row.driverStatus);
+    const activeTripCount = Number(row.activeTripCount ?? 0);
+    const hasActiveTrip = Number.isFinite(activeTripCount) && activeTripCount > 0;
 
-    if (accountStatus === 'khoa' || !isDriverReadyStatus(driverStatus)) {
+    if (accountStatus === 'khoa' || hasActiveTrip) {
+      return null;
+    }
+
+    if (!isDriverReadyStatus(driverStatus) && (driverStatus === 'khoa' || driverStatus === 'choduyet')) {
       return null;
     }
 
@@ -3583,7 +3660,28 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
     }
 
     if (normalizedTripStatus === 'DaNhanChuyen' && !isDriverReadyStatus(resolvedDriverStatus)) {
-      throw createValidationError('Tài khoản tài xế chưa ở trạng thái hoạt động.');
+      const normalizedResolvedDriverStatus = normalizeStatusToken(resolvedDriverStatus);
+
+      if (normalizedResolvedDriverStatus === 'khoa' || normalizedResolvedDriverStatus === 'choduyet') {
+        throw createValidationError('Tài khoản tài xế chưa ở trạng thái hoạt động.');
+      }
+
+      const activeTripCount = await countDriverActiveTrips(transaction, resolvedDriverCccd, bookingCode);
+
+      if (activeTripCount > 0) {
+        throw createValidationError('Tài xế đang có cuốc khác chưa hoàn tất.');
+      }
+
+      await new sql.Request(transaction)
+        .input('driverSystemAccountId', sql.VarChar(20), normalizedDriverAccountId)
+        .query(`
+          UPDATE dbo.TaiXe
+          SET
+            TrangThai = N'HoatDong',
+            NgayCapNhat = SYSDATETIME()
+          WHERE MaTK = @driverSystemAccountId
+            AND LOWER(ISNULL(TrangThai, '')) NOT IN (N'khoa', N'choduyet');
+        `);
     }
 
     if (
@@ -3684,6 +3782,27 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       }
 
     const updatedRow = await readTripStatusRow(transaction, bookingCode);
+
+    if (normalizedTripStatus === 'DaHuy' || normalizedTripStatus === 'HoanThanh') {
+      const driverSystemAccountIdForAvailabilityReset = normalizeText(
+        updatedRow?.driverAccountId
+          ?? currentRow?.driverAccountId
+          ?? normalizedDriverAccountId,
+      );
+
+      if (driverSystemAccountIdForAvailabilityReset) {
+        await new sql.Request(transaction)
+          .input('driverSystemAccountId', sql.VarChar(20), driverSystemAccountIdForAvailabilityReset)
+          .query(`
+            UPDATE dbo.TaiXe
+            SET
+              TrangThai = N'HoatDong',
+              NgayCapNhat = SYSDATETIME()
+            WHERE MaTK = @driverSystemAccountId
+              AND LOWER(ISNULL(TrangThai, '')) NOT IN (N'khoa', N'choduyet');
+          `);
+      }
+    }
 
     if (normalizedTripStatus === 'HoanThanh') {
       await applyDriverWalletSettlement(transaction, {
@@ -4310,7 +4429,10 @@ export async function bookRide(payload) {
   booking.paymentStatus = getPaymentStatus(paymentMethod, paymentProvider);
   booking.paymentStatusLabel = getPaymentStatusLabel(booking.paymentStatus);
 
-  const persistedPayment = await persistBookingToDatabase(booking);
+  const persistedPayment = await runWithSqlDeadlockRetry(
+    () => persistBookingToDatabase(booking),
+    'persistBookingToDatabase',
+  );
 
   if (persistedPayment) {
     booking.paymentCode = persistedPayment.paymentCode;
@@ -4992,7 +5114,10 @@ export async function updateTripStatus(payload = {}) {
     );
   }
 
-  return updateTripStatusInDatabase(bookingCode, requestedTripStatus, normalizedDriverAccountId, cancelMeta);
+  return runWithSqlDeadlockRetry(
+    () => updateTripStatusInDatabase(bookingCode, requestedTripStatus, normalizedDriverAccountId, cancelMeta),
+    'updateTripStatusInDatabase',
+  );
 }
 
 export async function rejectTripDispatch(payload = {}) {
@@ -5000,7 +5125,10 @@ export async function rejectTripDispatch(payload = {}) {
     throw createValidationError('Từ chối cuốc cần kết nối cơ sở dữ liệu để đồng bộ điều phối.');
   }
 
-  return rejectTripDispatchInDatabase(payload);
+  return runWithSqlDeadlockRetry(
+    () => rejectTripDispatchInDatabase(payload),
+    'rejectTripDispatchInDatabase',
+  );
 }
 
 export async function submitRideRating(payload = {}) {
@@ -5864,13 +5992,16 @@ export async function handleZaloPayCallback(payload = {}) {
   }
 
   try {
-    await markBookingPaidByGateway({
-      bookingCode,
-      paidAt,
-      appTransId,
-      zpTransToken,
-      gatewayReturnCode: Number(parsedCallback?.status ?? 1) || 1,
-    });
+    await runWithSqlDeadlockRetry(
+      () => markBookingPaidByGateway({
+        bookingCode,
+        paidAt,
+        appTransId,
+        zpTransToken,
+        gatewayReturnCode: Number(parsedCallback?.status ?? 1) || 1,
+      }),
+      'markBookingPaidByGateway-zalopay-callback',
+    );
 
     await logPaymentGatewayAudit({
       bookingCode,
@@ -5924,13 +6055,16 @@ export async function handleMoMoCallback(payload = {}) {
 
     if (bookingCode) {
       try {
-        await markBookingPaidByGateway({
-          bookingCode,
-          paidAt: new Date(),
-          appTransId: orderId,
-          gatewayTransToken: normalizeText(payload?.transId) || `MOCK-${Date.now()}`,
-          gatewayReturnCode: MOMO_SUCCESS_RESULT_CODE,
-        });
+        await runWithSqlDeadlockRetry(
+          () => markBookingPaidByGateway({
+            bookingCode,
+            paidAt: new Date(),
+            appTransId: orderId,
+            gatewayTransToken: normalizeText(payload?.transId) || `MOCK-${Date.now()}`,
+            gatewayReturnCode: MOMO_SUCCESS_RESULT_CODE,
+          }),
+          'markBookingPaidByGateway-momo-mock-callback',
+        );
       } catch {
         // Keep callback idempotent in mock mode.
       }
@@ -6087,13 +6221,16 @@ export async function handleMoMoCallback(payload = {}) {
   }
 
   try {
-    await markBookingPaidByGateway({
-      bookingCode,
-      paidAt: new Date(),
-      appTransId: orderId,
-      gatewayTransToken: normalizeText(payload?.transId),
-      gatewayReturnCode: resultCode,
-    });
+    await runWithSqlDeadlockRetry(
+      () => markBookingPaidByGateway({
+        bookingCode,
+        paidAt: new Date(),
+        appTransId: orderId,
+        gatewayTransToken: normalizeText(payload?.transId),
+        gatewayReturnCode: resultCode,
+      }),
+      'markBookingPaidByGateway-momo-callback',
+    );
   } catch {
     await logPaymentGatewayAudit({
       bookingCode,
@@ -6288,13 +6425,16 @@ export async function getTripPaymentStatus(payload = {}) {
       });
 
       if (isPaidByGateway) {
-        const markResult = await markBookingPaidByGateway({
-          bookingCode,
-          paidAt: new Date(),
-          appTransId: gatewayAppTransId,
-          zpTransToken: normalizeText(gatewayResult?.zp_trans_id ?? gatewayResult?.zp_trans_token),
-          gatewayReturnCode,
-        });
+        const markResult = await runWithSqlDeadlockRetry(
+          () => markBookingPaidByGateway({
+            bookingCode,
+            paidAt: new Date(),
+            appTransId: gatewayAppTransId,
+            zpTransToken: normalizeText(gatewayResult?.zp_trans_id ?? gatewayResult?.zp_trans_token),
+            gatewayReturnCode,
+          }),
+          'markBookingPaidByGateway-zalopay-query',
+        );
 
         paymentStatus = 'DaThanhToan';
         paidAt = markResult?.paidAt ? new Date(markResult.paidAt) : new Date();
@@ -6345,13 +6485,16 @@ export async function getTripPaymentStatus(payload = {}) {
       });
 
       if (isPaidByGateway) {
-        const markResult = await markBookingPaidByGateway({
-          bookingCode,
-          paidAt: new Date(),
-          appTransId: gatewayAppTransId,
-          gatewayTransToken: normalizeText(gatewayResult?.transId),
-          gatewayReturnCode,
-        });
+        const markResult = await runWithSqlDeadlockRetry(
+          () => markBookingPaidByGateway({
+            bookingCode,
+            paidAt: new Date(),
+            appTransId: gatewayAppTransId,
+            gatewayTransToken: normalizeText(gatewayResult?.transId),
+            gatewayReturnCode,
+          }),
+          'markBookingPaidByGateway-momo-query',
+        );
 
         paymentStatus = 'DaThanhToan';
         paidAt = markResult?.paidAt ? new Date(markResult.paidAt) : new Date();
