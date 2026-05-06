@@ -1,0 +1,337 @@
+.booking-guide-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  padding: 0.75rem;
+}
+
+.booking-guide-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 18, 27, 0.56);
+  backdrop-filter: blur(3px);
+}
+
+.booking-guide-modal__window {
+  position: relative;
+  z-index: 1;
+  width: min(1160px, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+  border-radius: 1.1rem;
+  background: #f2f4f7;
+  border: 1px solid rgba(18, 29, 43, 0.1);
+  box-shadow: 0 28px 60px rgba(8, 16, 24, 0.26);
+  padding: 1rem 1rem 1.2rem;
+}
+
+.booking-guide-modal__close {
+  position: sticky;
+  top: 0.25rem;
+  margin-left: auto;
+  width: 2.05rem;
+  height: 2.05rem;
+  border-radius: 999px;
+  background: #111;
+  display: grid;
+  place-items: center;
+}
+
+.booking-guide-modal__close img {
+  width: 0.76rem;
+  height: 0.76rem;
+  filter: brightness(0) invert(1);
+}
+
+.booking-guide-modal__header {
+  text-align: center;
+  margin: 0.2rem 0 0.9rem;
+}
+
+.booking-guide-modal__header h3 {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  color: #091018;
+}
+
+.booking-guide-modal__header p {
+  margin: 0.35rem 0 0;
+  color: #48576a;
+  font-size: 1rem;
+}
+
+.booking-guide-modal__steps {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.booking-guide-modal__step {
+  position: relative;
+  border-radius: 1rem;
+  background: #ffffff;
+  border: 1px solid rgba(20, 32, 46, 0.08);
+  display: grid;
+  grid-template-columns: minmax(250px, 0.78fr) auto minmax(0, 1.22fr);
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.95rem 1rem;
+}
+
+.booking-guide-modal__step-copy {
+  display: grid;
+  gap: 0.45rem;
+  align-content: center;
+}
+
+.booking-guide-modal__step-index {
+  width: 3.05rem;
+  height: 3.05rem;
+  border-radius: 999px;
+  background: #96d83f;
+  color: #fff;
+  font-size: 1.55rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+
+.booking-guide-modal__step-copy h4 {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.7vw, 1.7rem);
+  line-height: 1.25;
+  color: #101820;
+}
+
+.booking-guide-modal__step-copy p {
+  margin: 0;
+  font-size: 1.04rem;
+  line-height: 1.4;
+  color: #1f2b37;
+}
+
+.booking-guide-modal__step-arrow {
+  width: 2.55rem;
+  height: 2.55rem;
+  border-radius: 999px;
+  border: 1px solid #d3dae3;
+  background: #ffffff;
+  box-shadow: 0 10px 18px rgba(15, 30, 47, 0.14);
+  display: grid;
+  place-items: center;
+}
+
+.booking-guide-modal__step-arrow-icon {
+  display: block;
+  color: #233444;
+  font-size: 1.28rem;
+  font-weight: 700;
+  transform: translateX(1px);
+}
+
+.booking-guide-modal__mockup {
+  position: relative;
+  border-radius: 0.9rem;
+  border: 1px solid #dbe2ea;
+  background: #f8fafb;
+  padding: 0.68rem;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 0.62rem;
+}
+
+.booking-guide-modal__tabs {
+  grid-column: 2;
+  justify-self: end;
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.booking-guide-modal__tab {
+  min-height: 2rem;
+  padding: 0 0.72rem;
+  border-radius: 0.62rem;
+  border: 1px solid #d4d9df;
+  background: #fff;
+  color: #1a2632;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.booking-guide-modal__tab.is-active {
+  border-color: #87c943;
+  box-shadow: inset 0 0 0 1px #87c943;
+}
+
+.booking-guide-modal__route-mode {
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.2rem;
+  padding: 0 0.65rem;
+  border-radius: 0.62rem;
+  border: 1px solid #8ccc49;
+  background: #fff;
+  width: fit-content;
+}
+
+.booking-guide-modal__route-mode img {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.booking-guide-modal__route-card {
+  grid-column: 1;
+  border: 2px solid #1c2630;
+  border-radius: 0.4rem;
+  background: #fff;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.booking-guide-modal__route-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #5d6a78;
+}
+
+.booking-guide-modal__route-row img {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.booking-guide-modal__route-divider {
+  height: 1px;
+  background: #d7dee7;
+}
+
+.booking-guide-modal__payment-row {
+  grid-column: 1;
+  display: inline-flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.booking-guide-modal__chip {
+  min-height: 1.95rem;
+  padding: 0 0.7rem;
+  border-radius: 0.58rem;
+  border: 1px solid #d4d9df;
+  background: #fff;
+  color: #1f2c39;
+  font-size: 0.84rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.booking-guide-modal__chip.is-active {
+  border-color: #87c943;
+  box-shadow: inset 0 0 0 1px #87c943;
+}
+
+.booking-guide-modal__confirm-btn {
+  grid-column: 1;
+  min-height: 2.6rem;
+  border-radius: 0.62rem;
+  background: #a8d652;
+  color: #101a23;
+  font-size: 1.08rem;
+  font-weight: 700;
+}
+
+.booking-guide-modal__ride-list {
+  grid-column: 2;
+  grid-row: 2 / span 4;
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.booking-guide-modal__ride-item {
+  min-height: 2.92rem;
+  border: 1px solid #d9dfe7;
+  border-radius: 0.62rem;
+  background: #fff;
+  padding: 0.38rem 0.5rem;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.booking-guide-modal__ride-item.is-active {
+  border-color: #87c943;
+  box-shadow: inset 0 0 0 1px #87c943;
+}
+
+.booking-guide-modal__ride-item img {
+  width: 1.85rem;
+  height: 1.85rem;
+}
+
+.booking-guide-modal__ride-item strong {
+  display: block;
+  color: #111a24;
+  font-size: 0.95rem;
+}
+
+.booking-guide-modal__ride-item span {
+  display: block;
+  color: #283748;
+  font-size: 0.8rem;
+}
+
+.booking-guide-modal__ride-item em {
+  color: #121b24;
+  font-size: 0.88rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.booking-guide-modal__badge {
+  position: absolute;
+  top: 0.42rem;
+  right: 0.42rem;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 999px;
+  background: #9bd83f;
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+
+@media (max-width: 960px) {
+  .booking-guide-modal__step {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-guide-modal__step-arrow {
+    display: none;
+  }
+
+  .booking-guide-modal__mockup {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-guide-modal__tabs,
+  .booking-guide-modal__route-mode,
+  .booking-guide-modal__route-card,
+  .booking-guide-modal__payment-row,
+  .booking-guide-modal__confirm-btn,
+  .booking-guide-modal__ride-list {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .booking-guide-modal__tabs {
+    justify-self: start;
+  }
+}

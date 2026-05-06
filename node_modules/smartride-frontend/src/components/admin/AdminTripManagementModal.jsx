@@ -1,7 +1,7 @@
 import { closeIcon } from '../../assets/icons';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { rideService } from '../../services/rideService';
 import { connectRideEventStream } from '../../services/rideRealtimeService';
 import DatePicker, { registerLocale } from 'react-datepicker';
@@ -490,18 +490,69 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
 
   const selectedStatusLabel = TRIP_STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? 'Trạng thái';
 
+  const tripStats = useMemo(() => {
+    const stats = {
+      total: items.length,
+      completed: 0,
+      inProgress: 0,
+      cancelled: 0,
+    };
+
+    items.forEach((item) => {
+      const status = String(item.tripStatus ?? item.status ?? '').trim();
+      if (status === 'HoanThanh') {
+        stats.completed++;
+      } else if (['ChoTaiXe', 'DaNhanChuyen', 'DangDen', 'DaDon', 'DangThucHien'].includes(status)) {
+        stats.inProgress++;
+      } else if (status === 'DaHuy') {
+        stats.cancelled++;
+      }
+    });
+
+    return stats;
+  }, [items]);
+
   if (!open) return null;
 
   return createPortal(
     <div className="atm-overlay" onClick={onClose}>
       <div className="atm-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="atm-modal__header">
-          <h2 className="atm-modal__title">Quản lý chuyến đi</h2>
+        <header className="atm-modal__header">
           <button className="atm-modal__close" onClick={onClose} aria-label="Đóng">
             <img src={closeIcon} alt="Đóng" width={20} height={20} />
           </button>
-        </div>
+
+          <div className="atm-modal__header-copy">
+            <p className="atm-modal__eyebrow">ADMIN / CHUYẾN ĐI</p>
+            <h2 className="atm-modal__title">QUẢN LÝ CHUYẾN ĐI</h2>
+            <p className="atm-modal__description">
+              Tra cứu giao dịch chuyến đi, theo dõi trạng thái và quản lý các chuyến xe trong một giao diện duy nhất.
+            </p>
+          </div>
+
+          <div className="atm-modal__header-stats" aria-label="Thống kê chuyến đi">
+            <article className="atm-modal__stat-card">
+              <strong>{tripStats.total}</strong>
+              <span>Tổng chuyến đi</span>
+            </article>
+
+            <article className="atm-modal__stat-card">
+              <strong>{tripStats.completed}</strong>
+              <span>Hoàn thành</span>
+            </article>
+
+            <article className="atm-modal__stat-card">
+              <strong>{tripStats.inProgress}</strong>
+              <span>Đang thực hiện</span>
+            </article>
+
+            <article className="atm-modal__stat-card">
+              <strong>{tripStats.cancelled}</strong>
+              <span>Đã hủy</span>
+            </article>
+          </div>
+        </header>
 
         {/* Toolbar */}
         <div className="atm-toolbar">

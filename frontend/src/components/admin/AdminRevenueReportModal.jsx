@@ -477,10 +477,37 @@ export default function AdminRevenueReportModal({ open, onClose, accountId = '' 
       <div className="revenue-modal__backdrop" onClick={onClose} />
       <div className="revenue-modal__window">
         {/* Header */}
-        <div className="revenue-modal__header">
-          <h2 className="revenue-modal__title">Xuất báo cáo doanh thu</h2>
-          <button className="revenue-modal__close" onClick={onClose} aria-label="Đóng">✕</button>
-        </div>
+        <header className="revenue-modal__header">
+          <div className="revenue-modal__header-copy">
+            <p className="revenue-modal__eyebrow">ADMIN / BÁO CÁO</p>
+            <h2 className="revenue-modal__title">XUẤT BÁO CÁO DOANH THU</h2>
+            <p>Lập báo cáo doanh thu chi tiết theo ngày, loại xe, phương thức thanh toán.</p>
+          </div>
+
+          <div className="revenue-modal__header-stats" aria-label="Thống kê báo cáo">
+            <article className="revenue-modal__stat-card">
+              <strong>{summary.totalTrips}</strong>
+              <span>Chuyến đi</span>
+            </article>
+
+            <article className="revenue-modal__stat-card">
+              <strong>{fmt(summary.totalRevenue)}</strong>
+              <span>Doanh thu</span>
+            </article>
+
+            <article className="revenue-modal__stat-card">
+              <strong>{fmt(summary.driverTotal)}</strong>
+              <span>Cho tài xế</span>
+            </article>
+
+            <article className="revenue-modal__stat-card">
+              <strong>{fmt(summary.systemTotal)}</strong>
+              <span>Hệ thống</span>
+            </article>
+          </div>
+
+          <button className="revenue-modal__close" onClick={onClose} aria-label="Đóng báo cáo doanh thu">✕</button>
+        </header>
 
         {/* Filters */}
         <div className="revenue-modal__filters">
@@ -598,26 +625,6 @@ export default function AdminRevenueReportModal({ open, onClose, accountId = '' 
           >
             {loading ? '⟳' : '↺'}
           </button>
-        </div>
-
-        {/* Summary cards */}
-        <div className="revenue-modal__summary">
-          <div className="revenue-modal__card">
-            <div className="revenue-modal__card-label">Tổng chuyến</div>
-            <div className="revenue-modal__card-value">{summary.totalTrips}</div>
-          </div>
-          <div className="revenue-modal__card">
-            <div className="revenue-modal__card-label">Tổng thu</div>
-            <div className="revenue-modal__card-value">{fmt(summary.totalRevenue)}</div>
-          </div>
-          <div className="revenue-modal__card">
-            <div className="revenue-modal__card-label">Tiền tài xế nhận</div>
-            <div className="revenue-modal__card-value">{fmt(summary.driverTotal)}</div>
-          </div>
-          <div className="revenue-modal__card revenue-modal__card--accent">
-            <div className="revenue-modal__card-label">Doanh thu hệ thống</div>
-            <div className="revenue-modal__card-value">{fmt(summary.systemTotal)}</div>
-          </div>
         </div>
 
         {/* Export buttons */}

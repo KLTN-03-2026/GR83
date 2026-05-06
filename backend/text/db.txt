@@ -106,19 +106,7 @@ CREATE TABLE dbo.Quyen
 );
 GO
 
-INSERT INTO dbo.Quyen (MaQuyen, TenQuyen, MoTa)
-SELECT v.MaQuyen, v.TenQuyen, v.MoTa
-FROM (VALUES
-('Q1', N'QuanTriVien', N'Quản trị viên'),
-('Q2', N'KhachHang',   N'Khách hàng'),
-('Q3', N'TaiXe',       N'Tài xế')
-) AS v(MaQuyen, TenQuyen, MoTa)
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM dbo.Quyen AS q
-    WHERE q.MaQuyen = v.MaQuyen
-);
-GO
+-- Seed data moved to: backend/text/db.seed.sql
 
 -- 2) TaiKhoan
 --    MaQuyen (cột thường, FK) → Quyen.MaQuyen (PK)
@@ -173,15 +161,7 @@ BEGIN
 END
 GO
 
-INSERT INTO dbo.TaiKhoan (MaTK, TaiKhoan, MatKhau, MaQuyen, Ten, Email, SDT, DiaChi, Avatar, NgaySinh, GioiTinh, TrangThai)
-SELECT 'TK0001','admin@smartride.local','123','Q1',N'Administrator','admin@smartride.local',
-       '0900000000',N'Da Nang',N'/uploads/avatar/admin.png','1990-01-01',N'Nam',N'HoatDong'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM dbo.TaiKhoan AS tk
-    WHERE tk.MaTK = 'TK0001'
-);
-GO
+-- Seed data moved to: backend/text/db.seed.sql
 
 -- 3) NganHang — bảng tham chiếu, không có FK
 CREATE TABLE dbo.NganHang
@@ -405,21 +385,7 @@ BEGIN
 END
 GO
 
-INSERT INTO dbo.UuDai (MaUuDai, TenUuDai, MoTa, LoaiUuDai, PhanTramGiam, SoTienGiam, GiaTriToiDa, DonToiThieu,
-                       DoiTuong, HienThi, TrangThai, SoLuotDaDung, GioiHanLuotDung,
-                       NgayBatDau, NgayHetHan, NgayTao, NgayCapNhat)
-VALUES
-('SALE10',   N'Giảm giá chuyến ngắn',      N'Ưu đãi giảm trực tiếp cho chuyến xe ngắn.',     'percent',10,NULL, 50000,0,'customer','public',  'active',  186,500,'2026-04-01','2026-05-30','2026-04-18T08:00:00','2026-04-18T08:00:00'),
-('NEWUSER',  N'Ưu đãi khách hàng mới',     N'Mã ưu đãi dành cho người dùng lần đầu đặt xe.','percent',20,NULL,100000,0,'customer','public',  'active',   92,300,'2026-04-01','2026-06-10','2026-04-21T09:00:00','2026-04-21T09:00:00'),
-('SALE15',   N'Khuyến mãi cuối tuần',       N'Khuyến mãi cuối tuần cho toàn bộ chuyến xe.',  'percent',15,NULL, 50000,0,'customer','public',  'active',  120,450,'2026-04-01','2026-05-15','2026-04-18T11:00:00','2026-04-18T11:00:00'),
-('BIKE20',   N'Ưu đãi xe máy',              N'Ưu đãi riêng cho các chuyến xe máy.',           'percent',20,NULL, 80000,0,'customer','public',  'active',   68,250,'2026-04-01','2026-06-12','2026-04-16T08:30:00','2026-04-16T08:30:00'),
-('SPRING25', N'Ưu đãi mùa mới',             N'Ưu đãi mùa mới dành cho người dùng quay lại.', 'percent',25,NULL, 75000,0,'customer','public',  'active',   44,200,'2026-04-01','2026-05-22','2026-04-22T07:00:00','2026-04-22T07:00:00'),
-('WEEKEND10',N'Cuối tuần tiết kiệm',         N'Khuyến mãi dùng cho khung giờ cuối tuần.',     'fixed',NULL,20000,  NULL,50000,'all','hidden',  'active',   77,400,'2026-04-01','2026-04-27','2026-04-20T08:00:00','2026-04-20T08:00:00'),
-('OLD5',     N'Ưu đãi cũ',                  N'Mã cũ đã hết hiệu lực và được giữ để đối soát.','percent', 5,NULL, 20000,0,'customer','public',  'expired', 210,600,'2026-02-01','2026-03-02','2026-03-01T08:00:00','2026-03-01T08:00:00'),
-('TET2025',  N'Ưu đãi theo mùa vụ',         N'Ưu đãi theo mùa vụ đã ngừng áp dụng.',         'percent',30,NULL, 60000,0,'customer','public',  'expired', 305,700,'2026-01-20','2026-02-10','2026-02-12T08:00:00','2026-02-12T08:00:00'),
-('VIP30',    N'Ưu đãi khách VIP',            N'Mã ưu đãi dành cho tập khách hàng VIP.',        'percent',30,NULL, 90000,0,'customer','public',  'expired',  41,120,'2026-01-01','2026-01-15','2026-01-15T08:00:00','2026-01-15T08:00:00'),
-('WELCOME5', N'Mã chào mừng',                N'Ưu đãi chào mừng sẽ mở trong đợt tiếp theo.',  'percent', 5,NULL, 40000,0,'customer','public','scheduled',   0,250,'2026-05-01','2026-06-30','2026-04-19T08:00:00','2026-04-19T08:00:00');
-GO
+-- Seed data moved to: backend/text/db.seed.sql
 
 -- 6) DatXe — Chuyến đặt xe
 --    MaTK    (cột thường, FK) → TaiKhoan.MaTK   (PK)
@@ -620,7 +586,13 @@ CREATE TABLE dbo.PaymentGatewayAudit
     ResponsePayload    NVARCHAR(MAX)  NULL,
     CreatedAt          DATETIME2(0)   NOT NULL CONSTRAINT DF_PaymentGatewayAudit_CreatedAt DEFAULT SYSUTCDATETIME(),
 
-    CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (AuditId)
+    CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (AuditId),
+    CONSTRAINT FK_PaymentGatewayAudit_ThanhToan FOREIGN KEY (PaymentCode)
+        REFERENCES dbo.ThanhToan(MaTT)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT FK_PaymentGatewayAudit_DatXe FOREIGN KEY (BookingCode)
+        REFERENCES dbo.DatXe(MaChuyen)
+        ON UPDATE CASCADE ON DELETE SET NULL
 );
 GO
 
@@ -791,19 +763,7 @@ CREATE TABLE dbo.LoaiKhieuNaiHoTro
 );
 GO
 
-INSERT INTO dbo.LoaiKhieuNaiHoTro (MaLoaiSuCo, TenLoaiSuCo, DoiTuong, ThuTuHienThi)
-VALUES
-('fare-issue',       N'Giá cước / thanh toán',          'customer',  1),
-('driver-attitude',  N'Thái độ tài xế',                 'customer',  2),
-('unsafe-driving',   N'Tài xế lái xe không an toàn',    'customer',  3),
-('lost-item',        N'Thất lạc đồ dùng',               'customer',  4),
-('app-error',        N'Lỗi ứng dụng',                   'all',       5),
-('other',            N'Lý do khác',                     'all',       6),
-('accident',         N'Tai nạn khẩn cấp',               'driver',    7),
-('vehicle-issue',    N'Xe gặp sự cố',                   'driver',    8),
-('customer-conflict',N'Mâu thuẫn với khách',            'driver',    9),
-('safety-threat',    N'Nguy cơ an toàn',                'driver',   10);
-GO
+-- Seed data moved to: backend/text/db.seed.sql
 
 -- 15) KhieuNaiHoTro — Khiếu nại / Hỗ trợ
 --    MaTK     (cột thường, FK) → TaiKhoan.MaTK        (PK)
@@ -931,57 +891,6 @@ GO
 
 -- ============================================================================
 -- DỮ LIỆU MẪU
+-- Tách riêng để dễ quản lý và mở rộng số liệu dashboard/revenue:
+--   backend/text/db.seed.sql
 -- ============================================================================
-
--- Tài khoản tài xế mẫu
-INSERT INTO dbo.TaiKhoan (MaTK, TaiKhoan, MatKhau, MaQuyen, Ten, Email, SDT, DiaChi, Avatar, NgaySinh, GioiTinh, TrangThai)
-SELECT v.MaTK, v.TaiKhoan, v.MatKhau, v.MaQuyen, v.Ten, v.Email, v.SDT, v.DiaChi, v.Avatar, v.NgaySinh, v.GioiTinh, v.TrangThai
-FROM (VALUES
-('TK0002','nguyenvana@smartride.local','123','Q3',N'Nguyễn Văn A','nguyenvana@smartride.local','0901111111',N'Liên Chiểu, Đà Nẵng',N'/uploads/avatars/tx-a.png','1994-05-12',N'Nam',N'HoatDong'),
-('TK0003','tranvanb@smartride.local',  '123','Q3',N'Trần Văn B',  'tranvanb@smartride.local', '0902222222',N'Hải Châu, Đà Nẵng',  N'/uploads/avatars/tx-b.png','1992-09-01',N'Nam',N'HoatDong'),
-('TK0004','levanc@smartride.local',    '123','Q3',N'Lê Văn C',    'levanc@smartride.local',   '0903333333',N'Thanh Khê, Đà Nẵng', N'/uploads/avatars/tx-c.png','1991-11-21',N'Nam',N'HoatDong')
-) AS v(MaTK, TaiKhoan, MatKhau, MaQuyen, Ten, Email, SDT, DiaChi, Avatar, NgaySinh, GioiTinh, TrangThai)
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM dbo.TaiKhoan AS tk
-    WHERE tk.MaTK = v.MaTK
-);
-GO
-
--- Ngân hàng mẫu
-INSERT INTO dbo.NganHang (MaNH, HoVaTen, STK, NganHang)
-VALUES
-('NH0001',N'Nguyen Van A','1234567890',N'Vietcombank'),
-('NH0002',N'Tran Van B',  '2234567890',N'BIDV'),
-('NH0003',N'Le Van C',    '3234567890',N'VietinBank');
-GO
-
--- Tài xế mẫu
-INSERT INTO dbo.TaiXe (MaTK, Avatar, DiaChi, CCCD, BangLai, LyLich, MaNH, ThongTinXe, LienHeKC, TrangThai)
-VALUES
-('TK0002',N'/uploads/avatars/tx-a.png',N'Liên Chiểu, Đà Nẵng','201234567890',
- N'/uploads/drivers/licenses/tx-a-license.png',N'/uploads/drivers/backgrounds/tx-a-lylich.png','NH0001',
- N'{"vehicleImage":"/uploads/drivers/vehicles/tx-a-bike.png","licensePlate":"43A-123","vehicleName":"Honda Wave"}',
- N'{"relationship":"Anh","fullName":"Nguyen Van D","phone":"0911111111","address":"Thanh Khe, Da Nang"}',N'HoatDong'),
-('TK0003',N'/uploads/avatars/tx-b.png',N'Hải Châu, Đà Nẵng','202234567890',
- N'/uploads/drivers/licenses/tx-b-license.png',N'/uploads/drivers/backgrounds/tx-b-lylich.png','NH0002',
- N'{"vehicleImage":"/uploads/drivers/vehicles/tx-b-car.png","licensePlate":"43B-456","vehicleName":"Toyota Vios"}',
- N'{"relationship":"Chị","fullName":"Tran Thi E","phone":"0922222222","address":"Hai Chau, Da Nang"}',N'HoatDong'),
-('TK0004',N'/uploads/avatars/tx-c.png',N'Thanh Khê, Đà Nẵng','203334567890',
- N'/uploads/drivers/licenses/tx-c-license.png',N'/uploads/drivers/backgrounds/tx-c-lylich.png','NH0003',
- N'{"vehicleImage":"/uploads/drivers/vehicles/tx-c-bike.png","licensePlate":"43C-789","vehicleName":"Yamaha Sirius"}',
- N'{"relationship":"Em","fullName":"Le Thi F","phone":"0933333333","address":"Lien Chieu, Da Nang"}',N'HoatDong');
-GO
-
--- Ví tài xế mẫu
-INSERT INTO dbo.Vi (MaTK, SoDu)
-VALUES ('TK0002',320000),('TK0003',150000),('TK0004',50000);
-GO
-
--- Giao dịch ví mẫu
-INSERT INTO dbo.GiaoDichVi (MaTK, LoaiGiaoDich, SoTien, SoDuTruoc, SoDuSau, MoTa, SoDTNguoiNhan, SoDTNguoiGui, MaThamChieu, TrangThai)
-VALUES
-('TK0002','topup',   200000,120000,320000,N'Nạp tiền ví qua MoMo',      NULL,         NULL,         'TX2-TOPUP-001',   'completed'),
-('TK0002','transfer',-50000,320000,270000,N'Chuyển tiền cho khách quen','0909999999', '0901111111', 'TX2-TRANSFER-001','completed'),
-('TK0003','topup',   150000,     0,150000,N'Nạp tiền ví qua ngân hàng', NULL,         NULL,         'TX3-TOPUP-001',   'completed');
-GO

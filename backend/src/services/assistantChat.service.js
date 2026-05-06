@@ -50,6 +50,28 @@ const SENSITIVE_QUESTION_PATTERNS = [
 ];
 
 let assistantChatSchemaPromise = null;
+let lastGeminiFailureReason = '';
+let geminiQuotaBlockedUntilMs = 0;
+let lastGeminiRetryAfterSeconds = 0;
+
+function parseRetryAfterSecondsFromGeminiError(payloadOrText = '') {
+  const rawText = typeof payloadOrText === 'string'
+    ? payloadOrText
+    : JSON.stringify(payloadOrText ?? {});
+
+  const match = rawText.match(/retry\s+in\s+([0-9]+(?:\.[0-9]+)?)s/i);
+
+  if (!match?.[1]) {
+    return 0;
+  }
+
+  const parsedSeconds = Number(match[1]);
+  if (!Number.isFinite(parsedSeconds) || parsedSeconds <= 0) {
+    return 0;
+  }
+
+  return Math.ceil(parsedSeconds);
+}
 
 const FAQ_ENTRIES = [
   {
@@ -96,6 +118,48 @@ const FAQ_ENTRIES = [
     keywords: ['tai xe bi', 'tai xe khong den', 'tai xe huy', 'khieu nai', 'phan nan'],
     answer: 'Nếu tài xế không đến đúng giờ hoặc có vấn đề trong chuyến, bạn dùng nút Báo lỗi/Khiếu nại trong màn hình chi tiết chuyến để ghi nhận. Đội ngũ CSKH sẽ xem xét và phản hồi trong thời gian sớm nhất.',
   },
+];
+
+const BOOKING_GUIDE_STEPS = [
+  {
+    id: 1,
+    title: 'Nhập điểm đón và điểm đến',
+    instruction: 'Mở ô tìm chuyến, nhập điểm đón và điểm đến thật cụ thể để hệ thống ước tính lộ trình và giá.',
+  },
+  {
+    id: 2,
+    title: 'Chọn loại xe',
+    instruction: 'Chọn nhóm xe phù hợp nhu cầu như Xe máy, Ô tô hoặc Xe liên tỉnh.',
+  },
+  {
+    id: 3,
+    title: 'Chọn hạng xe',
+    instruction: 'Trong nhóm xe đã chọn, chọn hạng xe như tiết kiệm, vip hoặc plus theo ngân sách.',
+  },
+  {
+    id: 4,
+    title: 'Chọn phương thức thanh toán',
+    instruction: 'Chọn thanh toán tiền mặt hoặc online trước khi xác nhận chuyến.',
+  },
+  {
+    id: 5,
+    title: 'Chọn mã giảm giá',
+    instruction: 'Nếu có mã ưu đãi, áp dụng ở bước này để hệ thống cập nhật giá cuối cùng.',
+  },
+  {
+    id: 6,
+    title: 'Xác nhận đặt xe',
+    instruction: 'Kiểm tra lại thông tin chuyến rồi bấm Đặt xe để gửi yêu cầu tới tài xế.',
+  },
+];
+
+const BOOKING_STEP_HINTS = [
+  { stepId: 1, patterns: [/diem\s*don/, /diem\s*den/, /dia\s*chi\s*don/, /dia\s*chi\s*den/, /nhap\s*tuyen/] },
+  { stepId: 2, patterns: [/chon\s*loai\s*xe/, /xe\s*may/, /o\s*to/, /lien\s*tinh/] },
+  { stepId: 3, patterns: [/chon\s*hang\s*xe/, /tiet\s*kiem/, /vip/, /plus/, /minibus/, /bus/] },
+  { stepId: 4, patterns: [/thanh\s*toan/, /tien\s*mat/, /online/, /vnpay/] },
+  { stepId: 5, patterns: [/ma\s*giam/, /khuyen\s*mai/, /uu\s*dai/, /voucher/] },
+  { stepId: 6, patterns: [/xac\s*nhan\s*dat\s*xe/, /dat\s*xe\s*ngay/, /gui\s*yeu\s*cau\s*xe/] },
 ];
 
 function createValidationError(message, details = undefined) {
@@ -273,8 +337,135 @@ function findFaqAnswer(messageText) {
   return '';
 }
 
-function buildFallbackAnswer() {
-  return 'Mình đã nhận được yêu cầu của bạn. Bạn có thể hỏi về đặt xe, giá cước, thanh toán, khuyến mãi, hủy chuyến hoặc cách dùng các chức năng trong SmartRide để mình hướng dẫn chi tiết.';
+function buildBookingGuideOverviewAnswer() {
+  return `Quy trình đặt xe trên SmartRide gồm 6 bước: ${BOOKING_GUIDE_STEPS
+    .map((step) => `${step.id}) ${step.title}`)
+    .join('; ')}.`;
+}
+
+function hashTextToSeed(value) {
+  const token = normalizeSearchToken(value);
+  let hash = 0;
+
+  for (let index = 0; index < token.length; index += 1) {
+    hash = ((hash << 5) - hash) + token.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+}
+
+function pickVariant(items, seed) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '';
+  }
+
+  return items[seed % items.length];
+}
+
+function detectStepFromText(messageText) {
+  const token = normalizeSearchToken(messageText);
+
+  if (!token) {
+    return 0;
+  }
+
+  const explicitStepMatch = token.match(/buoc\s*([1-6])/);
+
+  if (explicitStepMatch?.[1]) {
+    return Number(explicitStepMatch[1]);
+  }
+
+  for (const entry of BOOKING_STEP_HINTS) {
+    if (entry.patterns.some((pattern) => pattern.test(token))) {
+      return entry.stepId;
+    }
+  }
+
+  return 0;
+}
+
+function buildBookingGuideAnswer(messageText, historyMessages = []) {
+  const messageToken = normalizeSearchToken(messageText);
+
+  if (!messageToken) {
+    return '';
+  }
+
+  const bookingIntentPattern = /(dat\s*xe|goi\s*xe|book\s*xe|tim\s*chuyen|buoc\s*tiep\s*theo|roi\s*sao|huong\s*dan\s*dat\s*xe|cach\s*dat\s*xe)/;
+
+  if (!bookingIntentPattern.test(messageToken)) {
+    return '';
+  }
+
+  if (/(tong\s*quan|toan\s*bo\s*buoc|cac\s*buoc|6\s*buoc)/.test(messageToken)) {
+    return buildBookingGuideOverviewAnswer();
+  }
+
+  const seed = hashTextToSeed(messageText);
+  const stepFromCurrentMessage = detectStepFromText(messageText);
+  const latestKnownStep = stepFromCurrentMessage || detectStepFromText(
+    [...historyMessages]
+      .reverse()
+      .map((item) => normalizeText(item?.text ?? item?.messageText))
+      .find((text) => text) || '',
+  );
+
+  const completedStepMatchers = [
+    { pattern: /(da|toi\s*da|minh\s*da).*(nhap|chon).*(diem\s*don|diem\s*den|dia\s*chi)/, completedStep: 1 },
+    { pattern: /(da|toi\s*da|minh\s*da).*(chon).*(loai\s*xe|xe\s*may|o\s*to|lien\s*tinh)/, completedStep: 2 },
+    { pattern: /(da|toi\s*da|minh\s*da).*(chon).*(hang\s*xe|tiet\s*kiem|vip|plus|minibus|bus)/, completedStep: 3 },
+    { pattern: /(da|toi\s*da|minh\s*da).*(chon).*(thanh\s*toan|tien\s*mat|online|vnpay)/, completedStep: 4 },
+    { pattern: /(da|toi\s*da|minh\s*da).*(chon|nhap).*(ma\s*giam|khuyen\s*mai|uu\s*dai|voucher)/, completedStep: 5 },
+  ];
+
+  const completedMatch = completedStepMatchers.find((entry) => entry.pattern.test(messageToken));
+
+  let targetStepId = latestKnownStep || 1;
+
+  if (completedMatch) {
+    targetStepId = Math.min(6, completedMatch.completedStep + 1);
+  }
+
+  if (/(buoc\s*tiep\s*theo|tiep\s*theo\s*la\s*gi|roi\s*sao)/.test(messageToken) && latestKnownStep > 0) {
+    targetStepId = Math.min(6, latestKnownStep + 1);
+  }
+
+  const targetStep = BOOKING_GUIDE_STEPS.find((step) => step.id === targetStepId) || BOOKING_GUIDE_STEPS[0];
+
+  if (targetStep.id >= 6 && /(xong|hoan\s*tat|xac\s*nhan|dat\s*xe\s*roi)/.test(messageToken)) {
+    return 'Bạn đã ở bước cuối. Chỉ cần kiểm tra lại thông tin chuyến và bấm Đặt xe để hệ thống tìm tài xế phù hợp gần bạn.';
+  }
+
+  const intros = [
+    `Bạn đang hợp lý ở nhịp này, tiếp theo là bước ${targetStep.id}: ${targetStep.title}.`,
+    `Mình gợi ý bạn chuyển sang bước ${targetStep.id}: ${targetStep.title}.`,
+    `Bước kế tiếp của bạn là bước ${targetStep.id}: ${targetStep.title}.`,
+  ];
+
+  const closings = [
+    'Nếu muốn, mình có thể hướng dẫn luôn bước sau đó.',
+    'Bạn làm xong bước này thì nhắn mình, mình chỉ tiếp bước kế tiếp.',
+    'Nếu bạn đang phân vân lựa chọn, mình có thể gợi ý phương án nhanh nhất.',
+  ];
+
+  return `${pickVariant(intros, seed)} ${targetStep.instruction} ${pickVariant(closings, seed + 7)}`;
+}
+
+function buildFallbackAnswer(messageText = '') {
+  const seed = hashTextToSeed(messageText);
+  const intros = [
+    'Mình đã hiểu yêu cầu của bạn.',
+    'Mình nắm được câu hỏi của bạn rồi.',
+    'Mình đã ghi nhận nội dung bạn vừa gửi.',
+  ];
+  const guidance = [
+    'Bạn có thể hỏi mình về đặt xe, theo dõi chuyến, giá cước, thanh toán, khuyến mãi hoặc khiếu nại tài xế.',
+    'Bạn có thể nói rõ hơn mục tiêu (ví dụ: đặt xe ngay, hỏi phí, đổi thanh toán, áp mã giảm) để mình hỗ trợ đúng trọng tâm.',
+    'Bạn cứ mô tả tình huống cụ thể, mình sẽ đưa hướng dẫn theo từng bước ngay trong SmartRide.',
+  ];
+
+  return `${pickVariant(intros, seed)} ${pickVariant(guidance, seed + 3)}`;
 }
 
 function buildSensitiveRefusalAnswer() {
@@ -309,9 +500,13 @@ function isSensitiveQuestion(messageText) {
 function buildGeminiSystemInstruction() {
   return [
     'Bạn là trợ lý AI của SmartRide.',
-    'Mục tiêu: trả lời ngắn gọn, rõ ràng, bám sát câu hỏi, đúng ngữ cảnh website/app SmartRide.',
+    'Mục tiêu: trả lời linh hoạt theo ngữ cảnh hội thoại, tự nhiên, rõ ràng, đúng ngữ cảnh website/app SmartRide.',
     'Chỉ trả lời các vấn đề liên quan SmartRide: tài khoản, đặt xe, chuyến đi, thanh toán, khuyến mãi, hỗ trợ, đánh giá.',
     'Ưu tiên hướng dẫn thao tác theo từng bước khi người dùng hỏi cách dùng tính năng trên website/app.',
+    'Quy trình đặt xe mặc định gồm 6 bước: 1) Nhập điểm đón và điểm đến; 2) Chọn loại xe; 3) Chọn hạng xe; 4) Chọn phương thức thanh toán; 5) Chọn mã giảm giá; 6) Xác nhận đặt xe.',
+    'Khi người dùng hỏi bước tiếp theo, hãy xác định bước hiện tại từ hội thoại rồi đưa bước kế tiếp cụ thể.',
+    'Khi người dùng nhắn ngắn hoặc mơ hồ (ví dụ: "gợi ý giúp tôi", "tiếp theo sao"), phải suy luận từ ngữ cảnh hội thoại gần nhất để trả lời đúng ý định.',
+    'Không trả lời rập khuôn; thay đổi cách diễn đạt phù hợp nhưng vẫn chính xác.',
     'Tuyệt đối không cung cấp thông tin nhạy cảm: tài khoản/mật khẩu admin, token, key, dữ liệu riêng tư tài xế/khách hàng, thông tin hệ thống nội bộ.',
     'Không tiết lộ thông tin tài xế cụ thể nếu không có ngữ cảnh hợp lệ từ chuyến của chính người hỏi.',
     'Nếu thiếu thông tin, yêu cầu người dùng cung cấp thêm chi tiết thay vì bịa dữ liệu.',
@@ -340,17 +535,34 @@ function toGeminiContents(historyMessages = []) {
     }
   }
 
-  return items.slice(-14);
+  return items.slice(-18);
 }
 
 async function generateGeminiAnswer(historyMessages = []) {
+  lastGeminiFailureReason = '';
+  lastGeminiRetryAfterSeconds = 0;
+
   const apiKey = normalizeText(env.geminiApiKey);
 
   if (!apiKey) {
+    lastGeminiFailureReason = 'missing-key';
     return '';
   }
 
-  const modelName = normalizeText(env.geminiModel) || 'gemini-2.5-flash';
+  const now = Date.now();
+  if (geminiQuotaBlockedUntilMs > now) {
+    lastGeminiFailureReason = 'quota';
+    lastGeminiRetryAfterSeconds = Math.max(1, Math.ceil((geminiQuotaBlockedUntilMs - now) / 1000));
+    return '';
+  }
+
+  const preferredModel = normalizeText(env.geminiModel) || 'gemini-2.5-flash';
+  const modelCandidates = Array.from(new Set([
+    preferredModel,
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+  ].filter(Boolean)));
+  const apiVersions = ['v1beta', 'v1'];
   const timeoutMs = Number(env.geminiTimeoutMs);
   const requestTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1000 ? timeoutMs : 9000;
 
@@ -360,46 +572,91 @@ async function generateGeminiAnswer(historyMessages = []) {
   }, requestTimeoutMs);
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: buildGeminiSystemInstruction() }],
+    for (const modelName of modelCandidates) {
+      for (const apiVersion of apiVersions) {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/${apiVersion}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              systemInstruction: {
+                parts: [{ text: buildGeminiSystemInstruction() }],
+              },
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 500,
+                topP: 0.9,
+              },
+              contents: toGeminiContents(historyMessages),
+            }),
+            signal: controller.signal,
           },
-          generationConfig: {
-            temperature: 0.4,
-            maxOutputTokens: 500,
-            topP: 0.9,
-          },
-          contents: toGeminiContents(historyMessages),
-        }),
-        signal: controller.signal,
-      },
-    );
+        );
 
-    if (!response.ok) {
-      return '';
+        if (!response.ok) {
+          if (response.status === 429) {
+            let retryAfterSeconds = 60;
+
+            const retryAfterHeader = Number(response.headers.get('retry-after'));
+            if (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0) {
+              retryAfterSeconds = Math.ceil(retryAfterHeader);
+            } else {
+              const responseText = await response.text();
+              const parsedRetryAfter = parseRetryAfterSecondsFromGeminiError(responseText);
+              if (parsedRetryAfter > 0) {
+                retryAfterSeconds = parsedRetryAfter;
+              }
+            }
+
+            geminiQuotaBlockedUntilMs = Date.now() + retryAfterSeconds * 1000;
+            lastGeminiRetryAfterSeconds = retryAfterSeconds;
+            lastGeminiFailureReason = 'quota';
+            return '';
+          }
+
+          if (response.status === 401 || response.status === 403) {
+            lastGeminiFailureReason = 'auth';
+          } else if (!lastGeminiFailureReason) {
+            lastGeminiFailureReason = 'http-error';
+          }
+
+          continue;
+        }
+
+        const payload = await response.json();
+        const parts = payload?.candidates?.[0]?.content?.parts;
+
+        if (!Array.isArray(parts)) {
+          continue;
+        }
+
+        const answer = parts
+          .map((part) => normalizeText(part?.text))
+          .filter(Boolean)
+          .join('\n');
+
+        const normalizedAnswer = normalizeText(answer);
+
+        if (normalizedAnswer) {
+          geminiQuotaBlockedUntilMs = 0;
+          lastGeminiFailureReason = '';
+          lastGeminiRetryAfterSeconds = 0;
+          return normalizedAnswer;
+        }
+      }
     }
 
-    const payload = await response.json();
-    const parts = payload?.candidates?.[0]?.content?.parts;
-
-    if (!Array.isArray(parts)) {
-      return '';
+    return '';
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      lastGeminiFailureReason = 'timeout';
+    } else if (!lastGeminiFailureReason) {
+      lastGeminiFailureReason = 'network-error';
     }
 
-    const answer = parts
-      .map((part) => normalizeText(part?.text))
-      .filter(Boolean)
-      .join('\n');
-
-    return normalizeText(answer);
-  } catch {
     return '';
   } finally {
     clearTimeout(timeoutId);
@@ -820,15 +1077,6 @@ async function generateAssistantAnswer(historyMessages) {
     .find((item) => normalizeText(item?.senderRole).toLowerCase() === 'user');
 
   const userText = normalizeText(latestUserMessage?.text ?? latestUserMessage?.messageText);
-  const faqAnswer = findFaqAnswer(userText);
-
-  if (faqAnswer) {
-    return {
-      text: faqAnswer,
-      provider: 'faq',
-      model: 'faq-rules',
-    };
-  }
 
   const geminiAnswer = await generateGeminiAnswer(historyMessages);
 
@@ -841,9 +1089,15 @@ async function generateAssistantAnswer(historyMessages) {
   }
 
   return {
-    text: buildFallbackAnswer(),
-    provider: 'fallback',
-    model: 'local-fallback',
+    text: lastGeminiFailureReason === 'quota'
+      ? `Xin lỗi, trợ lý AI Gemini tạm hết quota trong thời điểm này.${lastGeminiRetryAfterSeconds > 0 ? ` Vui lòng thử lại sau khoảng ${lastGeminiRetryAfterSeconds} giây.` : ' Vui lòng thử lại sau ít phút.'}`
+      : lastGeminiFailureReason === 'auth' || lastGeminiFailureReason === 'missing-key'
+        ? 'Xin lỗi, trợ lý AI Gemini hiện chưa khả dụng do cấu hình API key. Quản trị viên cần cập nhật GEMINI_API_KEY mới để chatbot trả lời bình thường.'
+        : lastGeminiFailureReason === 'timeout'
+          ? 'Xin lỗi, trợ lý AI Gemini phản hồi chậm ở thời điểm này. Bạn vui lòng gửi lại câu hỏi giúp mình.'
+          : 'Xin lỗi, trợ lý AI Gemini hiện chưa khả dụng tạm thời. Bạn vui lòng thử lại sau ít phút.',
+    provider: 'gemini',
+    model: 'gemini-unavailable',
   };
 }
 

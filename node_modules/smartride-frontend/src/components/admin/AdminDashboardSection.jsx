@@ -1,10 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
+import DatePicker, { registerLocale } from 'react-datepicker';
+import { isValid, parse } from 'date-fns';
+import { vi } from 'date-fns/locale';
 import { rideService } from '../../services/rideService';
 import { adminUserService } from '../../services/adminUserService';
+import 'react-datepicker/dist/react-datepicker.css';
+
+registerLocale('vi-VN', vi);
 
 const DATE_FORMATTER = new Intl.DateTimeFormat('vi-VN', {
   day: '2-digit',
   month: '2-digit',
+});
+
+const FULL_DATE_FORMATTER = new Intl.DateTimeFormat('vi-VN', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
 });
 
 const CURRENCY_FORMATTER = new Intl.NumberFormat('vi-VN');
@@ -22,8 +34,52 @@ function parseDateInput(value) {
     return null;
   }
 
+  const ddmmyyyy = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    const day = Number(ddmmyyyy[1]);
+    const month = Number(ddmmyyyy[2]);
+    const year = Number(ddmmyyyy[3]);
+    const parsed = new Date(year, month - 1, day);
+
+    if (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return parsed;
+    }
+    return null;
+  }
+
   const parsed = new Date(`${normalized}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseDateForPicker(dateString) {
+  const normalizedValue = String(dateString ?? '').trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedDate = parse(normalizedValue, 'yyyy-MM-dd', new Date());
+  if (isValid(parsedDate)) {
+    return parsedDate;
+  }
+
+  const fallbackDate = new Date(normalizedValue);
+  return isValid(fallbackDate) ? fallbackDate : null;
+}
+
+function formatDateForFilterValue(dateValue) {
+  if (!(dateValue instanceof Date) || !isValid(dateValue)) {
+    return '';
+  }
+
+  const year = dateValue.getFullYear();
+  const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+  const day = String(dateValue.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function normalizeTripStatus(value) {
@@ -105,7 +161,7 @@ function describeArc(cx, cy, radius, startAngle, endAngle) {
   return `M ${cx} ${cy} L ${start.x.toFixed(3)} ${start.y.toFixed(3)} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x.toFixed(3)} ${end.y.toFixed(3)} Z`;
 }
 
-function DashboardLineChart({ data = [] }) {
+function DashboardLineChart({ data = [], onShowTooltip, onMoveTooltip, onHideTooltip }) {
   const width = 760;
   const height = 320;
   const maxRideCount = Math.max(1, ...data.map((item) => item.tripCount));
@@ -159,8 +215,18 @@ function DashboardLineChart({ data = [] }) {
 
         return (
           <g key={item.label}>
-            <circle cx={x} cy={tripY} r="4" fill="#1f6feb" />
-            <circle cx={x} cy={revenueY} r="4" fill="#f97316" />
+            <circle
+              cx={x} cy={tripY} r="11" fill="transparent" style={{ cursor: 'crosshair' }}
+              onMouseMove={(e) => { onMoveTooltip?.(e); onShowTooltip?.(e, [`📅 ${item.fullDateLabel}`, `🚗 Chuyến đi: ${item.tripCount}`]); }}
+              onMouseLeave={() => onHideTooltip?.()}
+            />
+            <circle
+              cx={x} cy={revenueY} r="11" fill="transparent" style={{ cursor: 'crosshair' }}
+              onMouseMove={(e) => { onMoveTooltip?.(e); onShowTooltip?.(e, [`📅 ${item.fullDateLabel}`, `💰 Doanh thu: ${formatRevenue(item.revenue)}`]); }}
+              onMouseLeave={() => onHideTooltip?.()}
+            />
+            <circle cx={x} cy={tripY} r="4" fill="#1f6feb" style={{ pointerEvents: 'none' }} />
+            <circle cx={x} cy={revenueY} r="4" fill="#f97316" style={{ pointerEvents: 'none' }} />
             <text x={x} y={height - 6} textAnchor="middle" className="admin-dashboard__axis-label">
               {item.label}
             </text>
@@ -171,7 +237,7 @@ function DashboardLineChart({ data = [] }) {
   );
 }
 
-function DashboardPieChart({ segments = [] }) {
+function DashboardPieChart({ segments = [], onShowTooltip, onMoveTooltip, onHideTooltip }) {
   const size = 290;
   const cx = 145;
   const cy = 145;
@@ -188,7 +254,18 @@ function DashboardPieChart({ segments = [] }) {
         const pathD = describeArc(cx, cy, radius, angleCursor, endAngle);
         angleCursor = endAngle;
 
-        return <path key={segment.id} d={pathD} fill={segment.color} stroke="#fff" strokeWidth="2" />;
+        return (
+          <path
+            key={segment.id}
+            d={pathD}
+            fill={segment.color}
+            stroke="#fff"
+            strokeWidth="2"
+            style={{ cursor: 'pointer' }}
+            onMouseMove={(e) => { onMoveTooltip?.(e); onShowTooltip?.(e, [`${segment.label}`, `Số chuyến: ${segment.value}`, `Tỷ lệ: ${segment.percent.toFixed(1)}%`]); }}
+            onMouseLeave={() => onHideTooltip?.()}
+          />
+        );
       })}
       <circle cx={cx} cy={cy} r="52" fill="#fff" />
       <text x={cx} y={cy - 4} textAnchor="middle" className="admin-dashboard__pie-total-label">
@@ -201,7 +278,7 @@ function DashboardPieChart({ segments = [] }) {
   );
 }
 
-function DashboardBarChart({ data = [] }) {
+function DashboardBarChart({ data = [], onShowTooltip, onMoveTooltip, onHideTooltip }) {
   const width = 420;
   const height = 290;
   const barWidth = data.length ? Math.min(52, Math.floor((width - 80) / data.length) - 12) : 38;
@@ -221,7 +298,12 @@ function DashboardBarChart({ data = [] }) {
 
         return (
           <g key={item.id}>
-            <rect x={x} y={y} width={barWidth} height={barHeight} rx="8" fill="#2563eb" />
+            <rect
+              x={x} y={y} width={barWidth} height={barHeight} rx="8" fill="#2563eb"
+              style={{ cursor: 'pointer' }}
+              onMouseMove={(e) => { onMoveTooltip?.(e); onShowTooltip?.(e, [`🧑‍✈️ ${item.fullLabel}`, `Số chuyến: ${item.value}`]); }}
+              onMouseLeave={() => onHideTooltip?.()}
+            />
             <text x={x + barWidth / 2} y={y - 7} textAnchor="middle" className="admin-dashboard__bar-value">
               {item.value}
             </text>
@@ -240,6 +322,11 @@ export default function AdminDashboardSection() {
   const [error, setError] = useState('');
   const [users, setUsers] = useState([]);
   const [trips, setTrips] = useState([]);
+  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, lines: [] });
+
+  const showTooltip = (e, lines) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, lines });
+  const moveTooltip = (e) => setTooltip((prev) => (prev.visible ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+  const hideTooltip = () => setTooltip((prev) => ({ ...prev, visible: false }));
 
   const [fromDate, setFromDate] = useState(() => {
     const now = new Date();
@@ -255,7 +342,7 @@ export default function AdminDashboardSection() {
     setError('');
 
     Promise.all([
-      rideService.getTripHistory({ roleCode: 'Q1', limit: 40 }, { signal: controller.signal }),
+      rideService.getTripHistory({ roleCode: 'Q1', limit: 300 }, { signal: controller.signal }),
       adminUserService.listUsers({ signal: controller.signal }),
     ])
       .then(([tripResponse, userResponse]) => {
@@ -343,7 +430,9 @@ export default function AdminDashboardSection() {
       .sort((a, b) => a.date.getTime() - b.date.getTime())
       .map((entry) => ({
         label: DATE_FORMATTER.format(entry.date),
+        fullDateLabel: FULL_DATE_FORMATTER.format(entry.date),
         tripCount: entry.tripCount,
+        revenue: entry.revenue,
         revenueMillion: Number((entry.revenue / 1000000).toFixed(2)),
       }));
   }, [filteredTrips]);
@@ -411,7 +500,21 @@ export default function AdminDashboardSection() {
   }, [filteredTrips]);
 
   return (
-    <section className="admin-dashboard" aria-label="Admin dashboard">
+    <>
+      {tooltip.visible && (
+        <div
+          className="admin-dashboard__tooltip"
+          style={{ left: tooltip.x + 14, top: tooltip.y - 8 }}
+          aria-hidden="true"
+        >
+          {tooltip.lines.map((line, i) => (
+            <span key={i} className={i === 0 ? 'admin-dashboard__tooltip-title' : 'admin-dashboard__tooltip-row'}>
+              {line}
+            </span>
+          ))}
+        </div>
+      )}
+      <section className="admin-dashboard" aria-label="Admin dashboard">
       <div className="container admin-dashboard__container">
         <header className="admin-dashboard__header">
           <h2>Admin dashboard</h2>
@@ -419,17 +522,45 @@ export default function AdminDashboardSection() {
           <div className="admin-dashboard__filters">
             <label>
               <span>Từ ngày:</span>
-              <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+              <DatePicker
+                selected={parseDateForPicker(fromDate)}
+                onChange={(selectedDate) => setFromDate(formatDateForFilterValue(selectedDate))}
+                locale="vi-VN"
+                dateFormat="dd/MM/yyyy"
+                placeholderText="dd/mm/yyyy"
+                showMonthDropdown
+                showYearDropdown
+                dropdownMode="select"
+                shouldCloseOnSelect
+                className="admin-user-modal__date-input admin-dashboard__date-input"
+                calendarClassName="admin-user-modal__date-calendar"
+                popperClassName="admin-user-modal__date-popper"
+                popperPlacement="bottom-start"
+                autoComplete="off"
+                showPopperArrow={false}
+              />
             </label>
 
             <label>
               <span>Đến ngày:</span>
-              <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+              <DatePicker
+                selected={parseDateForPicker(toDate)}
+                onChange={(selectedDate) => setToDate(formatDateForFilterValue(selectedDate))}
+                locale="vi-VN"
+                dateFormat="dd/MM/yyyy"
+                placeholderText="dd/mm/yyyy"
+                showMonthDropdown
+                showYearDropdown
+                dropdownMode="select"
+                shouldCloseOnSelect
+                className="admin-user-modal__date-input admin-dashboard__date-input"
+                calendarClassName="admin-user-modal__date-calendar"
+                popperClassName="admin-user-modal__date-popper"
+                popperPlacement="bottom-start"
+                autoComplete="off"
+                showPopperArrow={false}
+              />
             </label>
-
-            <button type="button" className="admin-dashboard__filter-button">
-              Lọc
-            </button>
           </div>
         </header>
 
@@ -473,14 +604,14 @@ export default function AdminDashboardSection() {
                 </div>
               </header>
 
-              <DashboardLineChart data={lineChartData} />
+              <DashboardLineChart data={lineChartData} onShowTooltip={showTooltip} onMoveTooltip={moveTooltip} onHideTooltip={hideTooltip} />
             </section>
 
             <section className="admin-dashboard__split" aria-label="Biểu đồ trạng thái và top tài xế">
               <article className="admin-dashboard__chart-card">
                 <h3>Biểu đồ tỷ lệ trạng thái chuyến</h3>
                 <div className="admin-dashboard__pie-layout">
-                  <DashboardPieChart segments={statusSegments} />
+                  <DashboardPieChart segments={statusSegments} onShowTooltip={showTooltip} onMoveTooltip={moveTooltip} onHideTooltip={hideTooltip} />
 
                   <div className="admin-dashboard__status-list">
                     {statusSegments.map((segment) => (
@@ -497,7 +628,7 @@ export default function AdminDashboardSection() {
                 <h3>Top tài xế</h3>
                 {topDrivers.length ? (
                   <>
-                    <DashboardBarChart data={topDrivers} />
+                    <DashboardBarChart data={topDrivers} onShowTooltip={showTooltip} onMoveTooltip={moveTooltip} onHideTooltip={hideTooltip} />
                     <ul className="admin-dashboard__driver-list" aria-label="Danh sách top tài xế">
                       {topDrivers.map((driver) => (
                         <li key={driver.id}>
@@ -516,5 +647,6 @@ export default function AdminDashboardSection() {
         ) : null}
       </div>
     </section>
+    </>
   );
 }

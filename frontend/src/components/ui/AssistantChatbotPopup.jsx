@@ -17,6 +17,15 @@ function normalizeText(value) {
     .replace(/\s+/g, ' ');
 }
 
+function normalizeSearchToken(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .toLowerCase();
+}
+
 /**
  * Convert a subset of Markdown to safe HTML for chat bubbles.
  * Handles: **bold**, *italic*, numbered lists, bullet lists, newlines.
@@ -134,6 +143,22 @@ function buildConversationId() {
   return `chat-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 }
 
+function extractRetryAfterSecondsFromText(text) {
+  const normalizedText = normalizeText(text).toLowerCase();
+
+  if (!normalizedText) {
+    return 0;
+  }
+
+  const match = normalizedText.match(/sau\s+khoang\s+(\d+)\s+giay/);
+  if (!match?.[1]) {
+    return 0;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 export default function AssistantChatbotPopup({
   open = false,
   onClose,
@@ -153,13 +178,71 @@ export default function AssistantChatbotPopup({
   const [sending, setSending] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [sendError, setSendError] = useState('');
+  const [autoRetryRemainingSeconds, setAutoRetryRemainingSeconds] = useState(0);
+  const [autoRetryNotice, setAutoRetryNotice] = useState('');
   const threadRef = useRef(null);
   const inputRef = useRef(null);
   const activeRequestRef = useRef(0);
+  const autoRetryTimeoutRef = useRef(null);
+  const autoRetryCountdownRef = useRef(null);
 
   const normalizedAccountId = normalizeText(accountId);
   const normalizedRoleCode = normalizeText(roleCode).toUpperCase();
   const storageKey = useMemo(() => buildStorageKey(normalizedAccountId), [normalizedAccountId]);
+
+  const clearAutoRetry = useCallback(() => {
+    if (autoRetryTimeoutRef.current) {
+      window.clearTimeout(autoRetryTimeoutRef.current);
+      autoRetryTimeoutRef.current = null;
+    }
+
+    if (autoRetryCountdownRef.current) {
+      window.clearInterval(autoRetryCountdownRef.current);
+      autoRetryCountdownRef.current = null;
+    }
+
+    setAutoRetryRemainingSeconds(0);
+    setAutoRetryNotice('');
+  }, []);
+
+  const scheduleAutoRetry = useCallback((messageText, retryAfterSeconds, sendAction) => {
+    if (!retryAfterSeconds || retryAfterSeconds <= 0) {
+      return;
+    }
+
+    clearAutoRetry();
+
+    setAutoRetryRemainingSeconds(retryAfterSeconds);
+    setAutoRetryNotice(`Hệ thống sẽ tự thử lại sau ${retryAfterSeconds} giây...`);
+
+    autoRetryCountdownRef.current = window.setInterval(() => {
+      setAutoRetryRemainingSeconds((current) => {
+        if (current <= 1) {
+          if (autoRetryCountdownRef.current) {
+            window.clearInterval(autoRetryCountdownRef.current);
+            autoRetryCountdownRef.current = null;
+          }
+
+          setAutoRetryNotice('Đang tự thử lại...');
+          return 0;
+        }
+
+        const nextValue = current - 1;
+        setAutoRetryNotice(`Hệ thống sẽ tự thử lại sau ${nextValue} giây...`);
+        return nextValue;
+      });
+    }, 1000);
+
+    autoRetryTimeoutRef.current = window.setTimeout(() => {
+      autoRetryTimeoutRef.current = null;
+      if (autoRetryCountdownRef.current) {
+        window.clearInterval(autoRetryCountdownRef.current);
+        autoRetryCountdownRef.current = null;
+      }
+
+      void sendAction(messageText, { isAutoRetry: true });
+    }, retryAfterSeconds * 1000);
+  }, [clearAutoRetry]);
 
   const applyHistoryPayload = useCallback((response) => {
     const resolvedConversationId = normalizeText(response?.conversation?.conversationId);
@@ -237,11 +320,16 @@ export default function AssistantChatbotPopup({
     if (!open) {
       setInputValue('');
       setSendError('');
+      clearAutoRetry();
       return;
     }
 
     inputRef.current?.focus();
-  }, [open]);
+  }, [clearAutoRetry, open]);
+
+  useEffect(() => () => {
+    clearAutoRetry();
+  }, [clearAutoRetry]);
 
   useEffect(() => {
     if (!open || typeof window === 'undefined') {
@@ -349,15 +437,22 @@ export default function AssistantChatbotPopup({
     return null;
   }
 
-  const handleSend = async (messageOverride = '') => {
+  const handleSend = async (messageOverride = '', options = {}) => {
+    const isAutoRetry = Boolean(options?.isAutoRetry);
     const messageText = normalizeText(messageOverride || inputValue);
 
     if (!messageText || sending) {
       return;
     }
 
+    if (!isAutoRetry) {
+      clearAutoRetry();
+    }
+
     setSendError('');
-    setInputValue('');
+    if (!isAutoRetry) {
+      setInputValue('');
+    }
 
     const tempUserMessage = {
       id: `user-${Date.now()}`,
@@ -366,7 +461,10 @@ export default function AssistantChatbotPopup({
       createdAt: new Date().toISOString(),
     };
 
-    setMessages((currentMessages) => [...currentMessages, tempUserMessage]);
+    if (!isAutoRetry) {
+      setMessages((currentMessages) => [...currentMessages, tempUserMessage]);
+    }
+
     setSending(true);
 
     try {
@@ -406,8 +504,32 @@ export default function AssistantChatbotPopup({
         text: 'Mình đã nhận được yêu cầu của bạn.',
       });
 
+      const retryAfterSeconds = extractRetryAfterSecondsFromText(assistantMessage.text);
+      const isQuotaMessage = retryAfterSeconds > 0 || /tam\s*het\s*quota|h[êe]t\s*quota/i.test(normalizeSearchToken(assistantMessage.text));
+
+      if (retryAfterSeconds > 0 && !isAutoRetry) {
+        scheduleAutoRetry(messageText, retryAfterSeconds, handleSend);
+      } else if (!isAutoRetry) {
+        setAutoRetryNotice('');
+        setAutoRetryRemainingSeconds(0);
+      }
+
+      if (isAutoRetry && isQuotaMessage) {
+        setAutoRetryNotice(
+          retryAfterSeconds > 0
+            ? `Gemini vẫn đang hết quota. Bạn thử lại thủ công sau khoảng ${retryAfterSeconds} giây.`
+            : 'Gemini vẫn đang hết quota. Bạn vui lòng thử lại sau ít phút.',
+        );
+        return;
+      }
+
       setMessages((currentMessages) => {
         const withoutTemp = currentMessages.filter((item) => item.id !== tempUserMessage.id);
+
+        if (isAutoRetry) {
+          return [...withoutTemp, assistantMessage].filter((item) => normalizeText(item.text));
+        }
+
         return [...withoutTemp, userMessage, assistantMessage].filter((item) => normalizeText(item.text));
       });
     } catch (error) {
@@ -708,6 +830,7 @@ export default function AssistantChatbotPopup({
         </form>
 
         {loading ? <p className="assistant-chatbot__status">Đang tải lịch sử hội thoại...</p> : null}
+        {autoRetryNotice ? <p className="assistant-chatbot__status">{autoRetryNotice}</p> : null}
         {loadError ? <p className="assistant-chatbot__status assistant-chatbot__status--error">{loadError}</p> : null}
         {sendError ? <p className="assistant-chatbot__status assistant-chatbot__status--error">{sendError}</p> : null}
       </section>

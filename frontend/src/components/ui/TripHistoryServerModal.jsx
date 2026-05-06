@@ -897,25 +897,25 @@ export default function TripHistoryServerModal({
             <p className="trip-history-modal__eyebrow">{preset.eyebrow}</p>
             <h3>{preset.title}</h3>
             <p className="trip-history-modal__summary">{preset.summary}</p>
+
+            <div className="trip-history-modal__hero-meta">
+              <span className="trip-history-modal__hero-chip">{preset.accentLabel}</span>
+              <span className="trip-history-modal__hero-chip trip-history-modal__hero-chip--soft">
+                {accountDisplayName || roleLabel || 'Người dùng SmartRide'}
+              </span>
+              <span className="trip-history-modal__hero-note">{preset.heroNote}</span>
+            </div>
           </div>
 
-          <div className="trip-history-modal__hero-meta">
-            <span className="trip-history-modal__hero-chip">{preset.accentLabel}</span>
-            <span className="trip-history-modal__hero-chip trip-history-modal__hero-chip--soft">
-              {accountDisplayName || roleLabel || 'Người dùng SmartRide'}
-            </span>
-            <span className="trip-history-modal__hero-note">{preset.heroNote}</span>
+          <div className="trip-history-modal__hero-stats" aria-label="Tổng quan chuyến đi">
+            {stats.map((stat) => (
+              <article className="trip-history-modal__stat-card" key={stat.label}>
+                <strong>{stat.value}</strong>
+                <span>{stat.label}</span>
+              </article>
+            ))}
           </div>
         </header>
-
-        <section className="trip-history-modal__stats" aria-label="Tổng quan chuyến đi">
-          {stats.map((stat) => (
-            <article className="trip-history-modal__stat-card" key={stat.label}>
-              <strong>{stat.value}</strong>
-              <span>{stat.label}</span>
-            </article>
-          ))}
-        </section>
 
         <section className="trip-history-modal__toolbar" aria-label="Bộ lọc lịch sử chuyến">
           <label className="trip-history-modal__field trip-history-modal__field--search">

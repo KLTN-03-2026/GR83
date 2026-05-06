@@ -8,7 +8,7 @@ import { format, isValid, parse } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import 'react-datepicker/dist/react-datepicker.css';
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './AdminPromotionManagementModal.css';
 
 registerLocale('vi-VN', vi);
@@ -181,8 +181,18 @@ function parseDateForPicker(value) {
     return null;
   }
 
-  const parsedDate = parse(normalizedValue.slice(0, 10), 'yyyy-MM-dd', new Date());
-  return isValid(parsedDate) ? parsedDate : null;
+  const supportedFormats = ['yyyy-MM-dd', 'dd/MM/yyyy', 'd/M/yyyy'];
+
+  for (const formatPattern of supportedFormats) {
+    const parsedDate = parse(normalizedValue, formatPattern, new Date());
+
+    if (isValid(parsedDate)) {
+      return parsedDate;
+    }
+  }
+
+  const fallbackDate = new Date(normalizedValue);
+  return isValid(fallbackDate) ? fallbackDate : null;
 }
 
 function formatDateForPayload(value) {
@@ -191,6 +201,14 @@ function formatDateForPayload(value) {
   }
 
   return format(value, 'yyyy-MM-dd');
+}
+
+function formatDateForVietnamInput(value) {
+  if (!value) {
+    return '';
+  }
+
+  return format(value, 'dd/MM/yyyy');
 }
 
 function formatMoneyValue(value) {
@@ -408,17 +426,19 @@ function validatePromotionForm(form = {}) {
 
 function StatCard({ tone, label, value }) {
   return (
-    <article className={classNames('admin-promotion-modal__stat-card', `admin-promotion-modal__stat-card--${tone}`)}>
-      <span>{label}</span>
+    <article className="admin-promotion-modal__stat-card">
       <strong>{value}</strong>
+      <span>{label}</span>
     </article>
   );
 }
 
 export default function AdminPromotionManagementModal({ open = false, onClose }) {
+  const expiryFilterFieldRef = useRef(null);
   const [promotions, setPromotions] = useState([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [expiryKeyword, setExpiryKeyword] = useState('');
+  const [expiryPickerOpen, setExpiryPickerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [editorMode, setEditorMode] = useState('none');
   const [editingPromotionId, setEditingPromotionId] = useState('');
@@ -456,6 +476,7 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
   const filteredPromotions = useMemo(() => {
     const normalizedSearchKeyword = normalizeToken(searchKeyword);
     const normalizedExpiryKeyword = normalizeToken(expiryKeyword);
+    const selectedExpiryDate = parseDateForPicker(expiryKeyword);
 
     return promotions.filter((promotion) => {
       if (statusFilter !== 'all' && normalizeStatus(promotion.status) !== statusFilter) {
@@ -472,7 +493,28 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
         }
       }
 
-      if (normalizedExpiryKeyword) {
+      if (selectedExpiryDate) {
+        const promotionExpiryDate = parseDateForPicker(promotion.expiresAt);
+
+        if (!promotionExpiryDate) {
+          return false;
+        }
+
+        const promotionExpiryDateKey = new Date(
+          promotionExpiryDate.getFullYear(),
+          promotionExpiryDate.getMonth(),
+          promotionExpiryDate.getDate(),
+        );
+        const selectedExpiryDateKey = new Date(
+          selectedExpiryDate.getFullYear(),
+          selectedExpiryDate.getMonth(),
+          selectedExpiryDate.getDate(),
+        );
+
+        if (promotionExpiryDateKey < selectedExpiryDateKey) {
+          return false;
+        }
+      } else if (normalizedExpiryKeyword) {
         const expiryText = normalizeToken(formatDateDisplay(promotion.expiresAt));
 
         if (!expiryText.includes(normalizedExpiryKeyword)) {
@@ -511,6 +553,7 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
       setPromotions([]);
       setSearchKeyword('');
       setExpiryKeyword('');
+      setExpiryPickerOpen(false);
       setStatusFilter('all');
       setEditorMode('none');
       setEditingPromotionId('');
@@ -561,6 +604,32 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
       abortController.abort();
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!expiryPickerOpen) {
+      return undefined;
+    }
+
+    const handleDocumentPointerDown = (event) => {
+      if (!expiryFilterFieldRef.current?.contains(event.target)) {
+        setExpiryPickerOpen(false);
+      }
+    };
+
+    const handleDocumentKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setExpiryPickerOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleDocumentPointerDown);
+    document.addEventListener('keydown', handleDocumentKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentPointerDown);
+      document.removeEventListener('keydown', handleDocumentKeyDown);
+    };
+  }, [expiryPickerOpen]);
 
   useEffect(() => {
     if (!feedbackMessage) {
@@ -813,14 +882,63 @@ export default function AdminPromotionManagementModal({ open = false, onClose })
             />
           </label>
 
-          <label className="admin-promotion-modal__field admin-promotion-modal__field--search">
+          <label
+            className="admin-promotion-modal__field admin-promotion-modal__field--date-filter"
+            ref={expiryFilterFieldRef}
+          >
             <span className="admin-promotion-modal__sr-only">Ngày hết hạn</span>
             <input
               type="text"
               value={expiryKeyword}
               onChange={(event) => setExpiryKeyword(event.target.value)}
+              onBlur={() => {
+                const parsedDate = parseDateForPicker(expiryKeyword);
+
+                if (!parsedDate) {
+                  return;
+                }
+
+                setExpiryKeyword(formatDateForVietnamInput(parsedDate));
+              }}
+              onClick={() => setExpiryPickerOpen((current) => !current)}
+              onFocus={() => setExpiryPickerOpen(true)}
               placeholder="dd/mm/yyyy"
+              className="admin-user-modal__date-input admin-promotion-modal__filter-date-input"
+              aria-expanded={expiryPickerOpen}
+              aria-haspopup="dialog"
             />
+
+            {expiryPickerOpen ? (
+              <div className="admin-promotion-modal__filter-date-panel">
+                <DatePicker
+                  inline
+                  selected={parseDateForPicker(expiryKeyword)}
+                  onChange={(selectedDate) => {
+                    setExpiryKeyword(formatDateForVietnamInput(selectedDate));
+                    setExpiryPickerOpen(false);
+                  }}
+                  locale="vi-VN"
+                  dateFormat="dd/MM/yyyy"
+                  showMonthDropdown
+                  showYearDropdown
+                  dropdownMode="select"
+                  calendarClassName="admin-user-modal__date-calendar"
+                />
+
+                <div className="admin-promotion-modal__filter-date-actions">
+                  <button
+                    type="button"
+                    className="admin-promotion-modal__filter-date-action"
+                    onClick={() => {
+                      setExpiryKeyword('');
+                      setExpiryPickerOpen(false);
+                    }}
+                  >
+                    Xóa lọc
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </label>
 
           <label className="admin-promotion-modal__field">

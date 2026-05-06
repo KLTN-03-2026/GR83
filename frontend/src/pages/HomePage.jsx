@@ -9,6 +9,7 @@ import AssistantChatbotPopup from '../components/ui/AssistantChatbotPopup';
 import DriverRideRequestModal from '../components/ui/DriverRideRequestModal';
 import DriverRideRejectModal from '../components/ui/DriverRideRejectModal';
 import DriverTripActionModal from '../components/ui/DriverTripActionModal';
+import BookingGuideModal from '../components/ui/BookingGuideModal';
 import AdminDashboardSection from '../components/admin/AdminDashboardSection';
 import SectionHeading from '../components/ui/SectionHeading';
 import { createLocationRecord, useAppContext } from '../context/AppContext';
@@ -1623,6 +1624,7 @@ export default function HomePage() {
   const [bookingHighlightedPromoId, setBookingHighlightedPromoId] = useState('');
   const [bookingPromoCards, setBookingPromoCards] = useState(() => promoCards);
   const [assistantChatbotOpen, setAssistantChatbotOpen] = useState(false);
+  const [bookingGuideModalOpen, setBookingGuideModalOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [driverSignupModalOpen, setDriverSignupModalOpen] = useState(false);
@@ -7201,10 +7203,16 @@ export default function HomePage() {
         onLogout={handleLogout}
         onLogin={openLoginModal}
         onNotify={showMiniToast}
+        onHelp={() => setBookingGuideModalOpen(true)}
         onForceTripCancelled={handleForceTripCancelled}
         driverCheckedIn={isDriverCheckedIn}
         driverAutoReceiveEnabled={isDriverAutoReceiveEnabled}
         onDriverCheckedInChange={handleDriverCheckedInChange}
+      />
+
+      <BookingGuideModal
+        open={bookingGuideModalOpen}
+        onClose={() => setBookingGuideModalOpen(false)}
       />
 
       <main>

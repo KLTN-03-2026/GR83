@@ -302,6 +302,7 @@ export default function Header({
   onLogout,
   onLogin,
   onNotify,
+  onHelp,
   onForceTripCancelled,
   driverCheckedIn = false,
   driverAutoReceiveEnabled = true,
@@ -1480,7 +1481,7 @@ export default function Header({
             ) : null}
           </div>
 
-          <button className="icon-button" type="button" aria-label="Trợ giúp">
+          <button className="icon-button" type="button" aria-label="Trợ giúp" onClick={() => onHelp?.()}>
             <img className="icon-button__img" src={helpIcon} alt="" aria-hidden="true" />
           </button>
         </nav>

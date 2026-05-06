@@ -325,31 +325,31 @@ export default function AdminDriverViolationManagementModal({ open = false, onCl
 
       <div className="admin-driver-violation-modal__window" onClick={(event) => event.stopPropagation()}>
         <header className="admin-driver-violation-modal__header">
-          <div>
+          <div className="admin-driver-violation-modal__header-copy">
             <p className="admin-driver-violation-modal__eyebrow">Kiểm soát nội bộ</p>
             <h2>Xử lí vi phạm</h2>
             <p>Hệ thống tự quét dữ liệu chuyến đi, đánh giá và phản ánh để tạo danh sách vi phạm tài xế cho admin xử lí.</p>
+          </div>
+
+          <div className="admin-driver-violation-modal__header-stats" aria-label="Thống kê vi phạm tài xế">
+            <article className="admin-driver-violation-modal__stat-card">
+              <strong>{Number(summary?.totalCount ?? 0)}</strong>
+              <span>Tổng vi phạm</span>
+            </article>
+            <article className="admin-driver-violation-modal__stat-card">
+              <strong>{Number(summary?.pendingCount ?? 0)}</strong>
+              <span>Chưa xử lí</span>
+            </article>
+            <article className="admin-driver-violation-modal__stat-card">
+              <strong>{Number(summary?.resolvedCount ?? 0)}</strong>
+              <span>Đã xử lí</span>
+            </article>
           </div>
 
           <button type="button" className="admin-driver-violation-modal__close" onClick={onClose} aria-label="Đóng">
             <img src={closeIcon} alt="" aria-hidden="true" />
           </button>
         </header>
-
-        <section className="admin-driver-violation-modal__stats" aria-label="Thống kê vi phạm tài xế">
-          <article className="admin-driver-violation-modal__stat-card">
-            <strong>{Number(summary?.totalCount ?? 0)}</strong>
-            <span>Tổng vi phạm</span>
-          </article>
-          <article className="admin-driver-violation-modal__stat-card">
-            <strong>{Number(summary?.pendingCount ?? 0)}</strong>
-            <span>Chưa xử lí</span>
-          </article>
-          <article className="admin-driver-violation-modal__stat-card">
-            <strong>{Number(summary?.resolvedCount ?? 0)}</strong>
-            <span>Đã xử lí</span>
-          </article>
-        </section>
 
         <div className="admin-driver-violation-modal__toolbar">
           <label className="admin-driver-violation-modal__field">

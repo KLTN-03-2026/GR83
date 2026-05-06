@@ -193,6 +193,16 @@ export default function AdminComplaintManagementModal({ open = false, onClose, a
     return items;
   }, [items]);
 
+  const complaintStats = useMemo(() => {
+    const stats = { total: items.length, processing: 0, resolved: 0 };
+    items.forEach((item) => {
+      const status = String(item.status ?? '').toLowerCase().trim();
+      if (status === 'resolved') stats.resolved++;
+      else stats.processing++;
+    });
+    return stats;
+  }, [items]);
+
   const openDetail = async (complaintId) => {
     if (!complaintId) {
       return;
@@ -256,8 +266,30 @@ export default function AdminComplaintManagementModal({ open = false, onClose, a
       <div className="admin-complaint-modal__backdrop" onClick={onClose} aria-hidden="true" />
       <div className="admin-complaint-modal__window" onClick={(event) => event.stopPropagation()}>
         <header className="admin-complaint-modal__header">
-          <h2>Xử lí khiếu nại</h2>
-          <button type="button" onClick={onClose} aria-label="Đóng">
+          <div className="admin-complaint-modal__header-copy">
+            <p className="admin-complaint-modal__eyebrow">ADMIN / KHIẾU NẠI</p>
+            <h2>XỬ LÍ KHIẾU NẠI</h2>
+            <p>Tiếp nhận, xử lí và theo dõi các khiếu nại từ khách hàng về dịch vụ trong một giao diện duy nhất.</p>
+          </div>
+
+          <div className="admin-complaint-modal__header-stats" aria-label="Thống kê khiếu nại">
+            <article className="admin-complaint-modal__stat-card">
+              <strong>{complaintStats.total}</strong>
+              <span>Tổng khiếu nại</span>
+            </article>
+
+            <article className="admin-complaint-modal__stat-card">
+              <strong>{complaintStats.processing}</strong>
+              <span>Đang xử lí</span>
+            </article>
+
+            <article className="admin-complaint-modal__stat-card">
+              <strong>{complaintStats.resolved}</strong>
+              <span>Đã giải quyết</span>
+            </article>
+          </div>
+
+          <button type="button" className="admin-complaint-modal__close" onClick={onClose} aria-label="Đóng xử lí khiếu nại">
             <img src={closeIcon} alt="" aria-hidden="true" />
           </button>
         </header>
