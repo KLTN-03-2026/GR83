@@ -508,7 +508,9 @@ export default function AssistantChatbotPopup({
       const isQuotaMessage = retryAfterSeconds > 0 || /tam\s*het\s*quota|h[êe]t\s*quota/i.test(normalizeSearchToken(assistantMessage.text));
 
       if (retryAfterSeconds > 0 && !isAutoRetry) {
-        scheduleAutoRetry(messageText, retryAfterSeconds, handleSend);
+        clearAutoRetry();
+        setAutoRetryNotice(`Gemini đang bận. Bạn vui lòng thử lại sau khoảng ${retryAfterSeconds} giây.`);
+        setAutoRetryRemainingSeconds(0);
       } else if (!isAutoRetry) {
         setAutoRetryNotice('');
         setAutoRetryRemainingSeconds(0);

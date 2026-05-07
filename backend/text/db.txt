@@ -589,10 +589,10 @@ CREATE TABLE dbo.PaymentGatewayAudit
     CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (AuditId),
     CONSTRAINT FK_PaymentGatewayAudit_ThanhToan FOREIGN KEY (PaymentCode)
         REFERENCES dbo.ThanhToan(MaTT)
-        ON UPDATE CASCADE ON DELETE SET NULL,
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
     CONSTRAINT FK_PaymentGatewayAudit_DatXe FOREIGN KEY (BookingCode)
         REFERENCES dbo.DatXe(MaChuyen)
-        ON UPDATE CASCADE ON DELETE SET NULL
+        ON UPDATE NO ACTION ON DELETE NO ACTION
 );
 GO
 
@@ -889,8 +889,4 @@ GO
 CREATE INDEX IX_ViPhamTaiXe_MaTKTaiXe_NgayPhatHien    ON dbo.ViPhamTaiXe (MaTKTaiXe, NgayPhatHien DESC);
 GO
 
--- ============================================================================
--- DỮ LIỆU MẪU
--- Tách riêng để dễ quản lý và mở rộng số liệu dashboard/revenue:
---   backend/text/db.seed.sql
--- ============================================================================
+

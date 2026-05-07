@@ -53,6 +53,7 @@ let assistantChatSchemaPromise = null;
 let lastGeminiFailureReason = '';
 let geminiQuotaBlockedUntilMs = 0;
 let lastGeminiRetryAfterSeconds = 0;
+let lastGeminiResolvedModel = '';
 
 function parseRetryAfterSecondsFromGeminiError(payloadOrText = '') {
   const rawText = typeof payloadOrText === 'string'
@@ -71,6 +72,19 @@ function parseRetryAfterSecondsFromGeminiError(payloadOrText = '') {
   }
 
   return Math.ceil(parsedSeconds);
+}
+
+function buildGeminiModelCandidates() {
+  const preferredModel = (normalizeText(env.geminiModel) || 'gemini-2.0-flash').replace(/^models\//i, '');
+  const configuredCandidates = String(env.geminiModelCandidates ?? '')
+    .split(',')
+    .map((item) => normalizeText(item).replace(/^models\//i, ''))
+    .filter(Boolean);
+
+  return Array.from(new Set([
+    preferredModel,
+    ...configuredCandidates,
+  ]));
 }
 
 const FAQ_ENTRIES = [
@@ -438,7 +452,7 @@ function buildBookingGuideAnswer(messageText, historyMessages = []) {
   }
 
   const intros = [
-    `Bạn đang hợp lý ở nhịp này, tiếp theo là bước ${targetStep.id}: ${targetStep.title}.`,
+    `Bạn đang hợp lý ở bước này, tiếp theo là bước ${targetStep.id}: ${targetStep.title}.`,
     `Mình gợi ý bạn chuyển sang bước ${targetStep.id}: ${targetStep.title}.`,
     `Bước kế tiếp của bạn là bước ${targetStep.id}: ${targetStep.title}.`,
   ];
@@ -541,6 +555,7 @@ function toGeminiContents(historyMessages = []) {
 async function generateGeminiAnswer(historyMessages = []) {
   lastGeminiFailureReason = '';
   lastGeminiRetryAfterSeconds = 0;
+  lastGeminiResolvedModel = '';
 
   const apiKey = normalizeText(env.geminiApiKey);
 
@@ -556,13 +571,8 @@ async function generateGeminiAnswer(historyMessages = []) {
     return '';
   }
 
-  const preferredModel = normalizeText(env.geminiModel) || 'gemini-2.5-flash';
-  const modelCandidates = Array.from(new Set([
-    preferredModel,
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-  ].filter(Boolean)));
-  const apiVersions = ['v1beta', 'v1'];
+  const modelCandidates = buildGeminiModelCandidates();
+  const apiVersion = 'v1beta';
   const timeoutMs = Number(env.geminiTimeoutMs);
   const requestTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1000 ? timeoutMs : 9000;
 
@@ -573,79 +583,107 @@ async function generateGeminiAnswer(historyMessages = []) {
 
   try {
     for (const modelName of modelCandidates) {
-      for (const apiVersion of apiVersions) {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/${apiVersion}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              systemInstruction: {
-                parts: [{ text: buildGeminiSystemInstruction() }],
-              },
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 500,
-                topP: 0.9,
-              },
-              contents: toGeminiContents(historyMessages),
-            }),
-            signal: controller.signal,
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/${apiVersion}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-        );
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: buildGeminiSystemInstruction() }],
+            },
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 500,
+              topP: 0.9,
+            },
+            contents: toGeminiContents(historyMessages),
+          }),
+          signal: controller.signal,
+        },
+      );
 
-        if (!response.ok) {
-          if (response.status === 429) {
-            let retryAfterSeconds = 60;
+      if (!response.ok) {
+        const responseText = await response.text();
 
-            const retryAfterHeader = Number(response.headers.get('retry-after'));
-            if (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0) {
-              retryAfterSeconds = Math.ceil(retryAfterHeader);
+        if (response.status === 429) {
+          const depletedCredits = /prepayment\s+credits\s+are\s+depleted|billing/i.test(responseText);
+
+          if (depletedCredits) {
+            geminiQuotaBlockedUntilMs = 0;
+            lastGeminiRetryAfterSeconds = 0;
+            lastGeminiFailureReason = 'billing-exhausted';
+            return '';
+          }
+
+          let retryAfterSeconds = 60;
+
+          const retryAfterHeaderValue = normalizeText(response.headers.get('retry-after'));
+          const retryAfterHeaderAsNumber = Number(retryAfterHeaderValue);
+
+          if (Number.isFinite(retryAfterHeaderAsNumber) && retryAfterHeaderAsNumber > 0) {
+            retryAfterSeconds = Math.ceil(retryAfterHeaderAsNumber);
+          } else {
+            const retryAfterDateMs = Date.parse(retryAfterHeaderValue);
+            if (Number.isFinite(retryAfterDateMs) && retryAfterDateMs > Date.now()) {
+              retryAfterSeconds = Math.max(1, Math.ceil((retryAfterDateMs - Date.now()) / 1000));
             } else {
-              const responseText = await response.text();
               const parsedRetryAfter = parseRetryAfterSecondsFromGeminiError(responseText);
               if (parsedRetryAfter > 0) {
                 retryAfterSeconds = parsedRetryAfter;
               }
             }
-
-            geminiQuotaBlockedUntilMs = Date.now() + retryAfterSeconds * 1000;
-            lastGeminiRetryAfterSeconds = retryAfterSeconds;
-            lastGeminiFailureReason = 'quota';
-            return '';
           }
 
-          if (response.status === 401 || response.status === 403) {
-            lastGeminiFailureReason = 'auth';
-          } else if (!lastGeminiFailureReason) {
-            lastGeminiFailureReason = 'http-error';
-          }
+          geminiQuotaBlockedUntilMs = Date.now() + retryAfterSeconds * 1000;
+          lastGeminiRetryAfterSeconds = retryAfterSeconds;
+          lastGeminiFailureReason = 'quota';
+          return '';
+        }
 
+        if (response.status === 401 || response.status === 403) {
+          const invalidKey = /unregistered callers|api key|api_key|permission_denied/i.test(responseText);
+          lastGeminiFailureReason = invalidKey ? 'invalid-key' : 'auth';
           continue;
         }
 
-        const payload = await response.json();
-        const parts = payload?.candidates?.[0]?.content?.parts;
-
-        if (!Array.isArray(parts)) {
-          continue;
+        if (response.status === 400 || response.status === 404) {
+          const modelNotFound = /model[^\n]*not\s*found|is\s*not\s*found|unsupported\s*model/i.test(responseText);
+          if (modelNotFound) {
+            lastGeminiFailureReason = 'model-not-found';
+            continue;
+          }
         }
 
-        const answer = parts
-          .map((part) => normalizeText(part?.text))
-          .filter(Boolean)
-          .join('\n');
-
-        const normalizedAnswer = normalizeText(answer);
-
-        if (normalizedAnswer) {
-          geminiQuotaBlockedUntilMs = 0;
-          lastGeminiFailureReason = '';
-          lastGeminiRetryAfterSeconds = 0;
-          return normalizedAnswer;
+        if (!lastGeminiFailureReason) {
+          lastGeminiFailureReason = 'http-error';
         }
+
+        continue;
+      }
+
+      const payload = await response.json();
+      const parts = payload?.candidates?.[0]?.content?.parts;
+
+      if (!Array.isArray(parts)) {
+        continue;
+      }
+
+      const answer = parts
+        .map((part) => normalizeText(part?.text))
+        .filter(Boolean)
+        .join('\n');
+
+      const normalizedAnswer = normalizeText(answer);
+
+      if (normalizedAnswer) {
+        geminiQuotaBlockedUntilMs = 0;
+        lastGeminiFailureReason = '';
+        lastGeminiRetryAfterSeconds = 0;
+        lastGeminiResolvedModel = modelName;
+        return normalizedAnswer;
       }
     }
 
@@ -1084,15 +1122,29 @@ async function generateAssistantAnswer(historyMessages) {
     return {
       text: geminiAnswer,
       provider: 'gemini',
-      model: normalizeText(env.geminiModel) || 'gemini-2.5-flash',
+      model: lastGeminiResolvedModel || (normalizeText(env.geminiModel) || 'gemini-2.0-flash').replace(/^models\//i, ''),
+    };
+  }
+
+  const bookingGuideAnswer = buildBookingGuideAnswer(userText, historyMessages);
+  const faqAnswer = findFaqAnswer(userText);
+  const localFallbackAnswer = bookingGuideAnswer || faqAnswer || buildFallbackAnswer(userText);
+
+  if (localFallbackAnswer) {
+    return {
+      text: localFallbackAnswer,
+      provider: 'local-fallback',
+      model: `fallback-${lastGeminiFailureReason || 'default'}`,
     };
   }
 
   return {
     text: lastGeminiFailureReason === 'quota'
       ? `Xin lỗi, trợ lý AI Gemini tạm hết quota trong thời điểm này.${lastGeminiRetryAfterSeconds > 0 ? ` Vui lòng thử lại sau khoảng ${lastGeminiRetryAfterSeconds} giây.` : ' Vui lòng thử lại sau ít phút.'}`
-      : lastGeminiFailureReason === 'auth' || lastGeminiFailureReason === 'missing-key'
-        ? 'Xin lỗi, trợ lý AI Gemini hiện chưa khả dụng do cấu hình API key. Quản trị viên cần cập nhật GEMINI_API_KEY mới để chatbot trả lời bình thường.'
+      : lastGeminiFailureReason === 'billing-exhausted'
+        ? 'Xin lỗi, tín dụng/prepay của Gemini API trong project này đã hết. Vui lòng nạp tín dụng hoặc bật billing rồi thử lại.'
+      : lastGeminiFailureReason === 'invalid-key' || lastGeminiFailureReason === 'auth' || lastGeminiFailureReason === 'missing-key'
+        ? 'Xin lỗi, trợ lý AI Gemini hiện chưa khả dụng do API key chưa hợp lệ hoặc chưa được cấp quyền cho Gemini API. Quản trị viên cần tạo API key mới trong Google AI Studio (hoặc bật Generative Language API đúng project) rồi cập nhật GEMINI_API_KEY.'
         : lastGeminiFailureReason === 'timeout'
           ? 'Xin lỗi, trợ lý AI Gemini phản hồi chậm ở thời điểm này. Bạn vui lòng gửi lại câu hỏi giúp mình.'
           : 'Xin lỗi, trợ lý AI Gemini hiện chưa khả dụng tạm thời. Bạn vui lòng thử lại sau ít phút.',
