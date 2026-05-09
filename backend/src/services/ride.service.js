@@ -53,7 +53,6 @@ const recentBookings = [];
 let rideSchemaPromise = null;
 const PAYMENT_METHOD_LABELS = {
   cash: 'Tiền mặt',
-  qr: 'Thanh toán bằng QR code',
   wallet: 'Thanh toán bằng Ví điện tử',
   app_wallet: 'Ví SmartRide',
 };
@@ -1532,11 +1531,6 @@ export async function ensureRideSchema() {
           ALTER TABLE dbo.DatXe ADD MaUuDai VARCHAR(40) NULL;
         END
 
-        IF COL_LENGTH(N'dbo.DatXe', N'TenUuDai') IS NULL
-        BEGIN
-          ALTER TABLE dbo.DatXe ADD TenUuDai NVARCHAR(120) NULL;
-        END
-
         IF COL_LENGTH(N'dbo.DatXe', N'PhanTramPhiNenTang') IS NULL
         BEGIN
           ALTER TABLE dbo.DatXe ADD PhanTramPhiNenTang DECIMAL(5, 2) NULL;
@@ -1567,11 +1561,6 @@ export async function ensureRideSchema() {
         IF COL_LENGTH(N'dbo.ThanhToan', N'MaUuDai') IS NULL
         BEGIN
           ALTER TABLE dbo.ThanhToan ADD MaUuDai VARCHAR(40) NULL;
-        END
-
-        IF COL_LENGTH(N'dbo.ThanhToan', N'TenUuDai') IS NULL
-        BEGIN
-          ALTER TABLE dbo.ThanhToan ADD TenUuDai NVARCHAR(120) NULL;
         END
 
         IF COL_LENGTH(N'dbo.ThanhToan', N'GatewayAppTransId') IS NULL
@@ -2458,11 +2447,11 @@ function normalizeContactPhone(value) {
 function normalizePaymentMethod(value) {
   const normalizedValue = normalizeText(value).toLowerCase();
 
-  if (normalizedValue === 'app_wallet') {
+  if (normalizedValue === 'app_wallet' || normalizedValue === 'qr') {
     return 'wallet';
   }
 
-  if (normalizedValue === 'qr' || normalizedValue === 'wallet') {
+  if (normalizedValue === 'wallet') {
     return normalizedValue;
   }
 
@@ -4116,7 +4105,6 @@ async function persistBookingToDatabase(booking) {
           TienPhiNenTang,
           TienTaiXeNhan,
           MaUuDai,
-          TenUuDai,
           PhuongThucThanhToan,
           NhaCungCapThanhToan,
           TrangThaiChuyen,
@@ -4149,7 +4137,6 @@ async function persistBookingToDatabase(booking) {
           @platformFeeAmount,
           @driverNetIncome,
           @promotionCode,
-          @promotionTitle,
           @paymentMethod,
           @paymentProvider,
           @tripStatus,
@@ -4193,7 +4180,6 @@ async function persistBookingToDatabase(booking) {
           TienPhiNenTang,
           TienTaiXeNhan,
           MaUuDai,
-          TenUuDai,
           PhuongThucThanhToan,
           NhaCungCapThanhToan,
           GatewayAppTransId,
@@ -4215,7 +4201,6 @@ async function persistBookingToDatabase(booking) {
           @platformFeeAmount,
           @driverNetIncome,
           @promotionCode,
-          @promotionTitle,
           @paymentMethod,
           @paymentProvider,
           @gatewayAppTransId,
@@ -4470,8 +4455,8 @@ const TRIP_HISTORY_STATUS_TONES = {
   cancelled: 'cancelled',
 };
 
-const TRIP_HISTORY_LIMIT_DEFAULT = 24;
-const TRIP_HISTORY_LIMIT_MAX = 40;
+const TRIP_HISTORY_LIMIT_DEFAULT = 120;
+const TRIP_HISTORY_LIMIT_MAX = 5000;
 const DRIVER_PLATFORM_FEE_PERCENT_DEFAULT = 30;
 
 function normalizeFeePercent(value, fallback = DRIVER_PLATFORM_FEE_PERCENT_DEFAULT) {
@@ -4536,11 +4521,7 @@ function getTripHistoryPaymentLabel(paymentMethod, paymentProvider) {
   const normalizedMethod = normalizeText(paymentMethod).toLowerCase();
   const providerLabel = getPaymentProviderLabel(paymentProvider);
 
-  if (normalizedMethod === 'qr') {
-    return providerLabel ? `QR code - ${providerLabel}` : 'QR code';
-  }
-
-  if (normalizedMethod === 'wallet') {
+  if (normalizedMethod === 'wallet' || normalizedMethod === 'qr' || normalizedMethod === 'app_wallet') {
     return providerLabel ? `Ví điện tử - ${providerLabel}` : 'Ví điện tử';
   }
 
@@ -4836,7 +4817,7 @@ function buildTripHistorySelectClause() {
       dx.TienPhiNenTang AS platformFeeAmount,
       dx.TienTaiXeNhan AS driverNetIncome,
       dx.MaUuDai AS promotionCode,
-      dx.TenUuDai AS promotionTitle,
+      ud.TenUuDai AS promotionTitle,
       dx.PhuongThucThanhToan AS paymentMethod,
       dx.NhaCungCapThanhToan AS paymentProvider,
       dx.TrangThaiChuyen AS tripStatus,
@@ -4851,7 +4832,7 @@ function buildTripHistorySelectClause() {
       tt.TienPhiNenTang AS paymentPlatformFeeAmount,
       tt.TienTaiXeNhan AS paymentDriverNetIncome,
       tt.MaUuDai AS paymentPromotionCode,
-      tt.TenUuDai AS paymentPromotionTitle,
+      ud.TenUuDai AS paymentPromotionTitle,
       tt.PhuongThucThanhToan AS paymentMethodFromPayment,
       tt.NhaCungCapThanhToan AS paymentProviderFromPayment,
       tt.TrangThaiThanhToan AS paymentStatus,
@@ -4874,6 +4855,7 @@ function buildTripHistorySelectClause() {
     LEFT JOIN TaiKhoan tk ON tk.MaTK = dx.MaTK
     LEFT JOIN TaiXe tx ON tx.CCCD = dx.MaTX
     LEFT JOIN TaiKhoan driverTk ON driverTk.MaTK = tx.MaTK
+    LEFT JOIN dbo.UuDai ud ON ud.MaUuDai = dx.MaUuDai
   `;
 }
 
@@ -4922,7 +4904,8 @@ function buildTripHistoryQuery(roleCode) {
   `;
 }
 
-async function enrichTripHistoryRow(row, account = null) {
+async function enrichTripHistoryRow(row, account = null, options = {}) {
+  const shouldResolveLocationFallback = options?.resolveLocationFallback !== false;
   const pickupLabel = normalizeText(row.pickupLabel);
   const destinationLabel = normalizeText(row.destinationLabel);
   const storedRouteGeometry = normalizeStoredRouteGeometry(row.routeGeometryJson);
@@ -4931,7 +4914,7 @@ async function enrichTripHistoryRow(row, account = null) {
     ? { ...storedRouteGeometry[storedRouteGeometry.length - 1] }
     : null;
 
-  if (!storedRouteGeometry) {
+  if (!storedRouteGeometry && shouldResolveLocationFallback) {
     const [pickupPositionRaw, destinationPositionRaw] = await Promise.all([
       pickupLabel ? resolveLocationPosition({ label: pickupLabel }) : Promise.resolve(null),
       destinationLabel ? resolveLocationPosition({ label: destinationLabel }) : Promise.resolve(null),
@@ -5346,33 +5329,73 @@ export async function submitRideRating(payload = {}) {
 }
 
 export async function getTripHistory(payload = {}) {
+  const traceStartedAt = Date.now();
   const roleCode = normalizeTripHistoryRoleCode(payload?.roleCode);
+  const viewMode = normalizeText(payload?.view ?? payload?.mode).toLowerCase();
   const limit = normalizeTripHistoryLimit(payload?.limit);
   const normalizedAccountId = normalizeText(payload?.accountId);
   const normalizedIdentifier = normalizeText(payload?.identifier).toLowerCase();
+  const isAdminGlobalHistory = roleCode === 'Q1' && !normalizedAccountId && !normalizedIdentifier;
+  const isAdminDashboardMode = isAdminGlobalHistory && (viewMode === '' || viewMode === 'dashboard' || viewMode === 'summary');
 
   if (roleCode !== 'Q1' && !normalizedAccountId && !normalizedIdentifier) {
     throw createValidationError('Thiếu thông tin tài khoản để tải lịch sử chuyến.');
   }
 
+  const schemaStartedAt = Date.now();
   await ensureRideSchema();
+  const schemaDurationMs = Date.now() - schemaStartedAt;
 
   const [resolvedAccount, pool] = await Promise.all([
     resolveHistoryAccount(payload),
     getSqlServerPool(),
   ]);
 
-  const queryResult = await pool
-    .request()
-    .input('accountId', sql.VarChar(20), normalizedAccountId)
-    .input('identifier', sql.VarChar(150), normalizedIdentifier)
-    .query(buildTripHistoryQuery(roleCode));
+  const queryStartedAt = Date.now();
+  const queryResult = isAdminDashboardMode
+    ? await pool
+      .request()
+      .query(`
+        SELECT
+          dx.MaChuyen AS bookingCode,
+          dx.MaTK AS accountId,
+          dx.MaTX AS driverAccountId,
+          dx.TrangThaiChuyen AS tripStatus,
+          dx.GiaTien AS basePrice,
+          dx.NgayTao AS bookedAt,
+          dx.NgayCapNhat AS updatedAt,
+          driverTk.Ten AS driverName
+        FROM dbo.DatXe dx
+        LEFT JOIN dbo.TaiXe tx ON tx.CCCD = dx.MaTX
+        LEFT JOIN dbo.TaiKhoan driverTk ON driverTk.MaTK = tx.MaTK
+        ORDER BY dx.NgayTao DESC, dx.MaChuyen DESC;
+      `)
+    : await pool
+      .request()
+      .input('accountId', sql.VarChar(20), normalizedAccountId)
+      .input('identifier', sql.VarChar(150), normalizedIdentifier)
+      .query(buildTripHistoryQuery(roleCode));
+  const queryDurationMs = Date.now() - queryStartedAt;
 
   const rows = queryResult.recordset ?? [];
   const platformFeePercent = normalizeFeePercent(env.driverPlatformFeePercent);
   const summary = buildTripHistorySummary(rows, platformFeePercent);
   const reviewSummary = buildTripHistoryReviewSummary(rows);
-  const items = await Promise.all(rows.slice(0, limit).map((row) => enrichTripHistoryRow(row, resolvedAccount)));
+  // Admin dashboards only need aggregates and key metadata. Skipping geocoder fallback
+  // avoids heavy external lookups that can stall large history requests.
+  const shouldResolveLocationFallback = roleCode !== 'Q1' && !isAdminDashboardMode;
+  const enrichStartedAt = Date.now();
+  const items = await Promise.all(
+    rows.slice(0, limit).map((row) => enrichTripHistoryRow(row, resolvedAccount, { resolveLocationFallback: shouldResolveLocationFallback })),
+  );
+  const enrichDurationMs = Date.now() - enrichStartedAt;
+  const totalDurationMs = Date.now() - traceStartedAt;
+
+  if (totalDurationMs >= 3000) {
+    console.warn(
+      `[ride-history] slow response role=${roleCode} total=${totalDurationMs}ms schema=${schemaDurationMs}ms query=${queryDurationMs}ms enrich=${enrichDurationMs}ms rows=${rows.length} limit=${limit}`,
+    );
+  }
 
   return {
     success: true,

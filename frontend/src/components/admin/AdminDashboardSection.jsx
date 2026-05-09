@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { isValid, parse } from 'date-fns';
 import { vi } from 'date-fns/locale';
@@ -52,8 +52,25 @@ function parseDateInput(value) {
     return null;
   }
 
-  const parsed = new Date(`${normalized}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const yyyymmdd = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (yyyymmdd) {
+    const year = Number(yyyymmdd[1]);
+    const month = Number(yyyymmdd[2]);
+    const day = Number(yyyymmdd[3]);
+    const parsed = new Date(year, month - 1, day);
+
+    if (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return parsed;
+    }
+    return null;
+  }
+
+  return null;
 }
 
 function parseDateForPicker(dateString) {
@@ -62,13 +79,17 @@ function parseDateForPicker(dateString) {
     return null;
   }
 
-  const parsedDate = parse(normalizedValue, 'yyyy-MM-dd', new Date());
-  if (isValid(parsedDate)) {
-    return parsedDate;
+  const parsedIsoDate = parse(normalizedValue, 'yyyy-MM-dd', new Date());
+  if (isValid(parsedIsoDate)) {
+    return parsedIsoDate;
   }
 
-  const fallbackDate = new Date(normalizedValue);
-  return isValid(fallbackDate) ? fallbackDate : null;
+  const parsedSlashDate = parse(normalizedValue, 'dd/MM/yyyy', new Date());
+  if (isValid(parsedSlashDate)) {
+    return parsedSlashDate;
+  }
+
+  return null;
 }
 
 function formatDateForFilterValue(dateValue) {
@@ -127,6 +148,15 @@ function formatCompactRevenue(value) {
   return `${millions.toFixed(millions >= 10 ? 0 : 1)} triệu`;
 }
 
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return { week, year: d.getUTCFullYear() };
+}
+
 function buildLinePath(points, width, height, maxValue) {
   if (!points.length) {
     return '';
@@ -161,9 +191,15 @@ function describeArc(cx, cy, radius, startAngle, endAngle) {
   return `M ${cx} ${cy} L ${start.x.toFixed(3)} ${start.y.toFixed(3)} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x.toFixed(3)} ${end.y.toFixed(3)} Z`;
 }
 
-function DashboardLineChart({ data = [], onShowTooltip, onMoveTooltip, onHideTooltip }) {
-  const width = 760;
-  const height = 320;
+function DashboardLineChart({ data = [], mode = 'day', onShowTooltip, onMoveTooltip, onHideTooltip }) {
+  const horizontalPadding = 38;
+  const verticalPadding = 18;
+  const minWidth = 760;
+  const minChartWidth = minWidth - horizontalPadding * 2;
+  const pointSpacing = mode === 'day' ? 42 : mode === 'week' ? 48 : 56;
+  const chartWidth = Math.max(minChartWidth, Math.max(0, data.length - 1) * pointSpacing);
+  const width = chartWidth + horizontalPadding * 2;
+  const height = 250;
   const maxRideCount = Math.max(1, ...data.map((item) => item.tripCount));
   const maxRevenueM = Math.max(1, ...data.map((item) => item.revenueMillion));
   const scaleMax = Math.max(maxRideCount, maxRevenueM);
@@ -181,13 +217,19 @@ function DashboardLineChart({ data = [], onShowTooltip, onMoveTooltip, onHideToo
     scaleMax,
   );
 
-  const horizontalPadding = 38;
-  const verticalPadding = 18;
-  const chartWidth = width - horizontalPadding * 2;
+  const isWideChart = width > minWidth;
+  const targetLabelCount = mode === 'day' ? 12 : 16;
+  const labelStep = data.length > targetLabelCount ? Math.ceil(data.length / targetLabelCount) : 1;
   const chartHeight = height - verticalPadding * 2;
 
   return (
-    <svg className="admin-dashboard__line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biểu đồ trạng thái chuyến và doanh thu theo ngày">
+    <svg
+      className="admin-dashboard__line-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ width: `${width}px` }}
+      role="img"
+      aria-label="Biểu đồ trạng thái chuyến và doanh thu"
+    >
       <rect x="0" y="0" width={width} height={height} fill="transparent" />
 
       {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
@@ -212,6 +254,7 @@ function DashboardLineChart({ data = [], onShowTooltip, onMoveTooltip, onHideToo
         const x = horizontalPadding + (data.length === 1 ? chartWidth / 2 : (chartWidth * index) / (data.length - 1));
         const tripY = verticalPadding + chartHeight - (chartHeight * item.tripCount) / Math.max(scaleMax, 1);
         const revenueY = verticalPadding + chartHeight - (chartHeight * item.revenueMillion) / Math.max(scaleMax, 1);
+        const shouldRenderAxisLabel = index === 0 || index === data.length - 1 || index % labelStep === 0;
 
         return (
           <g key={item.label}>
@@ -227,8 +270,13 @@ function DashboardLineChart({ data = [], onShowTooltip, onMoveTooltip, onHideToo
             />
             <circle cx={x} cy={tripY} r="4" fill="#1f6feb" style={{ pointerEvents: 'none' }} />
             <circle cx={x} cy={revenueY} r="4" fill="#f97316" style={{ pointerEvents: 'none' }} />
-            <text x={x} y={height - 6} textAnchor="middle" className="admin-dashboard__axis-label">
-              {item.label}
+            <text
+              x={x}
+              y={height - 6}
+              textAnchor="middle"
+              className={`admin-dashboard__axis-label${isWideChart ? ' admin-dashboard__axis-label--compact' : ''}`}
+            >
+              {shouldRenderAxisLabel ? item.label : ''}
             </text>
           </g>
         );
@@ -238,10 +286,10 @@ function DashboardLineChart({ data = [], onShowTooltip, onMoveTooltip, onHideToo
 }
 
 function DashboardPieChart({ segments = [], onShowTooltip, onMoveTooltip, onHideTooltip }) {
-  const size = 290;
-  const cx = 145;
-  const cy = 145;
-  const radius = 98;
+  const size = 250;
+  const cx = 125;
+  const cy = 125;
+  const radius = 82;
   const total = Math.max(1, segments.reduce((sum, segment) => sum + segment.value, 0));
 
   let angleCursor = -Math.PI / 2;
@@ -267,7 +315,7 @@ function DashboardPieChart({ segments = [], onShowTooltip, onMoveTooltip, onHide
           />
         );
       })}
-      <circle cx={cx} cy={cy} r="52" fill="#fff" />
+      <circle cx={cx} cy={cy} r="44" fill="#fff" />
       <text x={cx} y={cy - 4} textAnchor="middle" className="admin-dashboard__pie-total-label">
         Tổng
       </text>
@@ -280,7 +328,7 @@ function DashboardPieChart({ segments = [], onShowTooltip, onMoveTooltip, onHide
 
 function DashboardBarChart({ data = [], onShowTooltip, onMoveTooltip, onHideTooltip }) {
   const width = 420;
-  const height = 290;
+  const height = 245;
   const barWidth = data.length ? Math.min(52, Math.floor((width - 80) / data.length) - 12) : 38;
   const chartBottom = height - 42;
   const chartTop = 24;
@@ -317,23 +365,68 @@ function DashboardBarChart({ data = [], onShowTooltip, onMoveTooltip, onHideTool
   );
 }
 
-export default function AdminDashboardSection() {
+export default function AdminDashboardSection({ onNotify }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [users, setUsers] = useState([]);
   const [trips, setTrips] = useState([]);
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, lines: [] });
+  const lineChartScrollerRef = useRef(null);
 
   const showTooltip = (e, lines) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, lines });
   const moveTooltip = (e) => setTooltip((prev) => (prev.visible ? { ...prev, x: e.clientX, y: e.clientY } : prev));
   const hideTooltip = () => setTooltip((prev) => ({ ...prev, visible: false }));
 
-  const [fromDate, setFromDate] = useState(() => {
-    const now = new Date();
-    const before = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
-    return toDateInputValue(before);
-  });
-  const [toDate, setToDate] = useState(() => toDateInputValue(new Date()));
+  const [viewMode, setViewMode] = useState('all');
+  // Draft state: what user is currently typing/selecting in pickers
+  const [draftFromDate, setDraftFromDate] = useState('');
+  const [draftToDate, setDraftToDate] = useState('');
+  // Applied state: what actually filters the data
+  const [appliedFromDate, setAppliedFromDate] = useState('');
+  const [appliedToDate, setAppliedToDate] = useState('');
+
+  const applyDateFilter = () => {
+    const notifyValidationError = (message) => {
+      if (typeof onNotify === 'function') {
+        onNotify(message, 'error', 2800);
+        return;
+      }
+
+      setError(message);
+    };
+
+    const filterInputElements = document.querySelectorAll('.admin-dashboard__filters input');
+    const fromInputValue = String(filterInputElements?.[0]?.value ?? '').trim();
+    const toInputValue = String(filterInputElements?.[1]?.value ?? '').trim();
+
+    const fromRaw = fromInputValue || String(draftFromDate ?? '').trim();
+    const toRaw = toInputValue || String(draftToDate ?? '').trim();
+
+    if (fromRaw && !parseDateInput(fromRaw)) {
+      notifyValidationError('Ngày bắt đầu chưa hợp lệ. Vui lòng nhập đúng định dạng dd/MM/yyyy hoặc chọn trực tiếp từ lịch.');
+      return;
+    }
+
+    if (toRaw && !parseDateInput(toRaw)) {
+      notifyValidationError('Ngày kết thúc chưa hợp lệ. Vui lòng nhập đúng định dạng dd/MM/yyyy hoặc chọn trực tiếp từ lịch.');
+      return;
+    }
+
+    const parsedFrom = parseDateInput(fromRaw);
+    const parsedTo = parseDateInput(toRaw);
+
+    if (parsedFrom && parsedTo && parsedFrom.getTime() >= parsedTo.getTime()) {
+      notifyValidationError('Khoảng thời gian chưa hợp lệ: "Từ ngày" cần sớm hơn "Đến ngày".');
+      return;
+    }
+
+    if (error) {
+      setError('');
+    }
+
+    setAppliedFromDate(parsedFrom ? formatDateForFilterValue(parsedFrom) : '');
+    setAppliedToDate(parsedTo ? formatDateForFilterValue(parsedTo) : '');
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -342,7 +435,7 @@ export default function AdminDashboardSection() {
     setError('');
 
     Promise.all([
-      rideService.getTripHistory({ roleCode: 'Q1', limit: 300 }, { signal: controller.signal }),
+      rideService.getTripHistory({ roleCode: 'Q1', limit: 5000, view: 'dashboard' }, { signal: controller.signal }),
       adminUserService.listUsers({ signal: controller.signal }),
     ])
       .then(([tripResponse, userResponse]) => {
@@ -371,8 +464,8 @@ export default function AdminDashboardSection() {
   }, []);
 
   const filteredTrips = useMemo(() => {
-    const from = parseDateInput(fromDate);
-    const to = parseDateInput(toDate);
+    const from = parseDateInput(appliedFromDate);
+    const to = parseDateInput(appliedToDate);
 
     return trips.filter((item) => {
       const tripDate = getTripDate(item);
@@ -394,7 +487,7 @@ export default function AdminDashboardSection() {
 
       return true;
     });
-  }, [fromDate, toDate, trips]);
+  }, [appliedFromDate, appliedToDate, trips]);
 
   const metrics = useMemo(() => {
     const totalCustomers = users.filter((user) => String(user?.roleCode ?? '').trim().toUpperCase() === 'Q2').length;
@@ -410,8 +503,13 @@ export default function AdminDashboardSection() {
     };
   }, [filteredTrips, users]);
 
-  const lineChartData = useMemo(() => {
-    const map = new Map();
+  const dataSpanDays = useMemo(() => {
+    if (!filteredTrips.length) {
+      return 0;
+    }
+
+    let minTime = Number.POSITIVE_INFINITY;
+    let maxTime = Number.NEGATIVE_INFINITY;
 
     filteredTrips.forEach((trip) => {
       const tripDate = getTripDate(trip);
@@ -419,23 +517,100 @@ export default function AdminDashboardSection() {
         return;
       }
 
-      const key = `${tripDate.getFullYear()}-${String(tripDate.getMonth() + 1).padStart(2, '0')}-${String(tripDate.getDate()).padStart(2, '0')}`;
-      const existing = map.get(key) || { date: tripDate, tripCount: 0, revenue: 0 };
+      const time = tripDate.getTime();
+      minTime = Math.min(minTime, time);
+      maxTime = Math.max(maxTime, time);
+    });
+
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime)) {
+      return 0;
+    }
+
+    return Math.max(1, Math.floor((maxTime - minTime) / (24 * 60 * 60 * 1000)) + 1);
+  }, [filteredTrips]);
+
+  const activeViewMode = useMemo(() => {
+    if (viewMode !== 'all') {
+      return viewMode;
+    }
+
+    if (dataSpanDays > 90) {
+      return 'month';
+    }
+
+    if (dataSpanDays >= 30) {
+      return 'week';
+    }
+
+    return 'day';
+  }, [dataSpanDays, viewMode]);
+
+  const modeLabel = viewMode === 'all'
+    ? `tự động (${activeViewMode === 'day' ? 'theo ngày' : activeViewMode === 'week' ? 'theo tuần' : 'theo tháng'})`
+    : activeViewMode === 'day'
+      ? 'theo ngày'
+      : activeViewMode === 'week'
+        ? 'theo tuần'
+        : 'theo tháng';
+
+  const lineChartData = useMemo(() => {
+    const map = new Map();
+
+    filteredTrips.forEach((trip) => {
+      const tripDate = getTripDate(trip);
+      if (!tripDate) return;
+
+      let key;
+      let label;
+      let fullDateLabel;
+      let sortTime = tripDate.getTime();
+
+      if (activeViewMode === 'month') {
+        const y = tripDate.getFullYear();
+        const m = String(tripDate.getMonth() + 1).padStart(2, '0');
+        key = `${y}-${m}`;
+        label = `${m}/${String(y).slice(2)}`;
+        fullDateLabel = `Tháng ${tripDate.getMonth() + 1}/${y}`;
+        sortTime = new Date(y, tripDate.getMonth(), 1).getTime();
+      } else if (activeViewMode === 'week') {
+        const { week, year } = getISOWeek(tripDate);
+        const wStr = String(week).padStart(2, '0');
+        key = `${year}-W${wStr}`;
+        label = `T${week}`;
+        fullDateLabel = `Tuần ${week}/${year}`;
+        sortTime = new Date(tripDate.getFullYear(), tripDate.getMonth(), tripDate.getDate()).getTime();
+      } else {
+        const y = tripDate.getFullYear();
+        const mStr = String(tripDate.getMonth() + 1).padStart(2, '0');
+        const dStr = String(tripDate.getDate()).padStart(2, '0');
+        key = `${y}-${mStr}-${dStr}`;
+        label = DATE_FORMATTER.format(tripDate);
+        fullDateLabel = FULL_DATE_FORMATTER.format(tripDate);
+      }
+
+      const existing = map.get(key) || { key, label, fullDateLabel, sortTime, tripCount: 0, revenue: 0 };
       existing.tripCount += 1;
       existing.revenue += Number(trip?.price ?? 0);
+      existing.sortTime = Math.min(existing.sortTime, sortTime);
       map.set(key, existing);
     });
 
     return Array.from(map.values())
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .sort((a, b) => (a.sortTime - b.sortTime) || a.key.localeCompare(b.key))
       .map((entry) => ({
-        label: DATE_FORMATTER.format(entry.date),
-        fullDateLabel: FULL_DATE_FORMATTER.format(entry.date),
+        label: entry.label,
+        fullDateLabel: entry.fullDateLabel,
         tripCount: entry.tripCount,
         revenue: entry.revenue,
         revenueMillion: Number((entry.revenue / 1000000).toFixed(2)),
       }));
-  }, [filteredTrips]);
+  }, [activeViewMode, filteredTrips]);
+
+  useEffect(() => {
+    if (lineChartScrollerRef.current) {
+      lineChartScrollerRef.current.scrollLeft = 0;
+    }
+  }, [activeViewMode, appliedFromDate, appliedToDate, lineChartData.length]);
 
   const statusSegments = useMemo(() => {
     const counters = {
@@ -520,14 +695,40 @@ export default function AdminDashboardSection() {
           <h2>Admin dashboard</h2>
 
           <div className="admin-dashboard__filters">
+            <label className="admin-dashboard__mode-select-wrap">
+              <span>Kiểu hiển thị:</span>
+              <select
+                className="admin-dashboard__mode-select"
+                value={viewMode}
+                onChange={(event) => {
+                  const nextMode = event.target.value;
+                  setViewMode(nextMode);
+
+                  if (nextMode === 'all') {
+                    setDraftFromDate('');
+                    setDraftToDate('');
+                    setAppliedFromDate('');
+                    setAppliedToDate('');
+                  }
+                }}
+              >
+                <option value="all">Tự động</option>
+                <option value="day">Theo ngày</option>
+                <option value="week">Theo tuần</option>
+                <option value="month">Theo tháng</option>
+              </select>
+            </label>
+
             <label>
               <span>Từ ngày:</span>
               <DatePicker
-                selected={parseDateForPicker(fromDate)}
-                onChange={(selectedDate) => setFromDate(formatDateForFilterValue(selectedDate))}
+                selected={parseDateForPicker(draftFromDate)}
+                onChange={(selectedDate) => setDraftFromDate(formatDateForFilterValue(selectedDate))}
+                onChangeRaw={(event) => setDraftFromDate(event.target.value)}
                 locale="vi-VN"
                 dateFormat="dd/MM/yyyy"
-                placeholderText="dd/mm/yyyy"
+                placeholderText="Tất cả"
+                isClearable
                 showMonthDropdown
                 showYearDropdown
                 dropdownMode="select"
@@ -544,8 +745,9 @@ export default function AdminDashboardSection() {
             <label>
               <span>Đến ngày:</span>
               <DatePicker
-                selected={parseDateForPicker(toDate)}
-                onChange={(selectedDate) => setToDate(formatDateForFilterValue(selectedDate))}
+                selected={parseDateForPicker(draftToDate)}
+                onChange={(selectedDate) => setDraftToDate(formatDateForFilterValue(selectedDate))}
+                onChangeRaw={(event) => setDraftToDate(event.target.value)}
                 locale="vi-VN"
                 dateFormat="dd/MM/yyyy"
                 placeholderText="dd/mm/yyyy"
@@ -561,6 +763,14 @@ export default function AdminDashboardSection() {
                 showPopperArrow={false}
               />
             </label>
+
+            <button
+              className="admin-dashboard__filter-button"
+              onClick={applyDateFilter}
+            >
+              Lọc
+            </button>
+
           </div>
         </header>
 
@@ -593,7 +803,7 @@ export default function AdminDashboardSection() {
 
             <section className="admin-dashboard__chart-block" aria-label="Biểu đồ trạng thái chuyến và doanh thu">
               <header className="admin-dashboard__chart-header">
-                <h3>Biểu đồ trạng thái chuyến & doanh thu</h3>
+                <h3>Biểu đồ trạng thái chuyến & doanh thu <small>({modeLabel})</small></h3>
                 <div className="admin-dashboard__legend">
                   <span className="admin-dashboard__legend-item">
                     <i style={{ backgroundColor: '#1f6feb' }} aria-hidden="true" /> Chuyến đi
@@ -604,7 +814,15 @@ export default function AdminDashboardSection() {
                 </div>
               </header>
 
-              <DashboardLineChart data={lineChartData} onShowTooltip={showTooltip} onMoveTooltip={moveTooltip} onHideTooltip={hideTooltip} />
+              <div className="admin-dashboard__line-chart-scroller" ref={lineChartScrollerRef}>
+                <DashboardLineChart
+                  data={lineChartData}
+                  mode={activeViewMode}
+                  onShowTooltip={showTooltip}
+                  onMoveTooltip={moveTooltip}
+                  onHideTooltip={hideTooltip}
+                />
+              </div>
             </section>
 
             <section className="admin-dashboard__split" aria-label="Biểu đồ trạng thái và top tài xế">

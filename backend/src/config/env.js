@@ -1,3 +1,11 @@
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
 function parseBoolean(value, fallback = false) {
   if (value === undefined || value === null || String(value).trim() === '') {
     return fallback;
@@ -35,8 +43,8 @@ export const env = {
   dbEncrypt: parseBoolean(process.env.DB_ENCRYPT, false),
   dbTrustServerCertificate: parseBoolean(process.env.DB_TRUST_SERVER_CERTIFICATE, true),
   dbPoolMax: Number(process.env.DB_POOL_MAX ?? 10),
-  dbConnectionTimeoutMs: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15000),
-  dbRequestTimeoutMs: Number(process.env.DB_REQUEST_TIMEOUT_MS ?? 15000),
+  dbConnectionTimeoutMs: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 60000),
+  dbRequestTimeoutMs: Number(process.env.DB_REQUEST_TIMEOUT_MS ?? 60000),
   dbConnectionRetryCooldownMs: Number(process.env.DB_CONNECTION_RETRY_COOLDOWN_MS ?? 30000),
   driverPlatformFeePercent: Number(process.env.DRIVER_PLATFORM_FEE_PERCENT ?? 30),
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',

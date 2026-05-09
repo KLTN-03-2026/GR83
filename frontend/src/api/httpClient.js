@@ -12,6 +12,7 @@ export async function request(path, options = {}) {
             'Content-Type': 'application/json',
             ...(options.headers ?? {}),
           },
+      cache: options.cache ?? 'no-store',
       signal: options.signal,
       ...options,
     });

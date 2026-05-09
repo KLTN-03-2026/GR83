@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon --watch src --ext js,mjs,cjs,json --delay 1 src/server.js",
     "start": "node src/server.js",
     "build": "node -e \"console.log('No build step required for backend')\"",
     "probe:momo": "node scripts/probe-momo.mjs"

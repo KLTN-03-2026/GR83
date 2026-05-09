@@ -53,7 +53,6 @@ import {
   markDriverRideRequestNotificationSeen,
   removeDriverRideRequest,
 } from '../utils/driverRideRequestQueue';
-import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DatePicker, { registerLocale } from 'react-datepicker';
@@ -407,17 +406,11 @@ const BOOKING_PAYMENT_METHODS = {
     shortLabel: 'Tiền mặt',
     description: 'Thanh toán trực tiếp với tài xế khi kết thúc chuyến.',
   },
-  qr: {
-    id: 'qr',
-    label: 'Thanh toán bằng QR code',
-    shortLabel: 'QR code',
-    description: 'Quét mã QR để thanh toán nhanh ngay trên điện thoại.',
-  },
   wallet: {
     id: 'wallet',
-    label: 'Thanh toán bằng Ví điện tử',
-    shortLabel: 'Ví điện tử',
-    description: 'Chọn ZaloPay, MoMo hoặc Ví SmartRide để thanh toán.',
+    label: 'Online',
+    shortLabel: 'Online',
+    description: 'Thanh toán online qua Ví điện tử: ZaloPay, MoMo hoặc Ví SmartRide.',
   },
 };
 
@@ -427,7 +420,7 @@ const BOOKING_WALLET_PROVIDERS = [
   { id: 'app_wallet', label: 'Ví SmartRide' },
 ];
 
-const BOOKING_OTHER_PAYMENT_METHODS = [BOOKING_PAYMENT_METHODS.qr, BOOKING_PAYMENT_METHODS.wallet];
+const BOOKING_OTHER_PAYMENT_METHODS = [BOOKING_PAYMENT_METHODS.wallet];
 
 function normalizePromoSearchValue(value) {
   return String(value ?? '')
@@ -1533,11 +1526,11 @@ function normalizeIdentityDocumentNumber(value = '') {
 function normalizeBookingPaymentMethod(value) {
   const normalizedValue = String(value ?? '').trim().toLowerCase();
 
-  if (normalizedValue === 'app_wallet') {
+  if (normalizedValue === 'app_wallet' || normalizedValue === 'qr') {
     return 'wallet';
   }
 
-  if (normalizedValue === 'qr' || normalizedValue === 'wallet') {
+  if (normalizedValue === 'wallet') {
     return normalizedValue;
   }
 
@@ -1615,7 +1608,6 @@ export default function HomePage() {
   const [bookingPaymentMethod, setBookingPaymentMethod] = useState('cash');
   const [bookingPaymentProvider, setBookingPaymentProvider] = useState('zalopay');
   const [bookingPaymentPanelOpen, setBookingPaymentPanelOpen] = useState(false);
-  const [bookingQrCodeDataUrl, setBookingQrCodeDataUrl] = useState('');
   const [bookingPromoPanelOpen, setBookingPromoPanelOpen] = useState(false);
   const [bookingPromoSearchValue, setBookingPromoSearchValue] = useState('');
   const [bookingPromoFilterValue, setBookingPromoFilterValue] = useState('');
@@ -3208,9 +3200,10 @@ export default function HomePage() {
     }
   };
 
-  const handleBookingPaymentPanelToggle = () => {
+  const handleBookingOnlineSelect = () => {
     setBookingPromoPanelOpen(false);
-    setBookingPaymentPanelOpen((current) => !current);
+    setBookingPaymentMethod('wallet');
+    setBookingPaymentPanelOpen(true);
   };
 
   const handleBookingPromoPanelToggle = () => {
@@ -3320,45 +3313,6 @@ export default function HomePage() {
 
   useEffect(() => {
     let isActive = true;
-
-    if (bookingPaymentMethod === 'wallet') {
-      setBookingQrCodeDataUrl('');
-      return undefined;
-    }
-
-    const qrPayload = [
-      'SmartRide',
-      route.pickup?.label,
-      route.destination?.label,
-      selectedRideId,
-      searchResult?.vehicle,
-    ]
-      .filter(Boolean)
-      .join(' | ') || 'SmartRide QR payment';
-
-    void QRCode.toDataURL(qrPayload, {
-      width: 180,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-    })
-      .then((dataUrl) => {
-        if (isActive) {
-          setBookingQrCodeDataUrl(dataUrl);
-        }
-      })
-      .catch(() => {
-        if (isActive) {
-          setBookingQrCodeDataUrl('');
-        }
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [bookingPaymentMethod, route.pickup?.label, route.destination?.label, searchResult?.vehicle, selectedRideId]);
-
-  useEffect(() => {
-    let isActive = true;
     const controller = new AbortController();
 
     const refreshBookingPromotions = async () => {
@@ -3405,8 +3359,8 @@ export default function HomePage() {
     selectedBookingPaymentMethod.id === 'wallet'
       ? `${selectedBookingPaymentMethod.label} - ${selectedBookingPaymentProvider.label}`
       : selectedBookingPaymentMethod.label;
-  const bookingPanelPaymentMethodId = bookingPaymentMethod === 'cash' ? 'qr' : bookingPaymentMethod;
-  const bookingPanelPaymentMethod = BOOKING_PAYMENT_METHODS[bookingPanelPaymentMethodId] ?? BOOKING_PAYMENT_METHODS.qr;
+  const bookingPanelPaymentMethodId = bookingPaymentMethod === 'cash' ? 'wallet' : bookingPaymentMethod;
+  const bookingPanelPaymentMethod = BOOKING_PAYMENT_METHODS[bookingPanelPaymentMethodId] ?? BOOKING_PAYMENT_METHODS.wallet;
   const bookingPanelPaymentSummary =
     bookingPanelPaymentMethod.id === 'wallet'
       ? `${bookingPanelPaymentMethod.label} - ${selectedBookingPaymentProvider.label}`
@@ -5058,8 +5012,8 @@ export default function HomePage() {
       return;
     }
 
-    if (newPasswordValue.trim().length < 3) {
-      setChangePasswordStatus('Mật khẩu mới phải có ít nhất 3 ký tự.');
+    if (newPasswordValue.trim().length < 6) {
+      setChangePasswordStatus('Mật khẩu mới phải có ít nhất 6 ký tự.');
       return;
     }
 
@@ -7405,7 +7359,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {normalizedUserRoleCode === 'Q1' ? <AdminDashboardSection /> : null}
+        {normalizedUserRoleCode === 'Q1' ? <AdminDashboardSection onNotify={showMiniToast} /> : null}
 
         <section className="content-section">
           <div className="container">
@@ -9616,11 +9570,11 @@ export default function HomePage() {
                         <button
                           className={classNames('booking-payment-chip', (bookingPaymentPanelOpen || bookingPaymentMethod !== 'cash') && 'is-active')}
                           type="button"
-                          onClick={handleBookingPaymentPanelToggle}
+                          onClick={handleBookingOnlineSelect}
                           aria-expanded={bookingPaymentPanelOpen}
                           aria-controls="booking-payment-panel"
                         >
-                          {bookingPaymentMethod === 'cash' ? 'Online' : selectedBookingPaymentMethod.shortLabel}
+                          Online
                         </button>
                         <button
                           className={classNames('booking-payment-chip', bookingPromoPanelOpen && 'is-active')}
@@ -9755,17 +9709,9 @@ export default function HomePage() {
                           </div>
 
                           <div className="booking-payment-panel__visual" data-method={bookingPanelPaymentMethod.id}>
-                            {bookingPaymentMethod === 'wallet' ? (
-                              <div className="booking-payment-panel__qr-card booking-payment-panel__qr-card--wallet" aria-hidden="true">
-                                <span>Ví</span>
-                              </div>
-                            ) : bookingQrCodeDataUrl ? (
-                              <img className="booking-payment-panel__qr-image" src={bookingQrCodeDataUrl} alt="Mã QR thanh toán" />
-                            ) : (
-                              <div className="booking-payment-panel__qr-card" aria-hidden="true">
-                                <span>QR</span>
-                              </div>
-                            )}
+                            <div className="booking-payment-panel__qr-card booking-payment-panel__qr-card--wallet" aria-hidden="true">
+                              <span>Ví</span>
+                            </div>
 
                             <div className="booking-payment-panel__visual-copy">
                               <span>{bookingPanelPaymentMethod.shortLabel}</span>
@@ -9773,7 +9719,7 @@ export default function HomePage() {
                             </div>
                           </div>
 
-                          <div className="booking-payment-panel__options" role="group" aria-label="Các phương thức thanh toán">
+                          <div className="booking-payment-panel__options" role="group" aria-label="Ví điện tử">
                             {BOOKING_OTHER_PAYMENT_METHODS.map((option) => (
                               <button
                                 key={option.id}
@@ -9781,8 +9727,8 @@ export default function HomePage() {
                                 type="button"
                                 onClick={() => handleBookingPaymentMethodSelect(option.id)}
                               >
-                                <strong>{option.label}</strong>
-                                <span>{option.description}</span>
+                                <strong>Ví điện tử</strong>
+                                <span>ZaloPay / MoMo / Ví SmartRide</span>
                               </button>
                             ))}
                           </div>

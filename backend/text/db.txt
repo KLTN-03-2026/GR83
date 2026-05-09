@@ -8,8 +8,6 @@ IF OBJECT_ID(N'dbo.TR_ViPhamTaiXe_SetNgayCapNhat',              N'TR') IS NOT NU
 GO
 IF OBJECT_ID(N'dbo.TR_KhieuNaiHoTro_SetNgayCapNhat',            N'TR') IS NOT NULL DROP TRIGGER dbo.TR_KhieuNaiHoTro_SetNgayCapNhat;
 GO
-IF OBJECT_ID(N'dbo.TR_HoTroAnToanTaiXe_SetNgayCapNhat',        N'TR') IS NOT NULL DROP TRIGGER dbo.TR_HoTroAnToanTaiXe_SetNgayCapNhat;
-GO
 IF OBJECT_ID(N'dbo.TR_TinNhan_SetNgayCapNhat',                  N'TR') IS NOT NULL DROP TRIGGER dbo.TR_TinNhan_SetNgayCapNhat;
 GO
 IF OBJECT_ID(N'dbo.TR_ThanhToan_SetNgayCapNhat',                N'TR') IS NOT NULL DROP TRIGGER dbo.TR_ThanhToan_SetNgayCapNhat;
@@ -46,8 +44,6 @@ IF OBJECT_ID(N'dbo.ViPhamTaiXe',                N'U') IS NOT NULL DROP TABLE dbo
 GO
 IF OBJECT_ID(N'dbo.KhieuNaiHoTro',              N'U') IS NOT NULL DROP TABLE dbo.KhieuNaiHoTro;
 GO
-IF OBJECT_ID(N'dbo.HoTroAnToanTaiXe',           N'U') IS NOT NULL DROP TABLE dbo.HoTroAnToanTaiXe;
-GO
 IF OBJECT_ID(N'dbo.TinNhan',                    N'U') IS NOT NULL DROP TABLE dbo.TinNhan;
 GO
 IF OBJECT_ID(N'dbo.ChatbotMessage',             N'U') IS NOT NULL DROP TABLE dbo.ChatbotMessage;
@@ -79,8 +75,6 @@ GO
 IF OBJECT_ID(N'dbo.NganHang',                   N'U') IS NOT NULL DROP TABLE dbo.NganHang;
 GO
 IF OBJECT_ID(N'dbo.TaiKhoan',                   N'U') IS NOT NULL DROP TABLE dbo.TaiKhoan;
-GO
-IF OBJECT_ID(N'dbo.LoaiSuCoHoTroTaiXe',         N'U') IS NOT NULL DROP TABLE dbo.LoaiSuCoHoTroTaiXe;
 GO
 IF OBJECT_ID(N'dbo.LoaiKhieuNaiHoTro',          N'U') IS NOT NULL DROP TABLE dbo.LoaiKhieuNaiHoTro;
 GO
@@ -371,7 +365,13 @@ CREATE TABLE dbo.UuDai
     CONSTRAINT CK_UuDai_HienThi         CHECK (HienThi      IN ('public','hidden')),
     CONSTRAINT CK_UuDai_TrangThai       CHECK (TrangThai    IN ('active','expired','scheduled')),
     CONSTRAINT CK_UuDai_SoLuotDaDung    CHECK (SoLuotDaDung >= 0),
-    CONSTRAINT CK_UuDai_GioiHanLuotDung CHECK (GioiHanLuotDung IS NULL OR GioiHanLuotDung >= 0)
+    CONSTRAINT CK_UuDai_GioiHanLuotDung CHECK (GioiHanLuotDung IS NULL OR GioiHanLuotDung >= 0),
+    CONSTRAINT CK_UuDai_Ngay CHECK (NgayHetHan >= NgayBatDau),
+    CONSTRAINT CK_UuDai_LoaiGiaTri CHECK (
+        (LoaiUuDai = 'percent' AND PhanTramGiam IS NOT NULL AND SoTienGiam IS NULL)
+        OR
+        (LoaiUuDai = 'fixed'   AND SoTienGiam  IS NOT NULL AND PhanTramGiam IS NULL)
+    )
 );
 GO
 
@@ -418,7 +418,6 @@ CREATE TABLE dbo.DatXe
     TienPhiNenTang      INT            NULL,
     TienTaiXeNhan       INT            NULL,
     MaUuDai             VARCHAR(40)    NULL,           -- FK → UuDai.MaUuDai
-    TenUuDai            NVARCHAR(120)  NULL,
     PhuongThucThanhToan VARCHAR(20)    NOT NULL,
     NhaCungCapThanhToan VARCHAR(20)    NULL,
     TrangThaiChuyen     NVARCHAR(20)   NOT NULL CONSTRAINT DF_DatXe_TrangThaiChuyen    DEFAULT N'ChoTaiXe',
@@ -465,7 +464,6 @@ CREATE TABLE dbo.DatXeDieuPhoi
     MaDieuPhoi      INT            IDENTITY(1,1) NOT NULL,
     MaChuyen        VARCHAR(30)    NOT NULL,           -- FK → DatXe.MaChuyen
     MaTKTaiXe       VARCHAR(20)    NOT NULL,           -- FK → TaiKhoan.MaTK
-    MaTX            VARCHAR(20)    NULL,
     ThuTuDieuPhoi   INT            NOT NULL,           -- thứ tự lần điều phối
     TrangThai       VARCHAR(20)    NOT NULL CONSTRAINT DF_DatXeDieuPhoi_TrangThai DEFAULT 'pending',
     KhoangCachKm    DECIMAL(10,3)  NULL,
@@ -476,6 +474,7 @@ CREATE TABLE dbo.DatXeDieuPhoi
     NgayCapNhat     DATETIME2(0)   NOT NULL CONSTRAINT DF_DatXeDieuPhoi_NgayCapNhat DEFAULT SYSDATETIME(),
 
     CONSTRAINT PK_DatXeDieuPhoi              PRIMARY KEY (MaDieuPhoi),
+    CONSTRAINT UQ_DatXeDieuPhoi_MaChuyen_MaTKTaiXe UNIQUE (MaChuyen, MaTKTaiXe),
     CONSTRAINT CK_DatXeDieuPhoi_TrangThai    CHECK (TrangThai IN ('pending','accepted','rejected')),
     CONSTRAINT FK_DatXeDieuPhoi_DatXe        FOREIGN KEY (MaChuyen)
         REFERENCES dbo.DatXe(MaChuyen)
@@ -530,7 +529,6 @@ CREATE TABLE dbo.ThanhToan
     TienPhiNenTang      INT            NULL,
     TienTaiXeNhan       INT            NULL,
     MaUuDai             VARCHAR(40)    NULL,
-    TenUuDai            NVARCHAR(120)  NULL,
     PhuongThucThanhToan VARCHAR(20)    NOT NULL,
     NhaCungCapThanhToan VARCHAR(20)    NULL,
     GatewayAppTransId   VARCHAR(80)    NULL,
@@ -550,11 +548,17 @@ CREATE TABLE dbo.ThanhToan
     CONSTRAINT CK_ThanhToan_TrangThai   CHECK (TrangThaiThanhToan   IN (N'ChoThuTien',N'ChoXacNhan',N'DaThanhToan',N'ThatBai')),
     CONSTRAINT FK_ThanhToan_DatXe       FOREIGN KEY (MaChuyen)
         REFERENCES dbo.DatXe(MaChuyen)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT FK_ThanhToan_UuDai FOREIGN KEY (MaUuDai)
+        REFERENCES dbo.UuDai(MaUuDai)
+        ON UPDATE NO ACTION ON DELETE NO ACTION
 );
 GO
 
 CREATE INDEX IX_ThanhToan_GatewayAppTransId ON dbo.ThanhToan (GatewayAppTransId) WHERE GatewayAppTransId IS NOT NULL;
+GO
+
+CREATE INDEX IX_ThanhToan_MaUuDai ON dbo.ThanhToan (MaUuDai) WHERE MaUuDai IS NOT NULL;
 GO
 
 CREATE OR ALTER TRIGGER dbo.TR_ThanhToan_SetNgayCapNhat
@@ -621,6 +625,12 @@ CREATE TABLE dbo.ThongBao
         REFERENCES dbo.TaiKhoan(MaTK)
         ON UPDATE CASCADE ON DELETE SET NULL
 );
+GO
+
+ALTER TABLE dbo.DatXe WITH CHECK
+ADD CONSTRAINT FK_DatXe_ThongBaoTaiXe FOREIGN KEY (MaTBThongBaoTaiXe)
+    REFERENCES dbo.ThongBao(MaTB)
+    ON UPDATE NO ACTION ON DELETE SET NULL;
 GO
 
 -- 11) TinNhan — Tin nhắn trong chuyến
@@ -699,56 +709,7 @@ CREATE INDEX IX_ChatbotMessage_ConversationId_CreatedAt
 ON dbo.ChatbotMessage (ConversationId, CreatedAt DESC, MessageId DESC);
 GO
 
--- 12) LoaiSuCoHoTroTaiXe — Danh mục loại sự cố hỗ trợ tài xế (legacy, không có FK)
-CREATE TABLE dbo.LoaiSuCoHoTroTaiXe
-(
-    MaLoaiSuCo   VARCHAR(40)   NOT NULL,
-    TenLoaiSuCo  NVARCHAR(120) NOT NULL,
-    ThuTuHienThi INT           NOT NULL CONSTRAINT DF_LoaiSuCoHoTroTaiXe_ThuTu DEFAULT 0,
-
-    CONSTRAINT PK_LoaiSuCoHoTroTaiXe PRIMARY KEY (MaLoaiSuCo)
-);
-GO
-
--- 13) HoTroAnToanTaiXe — Hỗ trợ an toàn cho tài xế (legacy)
---    MaTK     (cột thường, FK) → TaiKhoan.MaTK                 (PK)
---    LoaiSuCo (cột thường, FK) → LoaiSuCoHoTroTaiXe.MaLoaiSuCo (PK)
-CREATE TABLE dbo.HoTroAnToanTaiXe
-(
-    MaHoTro      INT            IDENTITY(1,1) NOT NULL,
-    MaTK         VARCHAR(20)    NOT NULL,
-    LoaiSuCo     VARCHAR(40)    NOT NULL,
-    MoTa         NVARCHAR(1200) NOT NULL,
-    TrangThai    VARCHAR(20)    NOT NULL CONSTRAINT DF_HoTroAnToanTaiXe_TrangThai DEFAULT 'new',
-    NgayTao      DATETIME2(0)   NOT NULL CONSTRAINT DF_HoTroAnToanTaiXe_NgayTao DEFAULT SYSDATETIME(),
-    NgayCapNhat  DATETIME2(0)   NOT NULL CONSTRAINT DF_HoTroAnToanTaiXe_NgayCapNhat DEFAULT SYSDATETIME(),
-
-    CONSTRAINT PK_HoTroAnToanTaiXe PRIMARY KEY (MaHoTro),
-    CONSTRAINT CK_HoTroAnToanTaiXe_TrangThai CHECK (TrangThai IN ('new','processing','resolved','rejected')),
-    CONSTRAINT CK_HoTroAnToanTaiXe_MoTa CHECK (LEN(LTRIM(RTRIM(MoTa))) BETWEEN 10 AND 1200),
-    CONSTRAINT FK_HoTroAnToanTaiXe_TaiKhoan FOREIGN KEY (MaTK)
-        REFERENCES dbo.TaiKhoan(MaTK)
-        ON UPDATE NO ACTION ON DELETE NO ACTION,
-    CONSTRAINT FK_HoTroAnToanTaiXe_Loai FOREIGN KEY (LoaiSuCo)
-        REFERENCES dbo.LoaiSuCoHoTroTaiXe(MaLoaiSuCo)
-        ON UPDATE NO ACTION ON DELETE NO ACTION
-);
-GO
-
-CREATE OR ALTER TRIGGER dbo.TR_HoTroAnToanTaiXe_SetNgayCapNhat
-ON dbo.HoTroAnToanTaiXe AFTER UPDATE AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE ht SET ht.NgayCapNhat = SYSDATETIME()
-    FROM dbo.HoTroAnToanTaiXe AS ht
-    WHERE EXISTS (SELECT 1 FROM inserted AS i WHERE i.MaHoTro = ht.MaHoTro);
-END
-GO
-
-CREATE INDEX IX_HoTroAnToanTaiXe_MaTK_NgayTao ON dbo.HoTroAnToanTaiXe (MaTK, NgayTao DESC, MaHoTro DESC);
-GO
-CREATE INDEX IX_HoTroAnToanTaiXe_LoaiSuCo ON dbo.HoTroAnToanTaiXe (LoaiSuCo);
-GO
+-- Đã bỏ nhóm bảng legacy HoTroAnToanTaiXe/LoaiSuCoHoTroTaiXe để giảm rườm rà schema.
 
 -- 14) LoaiKhieuNaiHoTro — Danh mục loại khiếu nại (bảng tham chiếu, không có FK)
 CREATE TABLE dbo.LoaiKhieuNaiHoTro

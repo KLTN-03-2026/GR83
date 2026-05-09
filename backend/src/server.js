@@ -141,10 +141,6 @@ function bootstrapSqlServerSchemas() {
 }
 
 async function bootstrap() {
-  if (isSqlServerConfigured()) {
-    bootstrapSqlServerSchemas();
-  }
-
   const httpServer = createServer(app);
   const socketServer = new Server(httpServer, {
     cors: {
@@ -154,10 +150,64 @@ async function bootstrap() {
 
   registerRideSocketServer(socketServer);
 
-  httpServer.listen(env.port, () => {
-    void connectRideEventBroker();
-    console.log(`SmartRide backend listening on http://localhost:${env.port}`);
-  });
+  const listenMaxRetries = 6;
+  const listenRetryDelayMs = 700;
+  const listenRetryDelayAfterMaxMs = 3000;
+
+  const startServer = (attempt = 1) => {
+    const onListening = () => {
+      httpServer.off('error', onError);
+
+      if (isSqlServerConfigured()) {
+        bootstrapSqlServerSchemas();
+      }
+
+      connectRideEventBroker().catch((error) => {
+        console.warn('[ride-realtime] Failed to connect to event broker:', error?.message);
+      });
+      console.log(`SmartRide backend listening on http://localhost:${env.port}`);
+    };
+
+    const onError = (error) => {
+      httpServer.off('listening', onListening);
+
+      if (error?.code === 'EADDRINUSE') {
+        if (attempt < listenMaxRetries) {
+          console.warn(`[startup] Port ${env.port} busy, retrying startup (${attempt}/${listenMaxRetries - 1})...`);
+          setTimeout(() => startServer(attempt + 1), listenRetryDelayMs);
+          return;
+        }
+
+        console.warn(
+          `[startup] Port ${env.port} is still busy. Waiting ${listenRetryDelayAfterMaxMs}ms before retrying again...`,
+        );
+        setTimeout(() => startServer(attempt), listenRetryDelayAfterMaxMs);
+        return;
+      }
+
+      console.error('[startup] HTTP server error:', error?.message || error);
+      process.exit(1);
+    };
+
+    httpServer.once('listening', onListening);
+    httpServer.once('error', onError);
+    httpServer.listen(env.port);
+  };
+
+  startServer();
 }
 
-void bootstrap();
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('[uncaughtException]', error?.message, error?.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unhandledRejection]', String(reason), promise);
+});
+
+try {
+  void bootstrap();
+} catch (error) {
+  console.error('[bootstrap error]', error?.message, error?.stack);
+}

@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 -- SEED DATA CHO SMART RIDE
 -- Muc tieu: du lieu mau cho admin dashboard va bao cao doanh thu
 -- Chay sau khi da chay script tao schema: backend/text/db.txt
@@ -18,6 +18,7 @@ WHERE NOT EXISTS (
     WHERE q.MaQuyen = v.MaQuyen
 );
 GO
+
 
 -- 2) Tai khoan admin + tai xe + khach hang
 INSERT INTO dbo.TaiKhoan (MaTK, TaiKhoan, MatKhau, MaQuyen, Ten, Email, SDT, DiaChi, Avatar, NgaySinh, GioiTinh, TrangThai)
@@ -122,14 +123,14 @@ SELECT v.MaUuDai, v.TenUuDai, v.MoTa, v.LoaiUuDai, v.PhanTramGiam, v.SoTienGiam,
        v.DoiTuong, v.HienThi, v.TrangThai, v.SoLuotDaDung, v.GioiHanLuotDung,
        v.NgayBatDau, v.NgayHetHan, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('SALE10',N'Giam gia chuyen ngan',N'Uu dai giam cho chuyen ngan','percent',10,NULL,50000,0,'customer','public','active',186,500,'2026-04-01','2026-05-30','2026-04-18T08:00:00','2026-04-18T08:00:00'),
-('NEWUSER',N'Uu dai khach moi',N'Ma uu dai danh cho nguoi dung lan dau dat xe','percent',20,NULL,100000,0,'customer','public','active',92,300,'2026-04-01','2026-06-10','2026-04-21T09:00:00','2026-04-21T09:00:00'),
-('SALE15',N'Khuyen mai cuoi tuan',N'Khuyen mai cuoi tuan cho toan bo chuyen xe','percent',15,NULL,50000,0,'customer','public','active',120,450,'2026-04-01','2026-05-15','2026-04-18T11:00:00','2026-04-18T11:00:00'),
-('BIKE20',N'Uu dai xe may',N'Uu dai rieng cho cac chuyen xe may','percent',20,NULL,80000,0,'customer','public','active',68,250,'2026-04-01','2026-06-12','2026-04-16T08:30:00','2026-04-16T08:30:00'),
-('SPRING25',N'Uu dai mua moi',N'Uu dai mua moi danh cho nguoi dung quay lai','percent',25,NULL,75000,0,'customer','public','active',44,200,'2026-04-01','2026-05-22','2026-04-22T07:00:00','2026-04-22T07:00:00'),
-('WEEKEND10',N'Cuoi tuan tiet kiem',N'Khuyen mai dung cho khung gio cuoi tuan','fixed',NULL,20000,NULL,50000,'all','hidden','active',77,400,'2026-04-01','2026-04-27','2026-04-20T08:00:00','2026-04-20T08:00:00'),
-('OLD5',N'Uu dai cu',N'Ma cu da het hieu luc va duoc giu de doi soat','percent',5,NULL,20000,0,'customer','public','expired',210,600,'2026-02-01','2026-03-02','2026-03-01T08:00:00','2026-03-01T08:00:00'),
-('WELCOME5',N'Ma chao mung',N'Uu dai chao mung cho dot tiep theo','percent',5,NULL,40000,0,'customer','public','scheduled',0,250,'2026-05-01','2026-06-30','2026-04-19T08:00:00','2026-04-19T08:00:00')
+('SALE10',N'Giam gia chuyen ngan',N'Uu dai giam cho chuyen ngan','percent',10,NULL,50000,0,'customer','public','active',186,500,'2026-06-10','2026-05-30','2026-05-23T08:00:00','2026-05-23T08:00:00'),
+('NEWUSER',N'Uu dai khach moi',N'Ma uu dai danh cho nguoi dung lan dau dat xe','percent',20,NULL,100000,0,'customer','public','active',92,300,'2026-06-10','2026-06-10','2026-05-26T09:00:00','2026-05-26T09:00:00'),
+('SALE15',N'Khuyen mai cuoi tuan',N'Khuyen mai cuoi tuan cho toan bo chuyen xe','percent',15,NULL,50000,0,'customer','public','active',120,450,'2026-06-10','2026-05-15','2026-05-23T11:00:00','2026-05-23T11:00:00'),
+('BIKE20',N'Uu dai xe may',N'Uu dai rieng cho cac chuyen xe may','percent',20,NULL,80000,0,'customer','public','active',68,250,'2026-06-10','2026-06-12','2026-05-21T08:30:00','2026-05-21T08:30:00'),
+('SPRING25',N'Uu dai mua moi',N'Uu dai mua moi danh cho nguoi dung quay lai','percent',25,NULL,75000,0,'customer','public','active',44,200,'2026-06-10','2026-05-22','2026-05-27T07:00:00','2026-05-27T07:00:00'),
+('WEEKEND10',N'Cuoi tuan tiet kiem',N'Khuyen mai dung cho khung gio cuoi tuan','fixed',NULL,20000,NULL,50000,'all','hidden','active',77,400,'2026-06-10','2026-06-01','2026-05-25T08:00:00','2026-05-25T08:00:00'),
+('OLD5',N'Uu dai cu',N'Ma cu da het hieu luc va duoc giu de doi soat','percent',5,NULL,20000,0,'customer','public','expired',210,600,'2026-05-17','2026-06-15','2026-06-14T08:00:00','2026-06-14T08:00:00'),
+('WELCOME5',N'Ma chao mung',N'Uu dai chao mung cho dot tiep theo','percent',5,NULL,40000,0,'customer','public','scheduled',0,250,'2026-06-05','2026-06-30','2026-05-24T08:00:00','2026-05-24T08:00:00')
 ) AS v(MaUuDai, TenUuDai, MoTa, LoaiUuDai, PhanTramGiam, SoTienGiam, GiaTriToiDa, DonToiThieu,
        DoiTuong, HienThi, TrangThai, SoLuotDaDung, GioiHanLuotDung,
        NgayBatDau, NgayHetHan, NgayTao, NgayCapNhat)
@@ -168,7 +169,7 @@ INSERT INTO dbo.DatXe (
     TenKhachHang, SDT, LoaiXe, DatLich, DiemDon, DiemDen, QuangDuongKm, NguonTuyenDuong,
     MaHangXe, TenHangXe, LoaiGhe, ThoiGianDuKienPhut,
     GiaTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
-    MaUuDai, TenUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
     TrangThaiChuyen, TrangThaiThanhToan, NgayTao, NgayCapNhat
 )
 SELECT
@@ -176,38 +177,38 @@ SELECT
     v.TenKhachHang, v.SDT, v.LoaiXe, v.DatLich, v.DiemDon, v.DiemDen, v.QuangDuongKm, v.NguonTuyenDuong,
     v.MaHangXe, v.TenHangXe, v.LoaiGhe, v.ThoiGianDuKienPhut,
     v.GiaTien, v.GiaGoc, v.TienGiam, v.PhanTramPhiNenTang, v.TienPhiNenTang, v.TienTaiXeNhan,
-    v.MaUuDai, v.TenUuDai, v.PhuongThucThanhToan, v.NhaCungCapThanhToan,
+    v.MaUuDai, v.PhuongThucThanhToan, v.NhaCungCapThanhToan,
     v.TrangThaiChuyen, v.TrangThaiThanhToan, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('CX2026041001','TK0101','201234567890','TK0002',NULL,N'Pham Thi D','0910000001','motorbike',0,N'12 Ly Tu Trong',N'98 Trung Nu Vuong',3.60,N'google',N'honda',N'Honda Wave',NULL,11,36000,42000,6000,30,10800,25200,'SALE10',N'Giam gia chuyen ngan','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-04-10T07:40:00','2026-04-10T08:05:00'),
-('CX2026041201','TK0102','202234567890','TK0003',NULL,N'Nguyen H E','0910000002','car',0,N'90 Nguyen Chi Thanh',N'San bay Da Nang',9.40,N'google',N'toyota',N'Toyota Vios',N'4 cho',24,141000,141000,0,30,42300,98700,NULL,NULL,'cash',NULL,N'HoanThanh',N'DaThanhToan','2026-04-12T16:15:00','2026-04-12T17:00:00'),
-('CX2026041401','TK0103','203334567890','TK0004',NULL,N'Tran F','0910000003','motorbike',0,N'28 Nguyen Van Linh',N'Vincom Da Nang',4.80,N'google',N'yamaha',N'Yamaha Sirius',NULL,15,46000,56000,10000,30,13800,32200,'SALE10',N'Giam gia chuyen ngan','qr','momo',N'HoanThanh',N'DaThanhToan','2026-04-14T11:10:00','2026-04-14T11:38:00'),
-('CX2026041601','TK0104','201234567890','TK0002',NULL,N'Le Thi G','0910000004','car',0,N'123 Le Duan',N'36 Bach Dang',6.90,N'google',N'hyundai',N'Hyundai Accent',N'4 cho',19,102000,122000,20000,30,30600,71400,'NEWUSER',N'Uu dai khach moi','wallet','app_wallet',N'HoanThanh',N'DaThanhToan','2026-04-16T09:25:00','2026-04-16T10:00:00'),
-('CX2026041801','TK0105','202234567890','TK0003',NULL,N'Vu H','0910000005','intercity',1,N'Da Nang',N'Lang Co',72.00,N'google',N'ford',N'Ford Transit',N'16 cho',98,610000,640000,30000,30,183000,427000,'SPRING25',N'Uu dai mua moi','qr','zalopay',N'HoanThanh',N'DaThanhToan','2026-04-18T05:50:00','2026-04-18T08:05:00'),
-('CX2026042001','TK0101','203334567890','TK0004',NULL,N'Pham Thi D','0910000001','motorbike',0,N'5 An Thuong 1',N'22 Nguyen Van Thoai',2.60,N'google',N'honda',N'Honda AirBlade',NULL,9,24000,30000,6000,30,7200,16800,'SALE10',N'Giam gia chuyen ngan','cash',NULL,N'HoanThanh',N'DaThanhToan','2026-04-20T20:30:00','2026-04-20T20:50:00'),
-('CX2026042201','TK0102','201234567890','TK0002',NULL,N'Nguyen H E','0910000002','car',0,N'12 Ho Nghinh',N'Ga Da Nang',10.10,N'google',N'toyota',N'Toyota Vios',N'4 cho',26,149000,149000,0,30,44700,104300,NULL,NULL,'wallet','momo',N'HoanThanh',N'DaThanhToan','2026-04-22T13:00:00','2026-04-22T13:46:00'),
-('CX2026042401','TK0103','202234567890','TK0003',NULL,N'Tran F','0910000003','motorbike',0,N'49 Tran Quoc Toan',N'15 Ong Ich Khiem',4.10,N'google',N'yamaha',N'Yamaha Sirius',NULL,13,39000,39000,0,30,11700,27300,NULL,NULL,'qr','momo',N'HoanThanh',N'DaThanhToan','2026-04-24T18:35:00','2026-04-24T18:58:00'),
-('CX2026042501','TK0101','201234567890','TK0002',NULL,N'Pham Thi D','0910000001','motorbike',0,N'45 Le Duan',N'12 Nguyen Van Linh',4.20,N'google',N'honda',N'Honda Wave',NULL,14,42000,50000,8000,30,12600,29400,'SALE10',N'Giam gia chuyen ngan','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-04-25T08:10:00','2026-04-25T08:35:00'),
-('CX2026042601','TK0102','202234567890','TK0003',NULL,N'Nguyen H E','0910000002','car',0,N'20 Tran Phu',N'Asia Park',7.80,N'google',N'toyota',N'Toyota Vios',N'4 cho',20,118000,118000,0,30,35400,82600,NULL,NULL,'cash',NULL,N'HoanThanh',N'DaThanhToan','2026-04-26T10:00:00','2026-04-26T10:45:00'),
-('CX2026042701','TK0103','203334567890','TK0004',NULL,N'Tran F','0910000003','motorbike',0,N'99 Ong Ich Khiem',N'32 Dien Bien Phu',3.10,N'google',N'yamaha',N'Yamaha Sirius',NULL,12,32000,40000,8000,30,9600,22400,'SALE10',N'Giam gia chuyen ngan','qr','zalopay',N'HoanThanh',N'DaThanhToan','2026-04-27T07:30:00','2026-04-27T07:55:00'),
-('CX2026042801','TK0104','201234567890','TK0002',NULL,N'Le Thi G','0910000004','intercity',1,N'Da Nang',N'Hoi An',28.00,N'google',N'ford',N'Ford Transit',N'16 cho',55,265000,280000,15000,30,79500,185500,'SALE15',N'Khuyen mai cuoi tuan','wallet','app_wallet',N'HoanThanh',N'DaThanhToan','2026-04-28T15:20:00','2026-04-28T16:30:00'),
-('CX2026043001','TK0105','202234567890','TK0003',NULL,N'Vu H','0910000005','car',0,N'13 Hoang Dieu',N'San bay Da Nang',6.50,N'google',N'kia',N'Kia Morning',N'4 cho',18,98000,98000,0,30,29400,68600,NULL,NULL,'qr','momo',N'HoanThanh',N'DaThanhToan','2026-04-30T19:10:00','2026-04-30T19:45:00'),
-('CX2026050101','TK0101','203334567890','TK0004',NULL,N'Pham Thi D','0910000001','motorbike',0,N'205 Ton Duc Thang',N'31 Le Loi',5.10,N'google',N'honda',N'Honda AirBlade',NULL,16,51000,60000,9000,30,15300,35700,'SALE15',N'Khuyen mai cuoi tuan','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-05-01T09:05:00','2026-05-01T09:36:00'),
-('CX2026050201','TK0102','201234567890','TK0002',NULL,N'Nguyen H E','0910000002','car',0,N'10 Tran Hung Dao',N'Vincom Da Nang',8.20,N'google',N'toyota',N'Toyota Vios',N'4 cho',22,132000,150000,18000,30,39600,92400,'NEWUSER',N'Uu dai khach moi','wallet','app_wallet',N'HoanThanh',N'DaThanhToan','2026-05-02T11:45:00','2026-05-02T12:30:00'),
-('CX2026050301','TK0103','202234567890','TK0003',NULL,N'Tran F','0910000003','intercity',1,N'Da Nang',N'Hue',95.00,N'google',N'ford',N'Ford Transit',N'16 cho',130,780000,820000,40000,30,234000,546000,'SPRING25',N'Uu dai mua moi','qr','momo',N'HoanThanh',N'DaThanhToan','2026-05-03T06:20:00','2026-05-03T09:10:00'),
-('CX2026050401','TK0104','203334567890','TK0004',NULL,N'Le Thi G','0910000004','motorbike',0,N'45 Bach Dang',N'65 Ngo Quyen',2.90,N'google',N'yamaha',N'Yamaha Sirius',NULL,10,28000,35000,7000,30,8400,19600,'SALE10',N'Giam gia chuyen ngan','cash',NULL,N'HoanThanh',N'DaThanhToan','2026-05-04T14:12:00','2026-05-04T14:34:00'),
-('CX2026050501','TK0105','201234567890','TK0002',NULL,N'Vu H','0910000005','car',0,N'FPT Complex',N'Ga Da Nang',12.40,N'google',N'hyundai',N'Hyundai Accent',N'4 cho',30,176000,196000,20000,30,52800,123200,'NEWUSER',N'Uu dai khach moi','wallet','zalopay',N'HoanThanh',N'DaThanhToan','2026-05-05T17:25:00','2026-05-05T18:05:00'),
-('CX2026050502','TK0101',NULL,'TK0002',N'Khach huy do doi lich',N'Pham Thi D','0910000001','motorbike',1,N'Bai bien My Khe',N'Cau Rong',4.70,N'google',N'honda',N'Honda Wave',NULL,15,47000,47000,0,30,14100,32900,NULL,NULL,'cash',NULL,N'DaHuy',N'ThatBai','2026-05-05T20:10:00','2026-05-05T20:25:00'),
-('CX2026050601','TK0102',NULL,NULL,NULL,N'Nguyen H E','0910000002','car',0,N'28 Le Loi',N'San bay Da Nang',7.20,N'google',N'kia',N'Kia Morning',N'4 cho',19,103000,103000,0,30,30900,72100,NULL,NULL,'qr','momo',N'ChoTaiXe',N'ChoXacNhan','2026-05-06T08:05:00','2026-05-06T08:05:00'),
-('CX2026050602','TK0103','202234567890','TK0003',NULL,N'Tran F','0910000003','car',0,N'Caphe Cong',N'Lotte Mart',6.80,N'google',N'toyota',N'Toyota Vios',N'4 cho',18,99000,99000,0,30,29700,69300,NULL,NULL,'cash',NULL,N'DangThucHien',N'ChoThuTien','2026-05-06T09:20:00','2026-05-06T09:32:00'),
-('CX2026050603','TK0104',NULL,'TK0004',N'Khong tim duoc tai xe gan',N'Le Thi G','0910000004','intercity',1,N'Da Nang',N'Tam Ky',60.00,N'google',N'ford',N'Ford Transit',N'16 cho',90,540000,540000,0,30,162000,378000,NULL,NULL,'wallet','app_wallet',N'DaHuy',N'ThatBai','2026-05-06T06:15:00','2026-05-06T06:55:00'),
-('CX2026050604','TK0105',NULL,NULL,NULL,N'Vu H','0910000005','motorbike',0,N'120 Phan Chau Trinh',N'90 Nguyen Van Linh',3.80,N'google',N'honda',N'Honda Wave',NULL,13,36000,36000,0,30,10800,25200,NULL,NULL,'wallet','momo',N'ChoTaiXe',N'ChoXacNhan','2026-05-06T10:40:00','2026-05-06T10:40:00')
+('CX2026041001','TK0101','201234567890','TK0002',NULL,N'Pham Thi D','0910000001','motorbike',0,N'12 Ly Tu Trong',N'98 Trung Nu Vuong',3.60,N'google',N'honda',N'Honda Wave',NULL,11,36000,42000,6000,30,10800,25200,'SALE10','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-05-15T07:40:00','2026-05-15T08:05:00'),
+('CX2026041201','TK0102','202234567890','TK0003',NULL,N'Nguyen H E','0910000002','car',0,N'90 Nguyen Chi Thanh',N'San bay Da Nang',9.40,N'google',N'toyota',N'Toyota Vios',N'4 cho',24,141000,141000,0,30,42300,98700,NULL,'cash',NULL,N'HoanThanh',N'DaThanhToan','2026-05-17T16:15:00','2026-05-17T17:00:00'),
+('CX2026041401','TK0103','203334567890','TK0004',NULL,N'Tran F','0910000003','motorbike',0,N'28 Nguyen Van Linh',N'Vincom Da Nang',4.80,N'google',N'yamaha',N'Yamaha Sirius',NULL,15,46000,56000,10000,30,13800,32200,'SALE10','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-05-19T11:10:00','2026-05-19T11:38:00'),
+('CX2026041601','TK0104','201234567890','TK0002',NULL,N'Le Thi G','0910000004','car',0,N'123 Le Duan',N'36 Bach Dang',6.90,N'google',N'hyundai',N'Hyundai Accent',N'4 cho',19,102000,122000,20000,30,30600,71400,'NEWUSER','wallet','app_wallet',N'HoanThanh',N'DaThanhToan','2026-05-21T09:25:00','2026-05-21T10:00:00'),
+('CX2026041801','TK0105','202234567890','TK0003',NULL,N'Vu H','0910000005','intercity',1,N'Da Nang',N'Lang Co',72.00,N'google',N'ford',N'Ford Transit',N'16 cho',98,610000,640000,30000,30,183000,427000,'SPRING25','wallet','zalopay',N'HoanThanh',N'DaThanhToan','2026-05-23T05:50:00','2026-05-23T08:05:00'),
+('CX2026042001','TK0101','203334567890','TK0004',NULL,N'Pham Thi D','0910000001','motorbike',0,N'5 An Thuong 1',N'22 Nguyen Van Thoai',2.60,N'google',N'honda',N'Honda AirBlade',NULL,9,24000,30000,6000,30,7200,16800,'SALE10','cash',NULL,N'HoanThanh',N'DaThanhToan','2026-05-25T20:30:00','2026-05-25T20:50:00'),
+('CX2026042201','TK0102','201234567890','TK0002',NULL,N'Nguyen H E','0910000002','car',0,N'12 Ho Nghinh',N'Ga Da Nang',10.10,N'google',N'toyota',N'Toyota Vios',N'4 cho',26,149000,149000,0,30,44700,104300,NULL,'wallet','momo',N'HoanThanh',N'DaThanhToan','2026-05-27T13:00:00','2026-05-27T13:46:00'),
+('CX2026042401','TK0103','202234567890','TK0003',NULL,N'Tran F','0910000003','motorbike',0,N'49 Tran Quoc Toan',N'15 Ong Ich Khiem',4.10,N'google',N'yamaha',N'Yamaha Sirius',NULL,13,39000,39000,0,30,11700,27300,NULL,'wallet','momo',N'HoanThanh',N'DaThanhToan','2026-05-29T18:35:00','2026-05-29T18:58:00'),
+('CX2026042501','TK0101','201234567890','TK0002',NULL,N'Pham Thi D','0910000001','motorbike',0,N'45 Le Duan',N'12 Nguyen Van Linh',4.20,N'google',N'honda',N'Honda Wave',NULL,14,42000,50000,8000,30,12600,29400,'SALE10','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-05-30T08:10:00','2026-05-30T08:35:00'),
+('CX2026042601','TK0102','202234567890','TK0003',NULL,N'Nguyen H E','0910000002','car',0,N'20 Tran Phu',N'Asia Park',7.80,N'google',N'toyota',N'Toyota Vios',N'4 cho',20,118000,118000,0,30,35400,82600,NULL,'cash',NULL,N'HoanThanh',N'DaThanhToan','2026-05-31T10:00:00','2026-05-31T10:45:00'),
+('CX2026042701','TK0103','203334567890','TK0004',NULL,N'Tran F','0910000003','motorbike',0,N'99 Ong Ich Khiem',N'32 Dien Bien Phu',3.10,N'google',N'yamaha',N'Yamaha Sirius',NULL,12,32000,40000,8000,30,9600,22400,'SALE10','wallet','zalopay',N'HoanThanh',N'DaThanhToan','2026-06-01T07:30:00','2026-06-01T07:55:00'),
+('CX2026042801','TK0104','201234567890','TK0002',NULL,N'Le Thi G','0910000004','intercity',1,N'Da Nang',N'Hoi An',28.00,N'google',N'ford',N'Ford Transit',N'16 cho',55,265000,280000,15000,30,79500,185500,'SALE15','wallet','app_wallet',N'HoanThanh',N'DaThanhToan','2026-06-02T15:20:00','2026-06-02T16:30:00'),
+('CX2026043001','TK0105','202234567890','TK0003',NULL,N'Vu H','0910000005','car',0,N'13 Hoang Dieu',N'San bay Da Nang',6.50,N'google',N'kia',N'Kia Morning',N'4 cho',18,98000,98000,0,30,29400,68600,NULL,'wallet','momo',N'HoanThanh',N'DaThanhToan','2026-06-04T19:10:00','2026-06-04T19:45:00'),
+('CX2026050101','TK0101','203334567890','TK0004',NULL,N'Pham Thi D','0910000001','motorbike',0,N'205 Ton Duc Thang',N'31 Le Loi',5.10,N'google',N'honda',N'Honda AirBlade',NULL,16,51000,60000,9000,30,15300,35700,'SALE15','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-06-05T09:05:00','2026-06-05T09:36:00'),
+('CX2026050201','TK0102','201234567890','TK0002',NULL,N'Nguyen H E','0910000002','car',0,N'10 Tran Hung Dao',N'Vincom Da Nang',8.20,N'google',N'toyota',N'Toyota Vios',N'4 cho',22,132000,150000,18000,30,39600,92400,'NEWUSER','wallet','app_wallet',N'HoanThanh',N'DaThanhToan','2026-06-06T11:45:00','2026-06-06T12:30:00'),
+('CX2026050301','TK0103','202234567890','TK0003',NULL,N'Tran F','0910000003','intercity',1,N'Da Nang',N'Hue',95.00,N'google',N'ford',N'Ford Transit',N'16 cho',130,780000,820000,40000,30,234000,546000,'SPRING25','wallet','momo',N'HoanThanh',N'DaThanhToan','2026-06-07T06:20:00','2026-06-07T09:10:00'),
+('CX2026050401','TK0104','203334567890','TK0004',NULL,N'Le Thi G','0910000004','motorbike',0,N'45 Bach Dang',N'65 Ngo Quyen',2.90,N'google',N'yamaha',N'Yamaha Sirius',NULL,10,28000,35000,7000,30,8400,19600,'SALE10','cash',NULL,N'HoanThanh',N'DaThanhToan','2026-06-08T14:12:00','2026-06-08T14:34:00'),
+('CX2026050501','TK0105','201234567890','TK0002',NULL,N'Vu H','0910000005','car',0,N'FPT Complex',N'Ga Da Nang',12.40,N'google',N'hyundai',N'Hyundai Accent',N'4 cho',30,176000,196000,20000,30,52800,123200,'NEWUSER','wallet','zalopay',N'HoanThanh',N'DaThanhToan','2026-06-09T17:25:00','2026-06-09T18:05:00'),
+('CX2026050502','TK0101',NULL,'TK0002',N'Khach huy do doi lich',N'Pham Thi D','0910000001','motorbike',1,N'Bai bien My Khe',N'Cau Rong',4.70,N'google',N'honda',N'Honda Wave',NULL,15,47000,47000,0,30,14100,32900,NULL,'cash',NULL,N'DaHuy',N'ThatBai','2026-06-09T20:10:00','2026-06-09T20:25:00'),
+('CX2026050601','TK0102',NULL,NULL,N'Khong tim duoc tai xe gan',N'Nguyen H E','0910000002','car',0,N'28 Le Loi',N'San bay Da Nang',7.20,N'google',N'kia',N'Kia Morning',N'4 cho',19,103000,103000,0,30,30900,72100,NULL,'wallet','momo',N'DaHuy',N'ThatBai','2026-06-10T08:05:00','2026-06-10T08:05:00'),
+('CX2026050602','TK0103','202234567890','TK0003',NULL,N'Tran F','0910000003','car',0,N'Caphe Cong',N'Lotte Mart',6.80,N'google',N'toyota',N'Toyota Vios',N'4 cho',18,99000,99000,0,30,29700,69300,NULL,'cash',NULL,N'HoanThanh',N'DaThanhToan','2026-06-10T09:20:00','2026-06-10T09:32:00'),
+('CX2026050603','TK0104',NULL,'TK0004',N'Khong tim duoc tai xe gan',N'Le Thi G','0910000004','intercity',1,N'Da Nang',N'Tam Ky',60.00,N'google',N'ford',N'Ford Transit',N'16 cho',90,540000,540000,0,30,162000,378000,NULL,'wallet','app_wallet',N'DaHuy',N'ThatBai','2026-06-10T06:15:00','2026-06-10T06:55:00'),
+('CX2026050604','TK0105',NULL,NULL,N'Khong tim duoc tai xe gan',N'Vu H','0910000005','motorbike',0,N'120 Phan Chau Trinh',N'90 Nguyen Van Linh',3.80,N'google',N'honda',N'Honda Wave',NULL,13,36000,36000,0,30,10800,25200,NULL,'wallet','momo',N'DaHuy',N'ThatBai','2026-06-10T10:40:00','2026-06-10T10:40:00')
 ) AS v(
     MaChuyen, MaTK, MaTX, MaTKTaiXeDuocMoi, LyDoHuy,
     TenKhachHang, SDT, LoaiXe, DatLich, DiemDon, DiemDen, QuangDuongKm, NguonTuyenDuong,
     MaHangXe, TenHangXe, LoaiGhe, ThoiGianDuKienPhut,
     GiaTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
-    MaUuDai, TenUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
     TrangThaiChuyen, TrangThaiThanhToan, NgayTao, NgayCapNhat
 )
 WHERE NOT EXISTS (
@@ -228,7 +229,7 @@ INSERT INTO dbo.DatXe (
     TenKhachHang, SDT, LoaiXe, DatLich, DiemDon, DiemDen, QuangDuongKm, NguonTuyenDuong,
     MaHangXe, TenHangXe, LoaiGhe, ThoiGianDuKienPhut,
     GiaTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
-    MaUuDai, TenUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
     TrangThaiChuyen, TrangThaiThanhToan, NgayTao, NgayCapNhat
 )
 SELECT
@@ -295,11 +296,10 @@ SELECT
     CAST(ROUND((32000 + s.n * 3900) * 0.3, 0) AS INT) AS TienPhiNenTang,
     CAST(ROUND((32000 + s.n * 3900) * 0.7, 0) AS INT) AS TienTaiXeNhan,
     CASE WHEN s.n % 6 = 0 THEN 'SALE10' ELSE NULL END AS MaUuDai,
-    CASE WHEN s.n % 6 = 0 THEN N'Giam gia chuyen ngan' ELSE NULL END AS TenUuDai,
     CASE s.n % 3
         WHEN 0 THEN 'cash'
         WHEN 1 THEN 'wallet'
-        ELSE 'qr'
+        ELSE 'wallet'
     END AS PhuongThucThanhToan,
     CASE s.n % 3
         WHEN 0 THEN NULL
@@ -308,13 +308,10 @@ SELECT
     END AS NhaCungCapThanhToan,
     CASE
         WHEN s.n <= 34 THEN N'HoanThanh'
-        WHEN s.n <= 43 THEN N'ChoTaiXe'
-        WHEN s.n <= 47 THEN N'DangThucHien'
         ELSE N'DaHuy'
     END AS TrangThaiChuyen,
     CASE
         WHEN s.n <= 34 THEN N'DaThanhToan'
-        WHEN s.n <= 47 THEN N'ChoXacNhan'
         ELSE N'ThatBai'
     END AS TrangThaiThanhToan,
     DATEADD(
@@ -323,7 +320,7 @@ SELECT
         DATEADD(
             HOUR,
             6 + (s.n % 14),
-            DATEADD(DAY, (s.n - 1) / 3, CAST('2026-04-20T00:00:00' AS DATETIME2(0)))
+            DATEADD(DAY, (s.n - 1) / 3, CAST('2026-05-25T00:00:00' AS DATETIME2(0)))
         )
     ) AS NgayTao,
     DATEADD(
@@ -335,7 +332,7 @@ SELECT
             DATEADD(
                 HOUR,
                 6 + (s.n % 14),
-                DATEADD(DAY, (s.n - 1) / 3, CAST('2026-04-20T00:00:00' AS DATETIME2(0)))
+                DATEADD(DAY, (s.n - 1) / 3, CAST('2026-05-25T00:00:00' AS DATETIME2(0)))
             )
         )
     ) AS NgayCapNhat
@@ -362,7 +359,7 @@ SET
         DATEADD(
             HOUR,
             6 + (a.n % 14),
-            DATEADD(DAY, (a.n - 1) / 3, CAST('2026-04-20T00:00:00' AS DATETIME2(0)))
+            DATEADD(DAY, (a.n - 1) / 3, CAST('2026-05-25T00:00:00' AS DATETIME2(0)))
         )
     ),
     dx.NgayCapNhat = DATEADD(
@@ -374,7 +371,7 @@ SET
             DATEADD(
                 HOUR,
                 6 + (a.n % 14),
-                DATEADD(DAY, (a.n - 1) / 3, CAST('2026-04-20T00:00:00' AS DATETIME2(0)))
+                DATEADD(DAY, (a.n - 1) / 3, CAST('2026-05-25T00:00:00' AS DATETIME2(0)))
             )
         )
     )
@@ -383,40 +380,62 @@ INNER JOIN existingAuto AS a
     ON a.MaChuyen = dx.MaChuyen;
 GO
 
+-- 7.2) Chuan hoa toan bo DatXe: chi giu 2 trang thai HoanThanh/DaHuy
+UPDATE dbo.DatXe
+SET
+    TrangThaiChuyen = CASE
+        WHEN TrangThaiChuyen = N'HoanThanh' THEN N'HoanThanh'
+        ELSE N'DaHuy'
+    END,
+    TrangThaiThanhToan = CASE
+        WHEN TrangThaiChuyen = N'HoanThanh' THEN N'DaThanhToan'
+        ELSE N'ThatBai'
+    END,
+    LyDoHuy = CASE
+        WHEN TrangThaiChuyen = N'HoanThanh' THEN NULL
+        WHEN ISNULL(LTRIM(RTRIM(LyDoHuy)), N'') = N'' THEN N'Khong tim duoc tai xe gan'
+        ELSE LyDoHuy
+    END,
+    NgayCapNhat = SYSDATETIME()
+WHERE TrangThaiChuyen NOT IN (N'HoanThanh', N'DaHuy')
+   OR (TrangThaiChuyen = N'DaHuy' AND TrangThaiThanhToan <> N'ThatBai')
+   OR (TrangThaiChuyen = N'HoanThanh' AND TrangThaiThanhToan <> N'DaThanhToan');
+GO
+
 -- 8) Thanh toan cho cac chuyen da hoan thanh
 INSERT INTO dbo.ThanhToan (
     MaTT, MaChuyen, SoTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
-    MaUuDai, TenUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
     GatewayAppTransId, GatewayTransToken, GatewayLastQueryAt, GatewayLastReturnCode,
     TrangThaiThanhToan, ThoiDiemThanhToan, GhiChu, NgayTao, NgayCapNhat
 )
 SELECT v.MaTT, v.MaChuyen, v.SoTien, v.GiaGoc, v.TienGiam, v.PhanTramPhiNenTang, v.TienPhiNenTang, v.TienTaiXeNhan,
-       v.MaUuDai, v.TenUuDai, v.PhuongThucThanhToan, v.NhaCungCapThanhToan,
+       v.MaUuDai, v.PhuongThucThanhToan, v.NhaCungCapThanhToan,
        v.GatewayAppTransId, v.GatewayTransToken, v.GatewayLastQueryAt, v.GatewayLastReturnCode,
        v.TrangThaiThanhToan, v.ThoiDiemThanhToan, v.GhiChu, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('TT2026041001','CX2026041001',36000,42000,6000,30,10800,25200,'SALE10',N'Giam gia chuyen ngan','wallet','momo','MOMO-2026041001','TOKEN-1001','2026-04-10T08:06:00',1,N'DaThanhToan','2026-04-10T08:05:00',N'Thanh toan vi momo','2026-04-10T08:05:00','2026-04-10T08:06:00'),
-('TT2026041201','CX2026041201',141000,141000,0,30,42300,98700,NULL,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-04-12T16:59:00',N'Thu tien mat','2026-04-12T17:00:00','2026-04-12T17:00:00'),
-('TT2026041401','CX2026041401',46000,56000,10000,30,13800,32200,'SALE10',N'Giam gia chuyen ngan','qr','momo','MOMO-2026041401','TOKEN-1401','2026-04-14T11:39:00',1,N'DaThanhToan','2026-04-14T11:38:00',N'Thanh toan QR Momo','2026-04-14T11:38:00','2026-04-14T11:39:00'),
-('TT2026041601','CX2026041601',102000,122000,20000,30,30600,71400,'NEWUSER',N'Uu dai khach moi','wallet','app_wallet','APPW-2026041601','TOKEN-1601','2026-04-16T10:01:00',1,N'DaThanhToan','2026-04-16T10:00:00',N'Thanh toan vi noi bo','2026-04-16T10:00:00','2026-04-16T10:01:00'),
-('TT2026041801','CX2026041801',610000,640000,30000,30,183000,427000,'SPRING25',N'Uu dai mua moi','qr','zalopay','ZP-2026041801','TOKEN-1801','2026-04-18T08:06:00',1,N'DaThanhToan','2026-04-18T08:05:00',N'Thanh toan QR ZaloPay','2026-04-18T08:05:00','2026-04-18T08:06:00'),
-('TT2026042001','CX2026042001',24000,30000,6000,30,7200,16800,'SALE10',N'Giam gia chuyen ngan','cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-04-20T20:50:00',N'Thu tien mat','2026-04-20T20:50:00','2026-04-20T20:50:00'),
-('TT2026042201','CX2026042201',149000,149000,0,30,44700,104300,NULL,NULL,'wallet','momo','MOMO-2026042201','TOKEN-2201','2026-04-22T13:47:00',1,N'DaThanhToan','2026-04-22T13:46:00',N'Thanh toan vi momo','2026-04-22T13:46:00','2026-04-22T13:47:00'),
-('TT2026042401','CX2026042401',39000,39000,0,30,11700,27300,NULL,NULL,'qr','momo','MOMO-2026042401','TOKEN-2401','2026-04-24T18:59:00',1,N'DaThanhToan','2026-04-24T18:58:00',N'Thanh toan QR Momo','2026-04-24T18:58:00','2026-04-24T18:59:00'),
-('TT2026042501','CX2026042501',42000,50000,8000,30,12600,29400,'SALE10',N'Giam gia chuyen ngan','wallet','momo','MOMO-2026042501','TOKEN-2501','2026-04-25T08:36:00',1,N'DaThanhToan','2026-04-25T08:35:30',N'Thanh toan vi momo','2026-04-25T08:35:00','2026-04-25T08:36:00'),
-('TT2026042601','CX2026042601',118000,118000,0,30,35400,82600,NULL,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-04-26T10:44:00',N'Thu tien mat','2026-04-26T10:45:00','2026-04-26T10:45:00'),
-('TT2026042701','CX2026042701',32000,40000,8000,30,9600,22400,'SALE10',N'Giam gia chuyen ngan','qr','zalopay','ZP-2026042701','TOKEN-2701','2026-04-27T07:56:00',1,N'DaThanhToan','2026-04-27T07:55:45',N'Thanh toan QR ZaloPay','2026-04-27T07:55:00','2026-04-27T07:56:00'),
-('TT2026042801','CX2026042801',265000,280000,15000,30,79500,185500,'SALE15',N'Khuyen mai cuoi tuan','wallet','app_wallet','APPW-2026042801','TOKEN-2801','2026-04-28T16:31:00',1,N'DaThanhToan','2026-04-28T16:30:00',N'Thanh toan vi noi bo','2026-04-28T16:30:00','2026-04-28T16:31:00'),
-('TT2026043001','CX2026043001',98000,98000,0,30,29400,68600,NULL,NULL,'qr','momo','MOMO-2026043001','TOKEN-3001','2026-04-30T19:46:00',1,N'DaThanhToan','2026-04-30T19:45:00',N'Thanh toan QR Momo','2026-04-30T19:45:00','2026-04-30T19:46:00'),
-('TT2026050101','CX2026050101',51000,60000,9000,30,15300,35700,'SALE15',N'Khuyen mai cuoi tuan','wallet','momo','MOMO-2026050101','TOKEN-0101','2026-05-01T09:37:00',1,N'DaThanhToan','2026-05-01T09:36:00',N'Thanh toan vi momo','2026-05-01T09:36:00','2026-05-01T09:37:00'),
-('TT2026050201','CX2026050201',132000,150000,18000,30,39600,92400,'NEWUSER',N'Uu dai khach moi','wallet','app_wallet','APPW-2026050201','TOKEN-0201','2026-05-02T12:31:00',1,N'DaThanhToan','2026-05-02T12:30:00',N'Thanh toan vi noi bo','2026-05-02T12:30:00','2026-05-02T12:31:00'),
-('TT2026050301','CX2026050301',780000,820000,40000,30,234000,546000,'SPRING25',N'Uu dai mua moi','qr','momo','MOMO-2026050301','TOKEN-0301','2026-05-03T09:11:00',1,N'DaThanhToan','2026-05-03T09:10:00',N'Thanh toan QR Momo','2026-05-03T09:10:00','2026-05-03T09:11:00'),
-('TT2026050401','CX2026050401',28000,35000,7000,30,8400,19600,'SALE10',N'Giam gia chuyen ngan','cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-04T14:34:00',N'Thu tien mat','2026-05-04T14:34:00','2026-05-04T14:34:00'),
-('TT2026050501','CX2026050501',176000,196000,20000,30,52800,123200,'NEWUSER',N'Uu dai khach moi','wallet','zalopay','ZP-2026050501','TOKEN-0501','2026-05-05T18:06:00',1,N'DaThanhToan','2026-05-05T18:05:00',N'Thanh toan vi ZaloPay','2026-05-05T18:05:00','2026-05-05T18:06:00'),
-('TT2026050602','CX2026050602',99000,99000,0,30,29700,69300,NULL,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'ChoThuTien',NULL,N'Chuyen dang thuc hien, chua thu tien','2026-05-06T09:32:00','2026-05-06T09:32:00')
+('TT2026041001','CX2026041001',36000,42000,6000,30,10800,25200,'SALE10','wallet','momo','MOMO-2026041001','TOKEN-1001','2026-05-15T08:06:00',1,N'DaThanhToan','2026-05-15T08:05:00',N'Thanh toan vi momo','2026-05-15T08:05:00','2026-05-15T08:06:00'),
+('TT2026041201','CX2026041201',141000,141000,0,30,42300,98700,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-17T16:59:00',N'Thu tien mat','2026-05-17T17:00:00','2026-05-17T17:00:00'),
+('TT2026041401','CX2026041401',46000,56000,10000,30,13800,32200,'SALE10','wallet','momo','MOMO-2026041401','TOKEN-1401','2026-05-19T11:39:00',1,N'DaThanhToan','2026-05-19T11:38:00',N'Thanh toan QR Momo','2026-05-19T11:38:00','2026-05-19T11:39:00'),
+('TT2026041601','CX2026041601',102000,122000,20000,30,30600,71400,'NEWUSER','wallet','app_wallet','APPW-2026041601','TOKEN-1601','2026-05-21T10:01:00',1,N'DaThanhToan','2026-05-21T10:00:00',N'Thanh toan vi noi bo','2026-05-21T10:00:00','2026-05-21T10:01:00'),
+('TT2026041801','CX2026041801',610000,640000,30000,30,183000,427000,'SPRING25','wallet','zalopay','ZP-2026041801','TOKEN-1801','2026-05-23T08:06:00',1,N'DaThanhToan','2026-05-23T08:05:00',N'Thanh toan QR ZaloPay','2026-05-23T08:05:00','2026-05-23T08:06:00'),
+('TT2026042001','CX2026042001',24000,30000,6000,30,7200,16800,'SALE10','cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-25T20:50:00',N'Thu tien mat','2026-05-25T20:50:00','2026-05-25T20:50:00'),
+('TT2026042201','CX2026042201',149000,149000,0,30,44700,104300,NULL,'wallet','momo','MOMO-2026042201','TOKEN-2201','2026-05-27T13:47:00',1,N'DaThanhToan','2026-05-27T13:46:00',N'Thanh toan vi momo','2026-05-27T13:46:00','2026-05-27T13:47:00'),
+('TT2026042401','CX2026042401',39000,39000,0,30,11700,27300,NULL,'wallet','momo','MOMO-2026042401','TOKEN-2401','2026-05-29T18:59:00',1,N'DaThanhToan','2026-05-29T18:58:00',N'Thanh toan QR Momo','2026-05-29T18:58:00','2026-05-29T18:59:00'),
+('TT2026042501','CX2026042501',42000,50000,8000,30,12600,29400,'SALE10','wallet','momo','MOMO-2026042501','TOKEN-2501','2026-05-30T08:36:00',1,N'DaThanhToan','2026-05-30T08:35:30',N'Thanh toan vi momo','2026-05-30T08:35:00','2026-05-30T08:36:00'),
+('TT2026042601','CX2026042601',118000,118000,0,30,35400,82600,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-31T10:44:00',N'Thu tien mat','2026-05-31T10:45:00','2026-05-31T10:45:00'),
+('TT2026042701','CX2026042701',32000,40000,8000,30,9600,22400,'SALE10','wallet','zalopay','ZP-2026042701','TOKEN-2701','2026-06-01T07:56:00',1,N'DaThanhToan','2026-06-01T07:55:45',N'Thanh toan QR ZaloPay','2026-06-01T07:55:00','2026-06-01T07:56:00'),
+('TT2026042801','CX2026042801',265000,280000,15000,30,79500,185500,'SALE15','wallet','app_wallet','APPW-2026042801','TOKEN-2801','2026-06-02T16:31:00',1,N'DaThanhToan','2026-06-02T16:30:00',N'Thanh toan vi noi bo','2026-06-02T16:30:00','2026-06-02T16:31:00'),
+('TT2026043001','CX2026043001',98000,98000,0,30,29400,68600,NULL,'wallet','momo','MOMO-2026043001','TOKEN-3001','2026-06-04T19:46:00',1,N'DaThanhToan','2026-06-04T19:45:00',N'Thanh toan QR Momo','2026-06-04T19:45:00','2026-06-04T19:46:00'),
+('TT2026050101','CX2026050101',51000,60000,9000,30,15300,35700,'SALE15','wallet','momo','MOMO-2026050101','TOKEN-0101','2026-06-05T09:37:00',1,N'DaThanhToan','2026-06-05T09:36:00',N'Thanh toan vi momo','2026-06-05T09:36:00','2026-06-05T09:37:00'),
+('TT2026050201','CX2026050201',132000,150000,18000,30,39600,92400,'NEWUSER','wallet','app_wallet','APPW-2026050201','TOKEN-0201','2026-06-06T12:31:00',1,N'DaThanhToan','2026-06-06T12:30:00',N'Thanh toan vi noi bo','2026-06-06T12:30:00','2026-06-06T12:31:00'),
+('TT2026050301','CX2026050301',780000,820000,40000,30,234000,546000,'SPRING25','wallet','momo','MOMO-2026050301','TOKEN-0301','2026-06-07T09:11:00',1,N'DaThanhToan','2026-06-07T09:10:00',N'Thanh toan QR Momo','2026-06-07T09:10:00','2026-06-07T09:11:00'),
+('TT2026050401','CX2026050401',28000,35000,7000,30,8400,19600,'SALE10','cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-06-08T14:34:00',N'Thu tien mat','2026-06-08T14:34:00','2026-06-08T14:34:00'),
+('TT2026050501','CX2026050501',176000,196000,20000,30,52800,123200,'NEWUSER','wallet','zalopay','ZP-2026050501','TOKEN-0501','2026-06-09T18:06:00',1,N'DaThanhToan','2026-06-09T18:05:00',N'Thanh toan vi ZaloPay','2026-06-09T18:05:00','2026-06-09T18:06:00'),
+('TT2026050602','CX2026050602',99000,99000,0,30,29700,69300,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-06-10T09:32:00',N'Thu tien mat','2026-06-10T09:32:00','2026-06-10T09:32:00')
 ) AS v(
     MaTT, MaChuyen, SoTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
-    MaUuDai, TenUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
     GatewayAppTransId, GatewayTransToken, GatewayLastQueryAt, GatewayLastReturnCode,
     TrangThaiThanhToan, ThoiDiemThanhToan, GhiChu, NgayTao, NgayCapNhat
 )
@@ -427,16 +446,181 @@ WHERE NOT EXISTS (
 );
 GO
 
+-- 8.2) Du lieu mau 100 chuyen (15/05/2024 - 30/06/2024) - dung cho dashboard doanh thu
+-- 70 hoan thanh / 30 huy, cuoi tuan nhieu hon
+INSERT INTO dbo.DatXe (
+    MaChuyen, MaTK, MaTX, MaTBThongBaoTaiXe, MaTKTaiXeDuocMoi, LyDoHuy,
+    TenKhachHang, SDT, LoaiXe, DatLich, DiemDon, DiemDen, QuangDuongKm, NguonTuyenDuong,
+    MaHangXe, TenHangXe, LoaiGhe, ThoiGianDuKienPhut,
+    GiaTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    TrangThaiChuyen, TrangThaiThanhToan, NgayTao, NgayCapNhat
+)
+SELECT
+    v.MaChuyen, v.MaTK, v.MaTX, NULL, NULL, NULL,
+    v.TenKhachHang, v.SDT, v.LoaiXe, 0, v.DiemDon, v.DiemDen, v.QuangDuongKm, N'google',
+    v.MaHangXe, v.TenHangXe, v.LoaiGhe, v.ThoiGianPhut,
+    v.GiaTien, v.GiaGoc, v.TienGiam, 30, CAST(v.GiaTien * 0.3 AS INT), CAST(v.GiaTien * 0.7 AS INT),
+    v.MaUuDai, v.PTTT, v.NhaCungCap,
+    v.TrangThai,
+    CASE v.TrangThai WHEN N'HoanThanh' THEN N'DaThanhToan' WHEN N'DaHuy' THEN N'ThatBai' ELSE N'ChoXacNhan' END,
+    v.NgayTao, DATEADD(MINUTE, v.ThoiGianPhut + 5, v.NgayTao)
+FROM (VALUES
+('DASH20240515001','TK0101','201234567890',N'Nguyen Van Hung','0901000001','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,NULL,N'honda',N'Honda Wave',NULL,28,95000,95000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-15T08:15:00'),
+('DASH20240515002','TK0102','202234567890',N'Tran Thi Mai','0901000002','car',N'Vinhomes Binh Thanh',N'Q7 Crescent Mall',9,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',26,75000,85000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-15T17:30:00'),
+('DASH20240516001','TK0103','203334567890',N'Le Van Tuan','0901000003','motorbike',N'Q3 Ho Con Rua',N'BV Cho Ray Q5',3,NULL,N'yamaha',N'Yamaha Sirius',NULL,12,0,40000,0,NULL,'cash',NULL,N'DaHuy','2026-05-16T09:20:00'),
+('DASH20240516002','TK0104','201234567890',N'Pham Thi Hoa','0901000004','car',N'AEON Binh Tan',N'San bay TSN',7,NULL,N'kia',N'Kia Morning',N'4 cho',21,70000,70000,0,NULL,'wallet','momo',N'HoanThanh','2026-05-16T14:45:00'),
+('DASH20240517001','TK0105','202234567890',N'Hoang Van Nam','0901000005','motorbike',N'KCN Tan Binh',N'Q3 Dien Bien Phu',5,N'SALE10',N'honda',N'Honda Wave',NULL,16,50000,55000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-17T07:30:00'),
+('DASH20240517002','TK0101','201234567890',N'Ngo Thi Lan','0901000006','motorbike',N'Ga Sai Gon',N'Q Phu Nhuan',3,NULL,N'honda',N'Honda AirBlade',NULL,11,0,40000,0,NULL,'cash',NULL,N'DaHuy','2026-05-17T12:00:00'),
+('DASH20240517003','TK0102','203334567890',N'Dang Van Minh','0901000007','car',N'Q Binh Thanh',N'DH Bach Khoa Q10',6,NULL,N'toyota',N'Toyota Vios',N'4 cho',19,65000,65000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-17T19:45:00'),
+('DASH20240518001','TK0103','201234567890',N'Bui Thi Thu','0901000008','motorbike',N'San bay TSN',N'Landmark 81 BT',6,NULL,N'yamaha',N'Yamaha Sirius',NULL,19,65000,65000,0,NULL,'wallet','zalopay',N'HoanThanh','2026-05-18T09:00:00'),
+('DASH20240518002','TK0104','202234567890',N'Vu Van Long','0901000009','car',N'Q1 Diamond Plaza',N'Q7 Lotte Mart',9,N'SALE10',N'kia',N'Kia Morning',N'4 cho',26,75000,85000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-18T11:30:00'),
+('DASH20240518003','TK0105','203334567890',N'Do Thi Hang','0901000010','car',N'Phan Van Tri GV',N'San bay TSN',8,NULL,N'ford',N'Ford Transit',N'4 cho',24,0,80000,0,NULL,'cash',NULL,N'DaHuy','2026-05-18T15:15:00'),
+('DASH20240518004','TK0101','201234567890',N'Nguyen Thi Anh','0901000011','car',N'Vincom Thu Duc',N'Q1 Ben Thanh',15,N'SALE15',N'toyota',N'Toyota Vios',N'4 cho',40,120000,135000,15000,N'SALE15','wallet','momo',N'HoanThanh','2026-05-18T20:00:00'),
+('DASH20240519001','TK0102','202234567890',N'Tran Van Khoa','0901000012','car',N'Ben xe Mien Dong',N'Q7 Lotte Mart',12,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',33,110000,110000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-19T08:45:00'),
+('DASH20240519002','TK0103','201234567890',N'Le Thi Nhung','0901000013','motorbike',N'Q12 Nga Tu Ga',N'San bay TSN',5,NULL,N'honda',N'Honda Wave',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-05-19T12:30:00'),
+('DASH20240519003','TK0104','203334567890',N'Pham Van Duc','0901000014','car',N'Phu My Hung Q7',N'Q1 Ben Thanh',10,N'SALE10',N'kia',N'Kia Morning',N'4 cho',28,90000,95000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-19T16:00:00'),
+('DASH20240519004','TK0105','202234567890',N'Hoang Thi Yen','0901000015','motorbike',N'Q Go Vap',N'Q Tan Binh',4,NULL,N'yamaha',N'Yamaha Sirius',NULL,14,0,45000,0,NULL,'cash',NULL,N'DaHuy','2026-05-19T21:15:00'),
+('DASH20240520001','TK0101','201234567890',N'Nguyen Van Binh','0901000016','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,NULL,N'honda',N'Honda AirBlade',NULL,31,95000,95000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-20T07:50:00'),
+('DASH20240520002','TK0102','203334567890',N'Tran Thi Trang','0901000017','motorbike',N'Q1 Nguyen Hue',N'Vinhomes Binh Thanh',5,NULL,N'honda',N'Honda Wave',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-05-20T13:20:00'),
+('DASH20240521001','TK0103','201234567890',N'Le Van Son','0901000018','car',N'AEON Binh Tan',N'San bay TSN',7,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',21,60000,70000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-21T08:10:00'),
+('DASH20240521002','TK0104','202234567890',N'Pham Thi Linh','0901000019','car',N'DH Bach Khoa Q10',N'Crescent Mall Q7',8,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',24,80000,80000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-21T18:30:00'),
+('DASH20240522001','TK0105','203334567890',N'Vu Thi Huong','0901000020','motorbike',N'BV 115 Q10',N'Q Binh Thanh',4,N'SALE10',N'yamaha',N'Yamaha Sirius',NULL,14,40000,45000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-22T10:00:00'),
+('DASH20240522002','TK0101','201234567890',N'Dang Van Tung','0901000021','car',N'Ben xe Mien Tay',N'Q1 Ben Thanh',7,NULL,N'kia',N'Kia Morning',N'4 cho',21,0,70000,0,NULL,'cash',NULL,N'DaHuy','2026-05-22T16:40:00'),
+('DASH20240523001','TK0102','202234567890',N'Bui Van Thang','0901000022','motorbike',N'Q1 Diamond Plaza',N'Q Phu Nhuan',3,NULL,N'honda',N'Honda Wave',NULL,11,40000,40000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-23T07:25:00'),
+('DASH20240523002','TK0103','203334567890',N'Nguyen Thi Kim','0901000023','car',N'Le Van Luong Q7',N'Q1 Ben Thanh',12,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',33,100000,110000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-23T19:05:00'),
+('DASH20240524001','TK0104','201234567890',N'Tran Van Phuc','0901000024','motorbike',N'KCN Tan Binh',N'Q3 Dien Bien Phu',5,NULL,N'yamaha',N'Yamaha Sirius',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-05-24T08:00:00'),
+('DASH20240524002','TK0105','202234567890',N'Le Thi Loan','0901000025','motorbike',N'Ga Sai Gon',N'Q Phu Nhuan',3,NULL,N'honda',N'Honda AirBlade',NULL,11,40000,40000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-24T12:45:00'),
+('DASH20240524003','TK0101','203334567890',N'Phan Van Thinh','0901000026','car',N'San bay TSN',N'Landmark 81 BT',6,N'SALE10',N'kia',N'Kia Morning',N'4 cho',19,60000,65000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-24T20:30:00'),
+('DASH20240525001','TK0102','201234567890',N'Nguyen Thi Diem','0901000027','car',N'Vincom Thu Duc',N'Q1 Ben Thanh',15,N'SALE15',N'toyota',N'Toyota Vios',N'4 cho',40,120000,135000,15000,N'SALE15','wallet','momo',N'HoanThanh','2026-05-25T09:15:00'),
+('DASH20240525002','TK0103','202234567890',N'Vo Van Khanh','0901000028','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,NULL,N'honda',N'Honda Wave',NULL,31,0,95000,0,NULL,'cash',NULL,N'DaHuy','2026-05-25T11:50:00'),
+('DASH20240525003','TK0104','203334567890',N'Duong Thi Ngoc','0901000029','motorbike',N'Q Binh Thanh',N'DH Bach Khoa Q10',6,NULL,N'yamaha',N'Yamaha Sirius',NULL,19,65000,65000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-25T15:00:00'),
+('DASH20240525004','TK0105','201234567890',N'Ly Van Cuong','0901000030','car',N'Phu My Hung Q7',N'Q1 Ben Thanh',10,N'SALE10',N'hyundai',N'Hyundai Accent',N'4 cho',28,85000,95000,10000,N'SALE10','wallet','zalopay',N'HoanThanh','2026-05-25T19:30:00'),
+('DASH20240526001','TK0101','202234567890',N'Nguyen Van Hung','0901000001','car',N'Ben xe Mien Dong',N'Q7 Lotte Mart',12,NULL,N'toyota',N'Toyota Vios',N'4 cho',33,110000,110000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-26T08:30:00'),
+('DASH20240526002','TK0102','203334567890',N'Tran Thi Mai','0901000002','motorbike',N'Q12 Nga Tu Ga',N'San bay TSN',5,NULL,N'honda',N'Honda Wave',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-05-26T13:00:00'),
+('DASH20240526003','TK0103','201234567890',N'Le Van Tuan','0901000003','motorbike',N'Q3 Ho Con Rua',N'BV Cho Ray Q5',3,N'SALE10',N'yamaha',N'Yamaha Sirius',NULL,11,35000,40000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-26T16:30:00'),
+('DASH20240526004','TK0104','202234567890',N'Pham Thi Hoa','0901000004','car',N'AEON Binh Tan',N'Q1 Ben Thanh',9,NULL,N'kia',N'Kia Morning',N'4 cho',26,85000,85000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-26T21:00:00'),
+('DASH20240527001','TK0105','203334567890',N'Hoang Van Nam','0901000005','motorbike',N'Phan Van Tri GV',N'Q Tan Binh',5,NULL,N'honda',N'Honda AirBlade',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-05-27T07:45:00'),
+('DASH20240527002','TK0101','201234567890',N'Ngo Thi Lan','0901000006','car',N'San bay TSN',N'Vinhomes Binh Thanh',7,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',21,60000,70000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-27T17:20:00'),
+('DASH20240528001','TK0102','202234567890',N'Dang Van Minh','0901000007','motorbike',N'Q1 Nguyen Hue',N'DH Kinh Te Q3',2,NULL,N'honda',N'Honda Wave',NULL,9,0,30000,0,NULL,'cash',NULL,N'DaHuy','2026-05-28T09:00:00'),
+('DASH20240528002','TK0103','203334567890',N'Bui Thi Thu','0901000008','car',N'Le Van Luong Q7',N'Q1 Ben Thanh',12,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',33,110000,110000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-28T15:30:00'),
+('DASH20240529001','TK0104','201234567890',N'Vu Van Long','0901000009','motorbike',N'KCN Tan Binh',N'San bay TSN',6,NULL,N'yamaha',N'Yamaha Sirius',NULL,19,0,65000,0,NULL,'cash',NULL,N'DaHuy','2026-05-29T08:20:00'),
+('DASH20240529002','TK0105','202234567890',N'Do Thi Hang','0901000010','car',N'Q Go Vap',N'Q1 Ben Thanh',8,N'SALE10',N'kia',N'Kia Morning',N'4 cho',24,70000,80000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-05-29T19:00:00'),
+('DASH20240530001','TK0101','203334567890',N'Nguyen Thi Anh','0901000011','car',N'San bay TSN',N'Q Binh Thanh',8,NULL,N'toyota',N'Toyota Vios',N'4 cho',24,80000,80000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-30T07:30:00'),
+('DASH20240530002','TK0102','201234567890',N'Tran Van Khoa','0901000012','car',N'Q3 Ho Con Rua',N'Q7 Crescent Mall',7,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',21,0,70000,0,NULL,'cash',NULL,N'DaHuy','2026-05-30T14:00:00'),
+('DASH20240531001','TK0103','202234567890',N'Le Thi Nhung','0901000013','car',N'Vincom Thu Duc',N'Q1 Ben Thanh',15,N'SALE15',N'toyota',N'Toyota Vios',N'4 cho',40,120000,135000,15000,N'SALE15','wallet','momo',N'HoanThanh','2026-05-31T08:00:00'),
+('DASH20240531002','TK0104','203334567890',N'Pham Van Duc','0901000014','car',N'Ben xe Mien Dong',N'Q Phu Nhuan',9,NULL,N'ford',N'Ford Transit',N'4 cho',26,85000,85000,0,NULL,'cash',NULL,N'HoanThanh','2026-05-31T14:30:00'),
+('DASH20240531003','TK0105','201234567890',N'Hoang Thi Yen','0901000015','car',N'Q1 Diamond Plaza',N'Q7 Lotte Mart',9,N'SALE10',N'kia',N'Kia Morning',N'4 cho',26,75000,85000,10000,N'SALE10','wallet','zalopay',N'HoanThanh','2026-05-31T20:45:00'),
+('DASH20240601001','TK0101','202234567890',N'Nguyen Van Binh','0901000016','motorbike',N'AEON Binh Tan',N'San bay TSN',7,NULL,N'honda',N'Honda Wave',NULL,22,0,70000,0,NULL,'cash',NULL,N'DaHuy','2026-06-01T09:30:00'),
+('DASH20240601002','TK0102','203334567890',N'Tran Thi Trang','0901000017','car',N'San bay TSN',N'Landmark 81 BT',6,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',19,60000,65000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-01T11:00:00'),
+('DASH20240601003','TK0103','201234567890',N'Le Van Son','0901000018','car',N'Q Binh Thanh',N'Q7 Crescent Mall',9,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',26,85000,85000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-01T15:45:00'),
+('DASH20240601004','TK0104','202234567890',N'Pham Thi Linh','0901000019','car',N'Phu My Hung Q7',N'Q1 Ben Thanh',10,N'SALE10',N'kia',N'Kia Morning',N'4 cho',28,85000,95000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-01T20:15:00'),
+('DASH20240602001','TK0105','203334567890',N'Vu Thi Huong','0901000020','motorbike',N'Q12 Nga Tu Ga',N'Q Tan Binh',4,NULL,N'yamaha',N'Yamaha Sirius',NULL,14,0,45000,0,NULL,'cash',NULL,N'DaHuy','2026-06-02T08:45:00'),
+('DASH20240602002','TK0101','201234567890',N'Dang Van Tung','0901000021','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,NULL,N'honda',N'Honda AirBlade',NULL,31,95000,95000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-02T11:30:00'),
+('DASH20240602003','TK0102','202234567890',N'Bui Van Thang','0901000022','motorbike',N'Ben xe Mien Tay',N'Q3 Dien Bien Phu',5,N'SALE10',N'honda',N'Honda Wave',NULL,17,50000,55000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-02T16:00:00'),
+('DASH20240602004','TK0103','203334567890',N'Nguyen Thi Kim','0901000023','motorbike',N'Q1 Nguyen Hue',N'Vinhomes Binh Thanh',5,NULL,N'yamaha',N'Yamaha Sirius',NULL,17,55000,55000,0,NULL,'wallet','momo',N'HoanThanh','2026-06-02T21:30:00'),
+('DASH20240603001','TK0104','201234567890',N'Tran Van Phuc','0901000024','motorbike',N'Q Go Vap',N'San bay TSN',9,NULL,N'honda',N'Honda Wave',NULL,28,0,85000,0,NULL,'cash',NULL,N'DaHuy','2026-06-03T07:40:00'),
+('DASH20240603002','TK0105','202234567890',N'Le Thi Loan','0901000025','car',N'KCN Tan Binh',N'Q1 Ben Thanh',8,NULL,N'kia',N'Kia Morning',N'4 cho',24,0,80000,0,NULL,'cash',NULL,N'DaHuy','2026-06-03T12:20:00'),
+('DASH20240604001','TK0101','203334567890',N'Phan Van Thinh','0901000026','car',N'San bay TSN',N'Vinhomes Binh Thanh',7,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',21,60000,70000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-04T09:10:00'),
+('DASH20240604002','TK0102','201234567890',N'Nguyen Thi Diem','0901000027','car',N'DH Bach Khoa Q10',N'Q7 Crescent Mall',8,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',24,80000,80000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-04T18:00:00'),
+('DASH20240605001','TK0103','202234567890',N'Vo Van Khanh','0901000028','car',N'Le Van Luong Q7',N'Q1 Ben Thanh',12,NULL,N'toyota',N'Toyota Vios',N'4 cho',33,0,110000,0,NULL,'cash',NULL,N'DaHuy','2026-06-05T08:30:00'),
+('DASH20240605002','TK0104','203334567890',N'Duong Thi Ngoc','0901000029','motorbike',N'Ga Sai Gon',N'Q Phu Nhuan',3,NULL,N'honda',N'Honda Wave',NULL,11,40000,40000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-05T17:15:00'),
+('DASH20240606001','TK0105','201234567890',N'Ly Van Cuong','0901000030','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,N'SALE10',N'yamaha',N'Yamaha Sirius',NULL,31,90000,95000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-06T07:50:00'),
+('DASH20240606002','TK0101','202234567890',N'Nguyen Van Hung','0901000001','car',N'Q Binh Thanh',N'Crescent Mall Q7',7,NULL,N'kia',N'Kia Morning',N'4 cho',21,70000,70000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-06T19:30:00'),
+('DASH20240607001','TK0102','203334567890',N'Tran Thi Mai','0901000002','car',N'AEON Binh Tan',N'San bay TSN',7,NULL,N'toyota',N'Toyota Vios',N'4 cho',21,0,70000,0,NULL,'cash',NULL,N'DaHuy','2026-06-07T08:00:00'),
+('DASH20240607002','TK0103','201234567890',N'Le Van Tuan','0901000003','car',N'Vincom Thu Duc',N'Q1 Ben Thanh',15,N'SALE15',N'hyundai',N'Hyundai Accent',N'4 cho',40,120000,135000,15000,N'SALE15','wallet','momo',N'HoanThanh','2026-06-07T14:00:00'),
+('DASH20240607003','TK0104','202234567890',N'Pham Thi Hoa','0901000004','car',N'Q1 Diamond Plaza',N'Q7 Lotte Mart',9,N'SALE10',N'kia',N'Kia Morning',N'4 cho',26,75000,85000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-07T20:30:00'),
+('DASH20240608001','TK0105','203334567890',N'Hoang Van Nam','0901000005','motorbike',N'Phan Van Tri GV',N'Q Tan Binh',5,NULL,N'honda',N'Honda Wave',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-06-08T09:00:00'),
+('DASH20240608002','TK0101','201234567890',N'Ngo Thi Lan','0901000006','car',N'San bay TSN',N'Landmark 81 BT',6,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',19,60000,65000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-08T11:30:00'),
+('DASH20240608003','TK0102','202234567890',N'Dang Van Minh','0901000007','car',N'Ben xe Mien Dong',N'Q7 Crescent Mall',12,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',33,110000,110000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-08T15:45:00'),
+('DASH20240608004','TK0103','203334567890',N'Bui Thi Thu','0901000008','car',N'Phu My Hung Q7',N'Q1 Ben Thanh',10,N'SALE10',N'kia',N'Kia Morning',N'4 cho',28,85000,95000,10000,N'SALE10','wallet','zalopay',N'HoanThanh','2026-06-08T20:00:00'),
+('DASH20240609001','TK0104','201234567890',N'Vu Van Long','0901000009','motorbike',N'Q12 Nga Tu Ga',N'San bay TSN',5,NULL,N'yamaha',N'Yamaha Sirius',NULL,17,0,55000,0,NULL,'cash',NULL,N'DaHuy','2026-06-09T08:15:00'),
+('DASH20240609002','TK0105','202234567890',N'Do Thi Hang','0901000010','motorbike',N'Q1 Nguyen Hue',N'Vinhomes Binh Thanh',5,NULL,N'honda',N'Honda AirBlade',NULL,17,55000,55000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-09T12:00:00'),
+('DASH20240609003','TK0101','203334567890',N'Nguyen Thi Anh','0901000011','car',N'DH Bach Khoa Q10',N'Q7 Lotte Mart',8,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',24,70000,80000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-09T16:30:00'),
+('DASH20240609004','TK0102','201234567890',N'Tran Van Khoa','0901000012','motorbike',N'Q Binh Thanh',N'Q3 Ho Con Rua',5,NULL,N'honda',N'Honda Wave',NULL,17,55000,55000,0,NULL,'wallet','momo',N'HoanThanh','2026-06-09T21:00:00'),
+('DASH20240610001','TK0103','202234567890',N'Le Thi Nhung','0901000013','motorbike',N'San bay TSN',N'Q Go Vap',9,NULL,N'yamaha',N'Yamaha Sirius',NULL,28,0,85000,0,NULL,'cash',NULL,N'DaHuy','2026-06-10T07:30:00'),
+('DASH20240611001','TK0104','203334567890',N'Pham Van Duc','0901000014','car',N'AEON Binh Tan',N'Q1 Ben Thanh',9,N'SALE10',N'kia',N'Kia Morning',N'4 cho',26,80000,85000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-11T09:20:00'),
+('DASH20240612001','TK0105','201234567890',N'Hoang Thi Yen','0901000015','motorbike',N'Ben xe Mien Tay',N'Q3 Dien Bien Phu',5,NULL,N'honda',N'Honda Wave',NULL,17,55000,55000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-12T15:00:00'),
+('DASH20240613001','TK0101','202234567890',N'Nguyen Van Binh','0901000016','motorbike',N'Q Phu Nhuan',N'Q1 Ben Thanh',3,NULL,N'honda',N'Honda AirBlade',NULL,11,40000,40000,0,NULL,'wallet','momo',N'HoanThanh','2026-06-13T18:30:00'),
+('DASH20240614001','TK0102','203334567890',N'Tran Thi Trang','0901000017','car',N'San bay TSN',N'Vinhomes Binh Thanh',7,NULL,N'toyota',N'Toyota Vios',N'4 cho',21,0,70000,0,NULL,'cash',NULL,N'DaHuy','2026-06-14T07:45:00'),
+('DASH20240614002','TK0103','201234567890',N'Le Van Son','0901000018','car',N'Le Van Luong Q7',N'Q3 Dien Bien Phu',8,N'SALE10',N'hyundai',N'Hyundai Accent',N'4 cho',24,70000,80000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-14T19:00:00'),
+('DASH20240615001','TK0104','202234567890',N'Pham Thi Linh','0901000019','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,NULL,N'yamaha',N'Yamaha Sirius',NULL,31,95000,95000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-15T09:30:00'),
+('DASH20240615002','TK0105','203334567890',N'Vu Thi Huong','0901000020','car',N'KCN Tan Binh',N'Q1 Ben Thanh',8,NULL,N'kia',N'Kia Morning',N'4 cho',24,0,80000,0,NULL,'cash',NULL,N'DaHuy','2026-06-15T12:15:00'),
+('DASH20240615003','TK0101','201234567890',N'Dang Van Tung','0901000021','car',N'Q Go Vap',N'Q1 Diamond Plaza',8,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',24,70000,80000,10000,N'SALE10','wallet','zalopay',N'HoanThanh','2026-06-15T16:00:00'),
+('DASH20240615004','TK0102','202234567890',N'Bui Van Thang','0901000022','car',N'Vincom Thu Duc',N'Q7 Crescent Mall',13,NULL,N'hyundai',N'Hyundai Accent',N'4 cho',36,120000,120000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-15T20:45:00'),
+('DASH20240616001','TK0103','203334567890',N'Nguyen Thi Kim','0901000023','car',N'Ben xe Mien Dong',N'Q Phu Nhuan',9,N'SALE10',N'kia',N'Kia Morning',N'4 cho',26,80000,85000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-16T09:00:00'),
+('DASH20240616002','TK0104','201234567890',N'Tran Van Phuc','0901000024','motorbike',N'Q3 Ho Con Rua',N'San bay TSN',8,NULL,N'yamaha',N'Yamaha Sirius',NULL,25,0,80000,0,NULL,'cash',NULL,N'DaHuy','2026-06-16T13:30:00'),
+('DASH20240616003','TK0105','202234567890',N'Le Thi Loan','0901000025','car',N'Phu My Hung Q7',N'Q1 Ben Thanh',10,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',28,85000,95000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-16T17:00:00'),
+('DASH20240616004','TK0101','203334567890',N'Phan Van Thinh','0901000026','motorbike',N'Q1 Nguyen Hue',N'Vinhomes Binh Thanh',5,NULL,N'honda',N'Honda Wave',NULL,17,55000,55000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-16T21:15:00'),
+('DASH20240617001','TK0102','201234567890',N'Nguyen Thi Diem','0901000027','motorbike',N'San bay TSN',N'Q Tan Binh',4,NULL,N'honda',N'Honda AirBlade',NULL,14,0,45000,0,NULL,'cash',NULL,N'DaHuy','2026-06-17T08:00:00'),
+('DASH20240618001','TK0103','202234567890',N'Vo Van Khanh','0901000028','car',N'Q Binh Thanh',N'Q7 Lotte Mart',7,N'SALE10',N'kia',N'Kia Morning',N'4 cho',21,65000,70000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-18T14:20:00'),
+('DASH20240619001','TK0104','203334567890',N'Duong Thi Ngoc','0901000029','car',N'AEON Binh Tan',N'Q1 Ben Thanh',9,NULL,N'toyota',N'Toyota Vios',N'4 cho',26,85000,85000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-19T09:45:00'),
+('DASH20240620001','TK0105','201234567890',N'Ly Van Cuong','0901000030','car',N'DH Bach Khoa Q10',N'Q7 Crescent Mall',8,N'SALE10',N'hyundai',N'Hyundai Accent',N'4 cho',24,70000,80000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-20T17:30:00'),
+('DASH20240621001','TK0101','202234567890',N'Nguyen Van Hung','0901000001','car',N'San bay TSN',N'Landmark 81 BT',6,NULL,N'kia',N'Kia Morning',N'4 cho',19,0,65000,0,NULL,'cash',NULL,N'DaHuy','2026-06-21T08:15:00'),
+('DASH20240621002','TK0102','203334567890',N'Tran Thi Mai','0901000002','car',N'Ben xe Mien Dong',N'Q3 Dien Bien Phu',7,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',21,65000,70000,5000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-21T19:00:00'),
+('DASH20240622001','TK0103','201234567890',N'Le Van Tuan','0901000003','motorbike',N'San bay TSN',N'Q1 Ben Thanh',10,NULL,N'yamaha',N'Yamaha Sirius',NULL,31,95000,95000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-22T09:00:00'),
+('DASH20240622002','TK0104','202234567890',N'Pham Thi Hoa','0901000004','motorbike',N'Q Go Vap',N'San bay TSN',9,NULL,N'honda',N'Honda Wave',NULL,28,0,85000,0,NULL,'cash',NULL,N'DaHuy','2026-06-22T12:30:00'),
+('DASH20240622003','TK0105','203334567890',N'Hoang Van Nam','0901000005','car',N'Vincom Thu Duc',N'Q1 Ben Thanh',15,N'SALE15',N'hyundai',N'Hyundai Accent',N'4 cho',40,120000,135000,15000,N'SALE15','wallet','zalopay',N'HoanThanh','2026-06-22T16:00:00'),
+('DASH20240622004','TK0101','201234567890',N'Ngo Thi Lan','0901000006','car',N'Phu My Hung Q7',N'Q1 Nguyen Hue',10,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',28,85000,95000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-22T20:30:00'),
+('DASH20240623001','TK0102','202234567890',N'Dang Van Minh','0901000007','car',N'Ben xe Mien Tay',N'Q1 Ben Thanh',7,NULL,N'kia',N'Kia Morning',N'4 cho',21,70000,70000,0,NULL,'cash',NULL,N'HoanThanh','2026-06-23T09:15:00'),
+('DASH20240623002','TK0103','203334567890',N'Bui Thi Thu','0901000008','motorbike',N'Q1 Diamond Plaza',N'Q Binh Thanh',4,NULL,N'honda',N'Honda AirBlade',NULL,14,0,45000,0,NULL,'cash',NULL,N'DaHuy','2026-06-23T13:45:00'),
+('DASH20240623003','TK0104','201234567890',N'Vu Van Long','0901000009','car',N'San bay TSN',N'Q7 Crescent Mall',11,N'SALE10',N'toyota',N'Toyota Vios',N'4 cho',30,93000,103000,10000,N'SALE10','wallet','momo',N'HoanThanh','2026-06-23T17:00:00'),
+('DASH20240623004','TK0105','202234567890',N'Do Thi Hang','0901000010','motorbike',N'Q Binh Thanh',N'Q3 Ho Con Rua',5,NULL,N'yamaha',N'Yamaha Sirius',NULL,17,55000,55000,0,NULL,'wallet','momo',N'HoanThanh','2026-06-23T21:30:00')
+) AS v(
+    MaChuyen, MaTK, MaTX, TenKhachHang, SDT, LoaiXe, DiemDon, DiemDen, QuangDuongKm, MaUuDai_Param,
+    MaHangXe, TenHangXe, LoaiGhe, ThoiGianPhut, GiaTien, GiaGoc, TienGiam, MaUuDai, PTTT, NhaCungCap,
+    TrangThai, NgayTao
+)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dbo.DatXe AS dx
+    WHERE dx.MaChuyen = v.MaChuyen
+);
+GO
+
+-- 8.3) Thanh toan cho 70 chuyen hoan thanh trong du lieu mau dashboard
+INSERT INTO dbo.ThanhToan (
+    MaTT, MaChuyen, SoTien, GiaGoc, TienGiam, PhanTramPhiNenTang, TienPhiNenTang, TienTaiXeNhan,
+    MaUuDai, PhuongThucThanhToan, NhaCungCapThanhToan,
+    GatewayAppTransId, GatewayTransToken, GatewayLastQueryAt, GatewayLastReturnCode,
+    TrangThaiThanhToan, ThoiDiemThanhToan, GhiChu, NgayTao, NgayCapNhat
+)
+SELECT
+    CONCAT('TT', RIGHT(dx.MaChuyen, 14)) AS MaTT,
+    dx.MaChuyen,
+    dx.GiaTien, dx.GiaGoc, dx.TienGiam,
+    30, dx.TienPhiNenTang, dx.TienTaiXeNhan,
+    dx.MaUuDai, dx.PhuongThucThanhToan, dx.NhaCungCapThanhToan,
+    CASE WHEN dx.PhuongThucThanhToan <> 'cash' THEN CONCAT('GW-', dx.MaChuyen) ELSE NULL END,
+    CASE WHEN dx.PhuongThucThanhToan <> 'cash' THEN CONCAT('TK-', dx.MaChuyen) ELSE NULL END,
+    CASE WHEN dx.PhuongThucThanhToan <> 'cash' THEN DATEADD(MINUTE, 1, dx.NgayCapNhat) ELSE NULL END,
+    CASE WHEN dx.PhuongThucThanhToan <> 'cash' THEN 1 ELSE NULL END,
+    N'DaThanhToan',
+    dx.NgayCapNhat,
+    CASE dx.PhuongThucThanhToan
+        WHEN 'cash' THEN N'Thu tien mat'
+        WHEN 'wallet' THEN N'Thanh toan vi dien tu'
+        ELSE N'Thanh toan QR'
+    END,
+    dx.NgayCapNhat, dx.NgayCapNhat
+FROM dbo.DatXe dx
+WHERE dx.MaChuyen LIKE 'DASH2024%'
+  AND dx.TrangThaiChuyen = N'HoanThanh'
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.ThanhToan tt WHERE tt.MaChuyen = dx.MaChuyen
+  );
+GO
+
 -- 9) Danh gia chuyen xe
 INSERT INTO dbo.DanhGiaChuyenXe (MaChuyen, MaTK, MaTX, SoSaoDanhGia, NhanXetDanhGia, ThoiDiemDanhGia, NgayTao, NgayCapNhat)
 SELECT v.MaChuyen, v.MaTK, v.MaTX, v.SoSaoDanhGia, v.NhanXetDanhGia, v.ThoiDiemDanhGia, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('CX2026042501','TK0101','201234567890',5,N'Tai xe than thien, den nhanh','2026-04-25T08:40:00','2026-04-25T08:40:00','2026-04-25T08:40:00'),
-('CX2026042601','TK0102','202234567890',4,N'Chuyen di on dinh','2026-04-26T10:50:00','2026-04-26T10:50:00','2026-04-26T10:50:00'),
-('CX2026042801','TK0104','201234567890',5,N'Chuyen lien tinh tot','2026-04-28T16:35:00','2026-04-28T16:35:00','2026-04-28T16:35:00'),
-('CX2026050101','TK0101','203334567890',4,N'Gia hop ly','2026-05-01T09:42:00','2026-05-01T09:42:00','2026-05-01T09:42:00'),
-('CX2026050301','TK0103','202234567890',5,N'Tai xe ho tro nhiet tinh','2026-05-03T09:20:00','2026-05-03T09:20:00','2026-05-03T09:20:00'),
-('CX2026050501','TK0105','201234567890',4,N'Xe sach se','2026-05-05T18:10:00','2026-05-05T18:10:00','2026-05-05T18:10:00')
+('CX2026042501','TK0101','201234567890',5,N'Tai xe than thien, den nhanh','2026-05-30T08:40:00','2026-05-30T08:40:00','2026-05-30T08:40:00'),
+('CX2026042601','TK0102','202234567890',4,N'Chuyen di on dinh','2026-05-31T10:50:00','2026-05-31T10:50:00','2026-05-31T10:50:00'),
+('CX2026042801','TK0104','201234567890',5,N'Chuyen lien tinh tot','2026-06-02T16:35:00','2026-06-02T16:35:00','2026-06-02T16:35:00'),
+('CX2026050101','TK0101','203334567890',4,N'Gia hop ly','2026-06-05T09:42:00','2026-06-05T09:42:00','2026-06-05T09:42:00'),
+('CX2026050301','TK0103','202234567890',5,N'Tai xe ho tro nhiet tinh','2026-06-07T09:20:00','2026-06-07T09:20:00','2026-06-07T09:20:00'),
+('CX2026050501','TK0105','201234567890',4,N'Xe sach se','2026-06-09T18:10:00','2026-06-09T18:10:00','2026-06-09T18:10:00')
 ) AS v(MaChuyen, MaTK, MaTX, SoSaoDanhGia, NhanXetDanhGia, ThoiDiemDanhGia, NgayTao, NgayCapNhat)
 WHERE NOT EXISTS (
     SELECT 1
@@ -449,9 +633,9 @@ GO
 INSERT INTO dbo.KhieuNaiHoTro (MaTK, VaiTroNguoiGui, MaChuyen, LoaiSuCo, MoTa, TrangThai, ThoiDiemSuViec, TepDinhKemUrl, PhanHoiAdmin, MaTKXuLy, NgayTao, NgayCapNhat)
 SELECT v.MaTK, v.VaiTroNguoiGui, v.MaChuyen, v.LoaiSuCo, v.MoTa, v.TrangThai, v.ThoiDiemSuViec, v.TepDinhKemUrl, v.PhanHoiAdmin, v.MaTKXuLy, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('TK0101','Q2','CX2026050502','fare-issue',N'Chuyen bi huy nhung da bi tru tien tam giu','resolved','2026-05-05T20:20:00',NULL,N'Da hoan tien cho khach','TK0001','2026-05-05T20:22:00','2026-05-05T21:00:00'),
-('TK0103','Q2','CX2026050301','driver-attitude',N'Tai xe noi chuyen kho nghe','processing','2026-05-03T09:05:00',NULL,NULL,'TK0001','2026-05-03T09:30:00','2026-05-04T08:00:00'),
-('TK0003','Q3',NULL,'vehicle-issue',N'Xe bi su co giua ca dem, can ho tro khan','new','2026-05-04T23:10:00',NULL,NULL,NULL,'2026-05-04T23:12:00','2026-05-04T23:12:00')
+('TK0101','Q2','CX2026050502','fare-issue',N'Chuyen bi huy nhung da bi tru tien tam giu','resolved','2026-06-09T20:20:00',NULL,N'Da hoan tien cho khach','TK0001','2026-06-09T20:22:00','2026-06-09T21:00:00'),
+('TK0103','Q2','CX2026050301','driver-attitude',N'Tai xe noi chuyen kho nghe','processing','2026-06-07T09:05:00',NULL,NULL,'TK0001','2026-06-07T09:30:00','2026-06-08T08:00:00'),
+('TK0003','Q3',NULL,'vehicle-issue',N'Xe bi su co giua ca dem, can ho tro khan','new','2026-06-08T23:10:00',NULL,NULL,NULL,'2026-06-08T23:12:00','2026-06-08T23:12:00')
 ) AS v(MaTK, VaiTroNguoiGui, MaChuyen, LoaiSuCo, MoTa, TrangThai, ThoiDiemSuViec, TepDinhKemUrl, PhanHoiAdmin, MaTKXuLy, NgayTao, NgayCapNhat)
 WHERE NOT EXISTS (
     SELECT 1
@@ -473,8 +657,8 @@ SELECT
     v.HinhThucXuLy, v.GhiChuAdmin, v.MaTKXuLy, v.MaChuyen, NULL, v.MaTX, v.MaTKTaiXe,
     v.TenTaiXe, v.driverPhone, v.TenKhachHang, v.DuLieuPhatHien, v.NgayPhatHien, v.NgayXuLy, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('VP-CX2026050301-UNSAFE','system','unsafe-driving',N'Lai xe khong an toan',N'Phat hien toc do dot bien tren tuyen duong','high','resolved','warning',N'Nhac nho tai xe tuan thu an toan','TK0001','CX2026050301','202234567890','TK0003',N'Tran Van B','0902222222',N'Tran F',N'{"speedSpike":true,"maxSpeed":78}','2026-05-03T09:08:00','2026-05-03T10:00:00','2026-05-03T09:10:00','2026-05-03T10:00:00'),
-('VP-CX2026050501-ATTITUDE','system','driver-attitude',N'Thai do tai xe',N'Khach danh gia thai do phuc vu chua tot','medium','pending',NULL,NULL,NULL,'CX2026050501','201234567890','TK0002',N'Nguyen Van A','0901111111',N'Vu H',N'{"rating":3,"tags":["thai-do"]}','2026-05-05T18:20:00',NULL,'2026-05-05T18:22:00','2026-05-05T18:22:00')
+('VP-CX2026050301-UNSAFE','system','unsafe-driving',N'Lai xe khong an toan',N'Phat hien toc do dot bien tren tuyen duong','high','resolved','warning',N'Nhac nho tai xe tuan thu an toan','TK0001','CX2026050301','202234567890','TK0003',N'Tran Van B','0902222222',N'Tran F',N'{"speedSpike":true,"maxSpeed":78}','2026-06-07T09:08:00','2026-06-07T10:00:00','2026-06-07T09:10:00','2026-06-07T10:00:00'),
+('VP-CX2026050501-ATTITUDE','system','driver-attitude',N'Thai do tai xe',N'Khach danh gia thai do phuc vu chua tot','medium','pending',NULL,NULL,NULL,'CX2026050501','201234567890','TK0002',N'Nguyen Van A','0901111111',N'Vu H',N'{"rating":3,"tags":["thai-do"]}','2026-06-09T18:20:00',NULL,'2026-06-09T18:22:00','2026-06-09T18:22:00')
 ) AS v(
     Fingerprint, NguonPhatHien, LoaiViPham, TenLoaiViPham, MoTa, MucDo, TrangThai,
     HinhThucXuLy, GhiChuAdmin, MaTKXuLy, MaChuyen, MaTX, MaTKTaiXe,
@@ -486,3 +670,5 @@ WHERE NOT EXISTS (
     WHERE vp.Fingerprint = v.Fingerprint
 );
 GO
+
+

@@ -47,6 +47,17 @@ const SENSITIVE_QUESTION_PATTERNS = [
   /(thong\s*tin|ho\s*so).*(tai\s*xe|driver).*(cu\s*the|bat\s*ky|ngau\s*nhien)/i,
   // Attack patterns
   /(sql\s*injection|dump\s*db|database\s*password|hack|exploit|bypass|elevate\s*privilege)/i,
+  /(quyen\s*ri?eng\s*tu|privacy|bao\s*mat\s*thong\s*tin|thong\s*tin\s*bao\s*mat)/i,
+  /(quyen\s*loi|dac\s*quyen|quyen\s*han).*(khach\s*hang|customer|admin|quan\s*tri|tai\s*xe|driver)/i,
+];
+
+const WEBSITE_SCOPE_PATTERNS = [
+  /smart\s*ride|smartride|website|web\s*site|trang\s*web|ung\s*dung|app/i,
+  /dat\s*xe|goi\s*xe|book\s*xe|tim\s*chuyen|lich\s*su\s*chuyen|chuyen\s*di/i,
+  /gia\s*cuoc|gia\s*tien|thanh\s*toan|tien\s*mat|vnpay|momo|zalopay|vi\s*dien\s*tu/i,
+  /khuyen\s*mai|uu\s*dai|ma\s*giam|voucher/i,
+  /dang\s*nhap|dang\s*ky|tai\s*khoan|doi\s*mat\s*khau|quen\s*mat\s*khau|reset\s*mat\s*khau/i,
+  /ho\s*tro|bao\s*loi|khieu\s*nai|danh\s*gia|chatbot|tro\s*ly/i,
 ];
 
 let assistantChatSchemaPromise = null;
@@ -486,6 +497,10 @@ function buildSensitiveRefusalAnswer() {
   return 'Xin lỗi, mình không thể cung cấp thông tin nhạy cảm hoặc dữ liệu riêng tư của hệ thống/người dùng. Nếu bạn cần hỗ trợ hợp lệ, vui lòng cung cấp mã chuyến và gửi yêu cầu qua kênh hỗ trợ chính thức trong ứng dụng.';
 }
 
+function buildOutOfScopeRefusalAnswer() {
+  return 'Xin lỗi, khi chưa đăng nhập mình chỉ hỗ trợ các câu hỏi liên quan trực tiếp đến website/app SmartRide (đặt xe, giá cước, thanh toán, khuyến mãi, hướng dẫn sử dụng tính năng).';
+}
+
 function isGuidanceQuestion(messageText) {
   const normalizedMessage = normalizeSearchToken(messageText);
 
@@ -509,6 +524,39 @@ function isSensitiveQuestion(messageText) {
   }
 
   return SENSITIVE_QUESTION_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
+}
+
+function isWebsiteScopeQuestion(messageText) {
+  const normalizedMessage = normalizeSearchToken(messageText);
+
+  if (!normalizedMessage) {
+    return false;
+  }
+
+  return WEBSITE_SCOPE_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
+}
+
+function buildGuestConversationResponse(conversationId, messageText = '') {
+  return {
+    conversationId: normalizeText(conversationId) || `guest-${crypto.randomUUID()}`,
+    accountId: '',
+    roleCode: 'GUEST',
+    title: sanitizeConversationTitle(messageText) || 'Hội thoại khách vãng lai',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildGuestMessageResponse(senderRole, text, provider, model) {
+  return {
+    id: 0,
+    conversationId: '',
+    senderRole,
+    text,
+    provider,
+    model,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 function buildGeminiSystemInstruction() {
@@ -1156,10 +1204,20 @@ async function generateAssistantAnswer(historyMessages) {
 export async function getAssistantChatHistory(payload = {}) {
   await ensureAssistantChatSchema();
 
-  const accountId = requireAccountId(payload);
+  const accountId = normalizeText(payload?.accountId);
   const roleCode = normalizeRoleCode(payload?.roleCode ?? payload?.role);
   const conversationId = normalizeText(payload?.conversationId);
   const limit = normalizeLimit(payload?.limit);
+
+  if (!accountId) {
+    return {
+      success: true,
+      message: 'Lấy lịch sử chatbot thành công.',
+      conversation: buildGuestConversationResponse(conversationId),
+      recentConversations: [],
+      messages: [],
+    };
+  }
 
   const pool = await getSqlServerPool();
   const conversation = await resolveConversation(pool, {
@@ -1191,11 +1249,21 @@ export async function getAssistantChatHistory(payload = {}) {
 export async function listAssistantConversations(payload = {}) {
   await ensureAssistantChatSchema();
 
-  const accountId = requireAccountId(payload);
+  const accountId = normalizeText(payload?.accountId);
   const roleCode = normalizeRoleCode(payload?.roleCode ?? payload?.role);
   const scope = normalizeConversationScope(payload?.scope ?? payload?.tab);
   const keyword = normalizeConversationKeyword(payload?.keyword ?? payload?.q);
   const limit = normalizeLimit(payload?.limit, scope === 'recent' ? RECENT_CONVERSATIONS_LIMIT : ALL_CONVERSATIONS_DEFAULT_LIMIT);
+
+  if (!accountId) {
+    return {
+      success: true,
+      message: 'Lấy danh sách hội thoại thành công.',
+      scope,
+      keyword,
+      items: [],
+    };
+  }
 
   if (roleCode && roleCode !== 'Q2' && roleCode !== 'Q3' && roleCode !== 'Q1') {
     throw createValidationError('Vai trò tài khoản không hợp lệ.');
@@ -1286,7 +1354,7 @@ export async function deleteAssistantConversation(payload = {}) {
 export async function askAssistantChat(payload = {}) {
   await ensureAssistantChatSchema();
 
-  const accountId = requireAccountId(payload);
+  const accountId = normalizeText(payload?.accountId);
   const roleCode = normalizeRoleCode(payload?.roleCode ?? payload?.role);
   const conversationId = normalizeText(payload?.conversationId);
   const messageText = normalizeText(payload?.message ?? payload?.question ?? payload?.text);
@@ -1297,6 +1365,45 @@ export async function askAssistantChat(payload = {}) {
 
   if (messageText.length > CHAT_MESSAGE_MAX_LENGTH) {
     throw createValidationError(`Nội dung câu hỏi không vượt quá ${CHAT_MESSAGE_MAX_LENGTH} ký tự.`);
+  }
+
+  if (!accountId) {
+    const isSensitiveRequest = isSensitiveQuestion(messageText);
+    const inWebsiteScope = isWebsiteScopeQuestion(messageText);
+    const guestConversation = buildGuestConversationResponse(conversationId, messageText);
+    const userMessage = {
+      ...buildGuestMessageResponse('user', messageText, 'client', 'guest-input'),
+      conversationId: guestConversation.conversationId,
+    };
+
+    const guestAnswerText = isSensitiveRequest
+      ? buildSensitiveRefusalAnswer()
+      : (inWebsiteScope
+        ? (buildBookingGuideAnswer(messageText, [userMessage]) || findFaqAnswer(messageText) || buildFallbackAnswer(messageText))
+        : buildOutOfScopeRefusalAnswer());
+
+    const assistantMessage = {
+      ...buildGuestMessageResponse(
+        'assistant',
+        guestAnswerText,
+        isSensitiveRequest || !inWebsiteScope ? 'policy' : 'local-fallback',
+        isSensitiveRequest ? 'guest-sensitive-guard' : (!inWebsiteScope ? 'guest-scope-guard' : 'guest-web-fallback'),
+      ),
+      conversationId: guestConversation.conversationId,
+    };
+
+    return {
+      success: true,
+      message: 'Trợ lý AI đã phản hồi.',
+      conversation: guestConversation,
+      userMessage,
+      assistantMessage,
+      responseMeta: {
+        elapsedMs: 0,
+        provider: assistantMessage.provider,
+        model: assistantMessage.model,
+      },
+    };
   }
 
   const isSensitiveRequest = isSensitiveQuestion(messageText);
