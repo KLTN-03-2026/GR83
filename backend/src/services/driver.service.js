@@ -402,14 +402,149 @@ function parseDriverVehicleImages(rawVehicleInfo = {}) {
     };
   }
 
-  const rawVehicleImages = rawVehicleInfo.images ?? rawVehicleInfo.vehicleImages ?? {};
+  const rawVehicleImages = rawVehicleInfo.images ?? rawVehicleInfo.vehicleImages ?? rawVehicleInfo.hinhAnhXe ?? {};
+  const registrationImage = normalizeDriverAssetPath(
+    rawVehicleInfo.registrationImage
+    ?? rawVehicleInfo.giayDangKyXe
+    ?? rawVehicleInfo.giayToXe
+    ?? rawVehicleInfo.sideImage,
+  );
 
   return {
-    front: normalizeDriverAssetPath(rawVehicleImages.front ?? rawVehicleInfo.frontImage ?? rawVehicleInfo.hinhTruoc),
-    side: normalizeDriverAssetPath(
-      rawVehicleImages.side ?? rawVehicleInfo.sideImage ?? rawVehicleInfo.image ?? rawVehicleInfo.vehicleImage ?? rawVehicleInfo.hinhXe,
+    front: normalizeDriverAssetPath(
+      rawVehicleImages.front ?? rawVehicleInfo.frontImage ?? rawVehicleInfo.hinhTruoc ?? rawVehicleInfo.vehicleFrontImage,
     ),
-    rear: normalizeDriverAssetPath(rawVehicleImages.rear ?? rawVehicleInfo.rearImage ?? rawVehicleInfo.hinhSau),
+    side: normalizeDriverAssetPath(
+      rawVehicleImages.side
+      ?? registrationImage
+      ?? rawVehicleInfo.sideImage
+      ?? rawVehicleInfo.image
+      ?? rawVehicleInfo.vehicleImage
+      ?? rawVehicleInfo.hinhXe
+      ?? rawVehicleInfo.vehicleSideImage,
+    ),
+    rear: normalizeDriverAssetPath(
+      rawVehicleImages.rear ?? rawVehicleInfo.rearImage ?? rawVehicleInfo.hinhSau ?? rawVehicleInfo.vehicleRearImage,
+    ),
+  };
+}
+
+function normalizeVehicleType(value) {
+  const normalizedValue = normalizeText(value).toLowerCase();
+
+  if (!normalizedValue) {
+    return '';
+  }
+
+  if (['motorbike', 'xe may', 'xemay', 'bike', 'motor'].includes(normalizedValue)) {
+    return 'motorbike';
+  }
+
+  if (['car', 'oto', 'o to', 'xe hoi', 'xe 4 cho', 'xe4cho'].includes(normalizedValue)) {
+    return 'car';
+  }
+
+  if (['intercity', 'lien tinh', 'xe lien tinh', 'xelientinh'].includes(normalizedValue)) {
+    return 'intercity';
+  }
+
+  return normalizedValue;
+}
+
+function parseVehicleInfoString(rawValue) {
+  const normalizedRawValue = normalizeText(rawValue);
+
+  if (!normalizedRawValue) {
+    return {};
+  }
+
+  const splitParts = normalizedRawValue.split('|').map((item) => normalizeText(item));
+
+  if (splitParts.length >= 2) {
+    return {
+      licensePlate: splitParts[0],
+      vehicleType: splitParts[1],
+      name: splitParts[2] || splitParts[1],
+    };
+  }
+
+  return {
+    name: normalizedRawValue,
+  };
+}
+
+function normalizeDriverVehicleInfo(rawVehicleInfo = {}) {
+  let parsedVehicleInfo = {};
+
+  if (typeof rawVehicleInfo === 'string') {
+    const normalizedRawValue = normalizeText(rawVehicleInfo);
+
+    if (normalizedRawValue) {
+      try {
+        const parsedJsonValue = JSON.parse(normalizedRawValue);
+        parsedVehicleInfo = parsedJsonValue && typeof parsedJsonValue === 'object'
+          ? parsedJsonValue
+          : parseVehicleInfoString(normalizedRawValue);
+      } catch {
+        parsedVehicleInfo = parseVehicleInfoString(normalizedRawValue);
+      }
+    }
+  } else if (rawVehicleInfo && typeof rawVehicleInfo === 'object') {
+    parsedVehicleInfo = rawVehicleInfo;
+  }
+
+  const normalizedVehicleImages = parseDriverVehicleImages(parsedVehicleInfo);
+  const normalizedIdentityImages = parseDriverDocumentImages(parsedVehicleInfo.identityImages ?? parsedVehicleInfo.cccdImages);
+  const normalizedLicenseImages = parseDriverDocumentImages(parsedVehicleInfo.licenseImages ?? parsedVehicleInfo.bangLaiImages);
+  const normalizedVehicleType = normalizeVehicleType(
+    parsedVehicleInfo.vehicleType
+    ?? parsedVehicleInfo.type
+    ?? parsedVehicleInfo.loaiXe
+    ?? parsedVehicleInfo.vehicleCategory,
+  );
+  const normalizedVehicleName = normalizeText(
+    parsedVehicleInfo.name
+    ?? parsedVehicleInfo.vehicleName
+    ?? parsedVehicleInfo.tenXe
+    ?? parsedVehicleInfo.loaiXe,
+  ) || normalizedVehicleType;
+  const normalizedLicensePlate = normalizeText(
+    parsedVehicleInfo.licensePlate ?? parsedVehicleInfo.bienSoXe,
+  ).toUpperCase();
+  const normalizedRegistrationImage =
+    normalizeDriverAssetPath(
+      parsedVehicleInfo.registrationImage
+      ?? parsedVehicleInfo.giayDangKyXe
+      ?? parsedVehicleInfo.giayToXe,
+    ) || normalizedVehicleImages.side;
+
+  return {
+    image:
+      normalizeDriverAssetPath(parsedVehicleInfo.image ?? parsedVehicleInfo.vehicleImage ?? parsedVehicleInfo.hinhXe)
+      || normalizedVehicleImages.side
+      || normalizedVehicleImages.front
+      || normalizedVehicleImages.rear,
+    licensePlate: normalizedLicensePlate,
+    bienSoXe: normalizedLicensePlate,
+    name: normalizedVehicleName,
+    vehicleName: normalizedVehicleName,
+    vehicleType: normalizedVehicleType,
+    brand: normalizeText(parsedVehicleInfo.brand ?? parsedVehicleInfo.hangXe),
+    model: normalizeText(parsedVehicleInfo.model ?? parsedVehicleInfo.dongXe),
+    color: normalizeText(parsedVehicleInfo.color ?? parsedVehicleInfo.mauXe),
+    year: normalizeText(parsedVehicleInfo.year ?? parsedVehicleInfo.namSanXuat),
+    seatCount: normalizeText(parsedVehicleInfo.seatCount ?? parsedVehicleInfo.soCho),
+    registrationImage: normalizedRegistrationImage,
+    giayDangKyXe: normalizedRegistrationImage,
+    images: normalizedVehicleImages,
+    identityImages: {
+      front: normalizedIdentityImages.front,
+      back: normalizedIdentityImages.back,
+    },
+    licenseImages: {
+      front: normalizedLicenseImages.front,
+      back: normalizedLicenseImages.back,
+    },
   };
 }
 
@@ -432,39 +567,37 @@ function getDriverState(accountStatus, driverStatus) {
 }
 
 function mapDriverRowToResponse(row = {}) {
-  const vehicleInfo = safeJsonParse(row.ThongTinXe, {});
+  const vehicleInfo = normalizeDriverVehicleInfo(row.ThongTinXe);
   const emergencyContact = parseEmergencyContact(row.LienHeKC);
   const driverState = getDriverState(row.TrangThaiTaiKhoan, row.TrangThaiTaiXe);
-
-  const storedVehicleImages = parseDriverVehicleImages(vehicleInfo);
-  const storedIdentityImages = parseDriverDocumentImages(vehicleInfo.identityImages ?? vehicleInfo.cccdImages);
-  const storedLicenseImagesFromVehicle = parseDriverDocumentImages(vehicleInfo.licenseImages ?? vehicleInfo.bangLaiImages);
   const storedLicenseImagesFromColumn = parseDriverDocumentImages(safeJsonParse(row.BangLai, row.BangLai));
 
   const normalizedIdentityImages = {
-    front: storedIdentityImages.front,
-    back: storedIdentityImages.back,
+    front: normalizeDriverAssetPath(vehicleInfo.identityImages.front),
+    back: normalizeDriverAssetPath(vehicleInfo.identityImages.back),
   };
 
   const normalizedLicenseImages = {
-    front: storedLicenseImagesFromVehicle.front || storedLicenseImagesFromColumn.front,
-    back: storedLicenseImagesFromVehicle.back || storedLicenseImagesFromColumn.back,
+    front: normalizeDriverAssetPath(vehicleInfo.licenseImages.front) || storedLicenseImagesFromColumn.front,
+    back: normalizeDriverAssetPath(vehicleInfo.licenseImages.back) || storedLicenseImagesFromColumn.back,
   };
 
   const normalizedVehicleImages = {
-    front: storedVehicleImages.front,
-    side: storedVehicleImages.side,
-    rear: storedVehicleImages.rear,
+    front: normalizeDriverAssetPath(vehicleInfo.images.front),
+    side: normalizeDriverAssetPath(vehicleInfo.images.side),
+    rear: normalizeDriverAssetPath(vehicleInfo.images.rear),
   };
 
   const normalizedVehicleInfo = {
+    ...vehicleInfo,
     image:
-      normalizeDriverAssetPath(vehicleInfo.image ?? vehicleInfo.vehicleImage) ||
+      normalizeDriverAssetPath(vehicleInfo.image) ||
       normalizedVehicleImages.side ||
       normalizedVehicleImages.front ||
       normalizedVehicleImages.rear,
-    licensePlate: normalizeText(vehicleInfo.licensePlate ?? vehicleInfo.bienSoXe),
-    name: normalizeText(vehicleInfo.name ?? vehicleInfo.vehicleName ?? vehicleInfo.tenXe),
+    licensePlate: normalizeText(vehicleInfo.licensePlate).toUpperCase(),
+    name: normalizeText(vehicleInfo.name) || normalizeText(vehicleInfo.vehicleType),
+    vehicleType: normalizeVehicleType(vehicleInfo.vehicleType),
     images: normalizedVehicleImages,
     identityImages: normalizedIdentityImages,
     licenseImages: normalizedLicenseImages,
@@ -504,6 +637,7 @@ function mapDriverRowToResponse(row = {}) {
     },
     vehicleInfo: normalizedVehicleInfo,
     vehicleImages: normalizedVehicleImages,
+    vehicleType: normalizedVehicleInfo.vehicleType,
     emergencyContact: normalizedEmergencyContact,
     licensePlate: normalizedVehicleInfo.licensePlate,
     createdAt: row.NgayTaoTaiXe ?? null,
@@ -529,21 +663,59 @@ function parseDriverPayload(payload = {}, { forUpdate = false } = {}) {
   );
 
   const rawVehicleInfo = payload.vehicleInfo ?? payload.thongTinXe ?? {};
-  const rawVehicleImages = rawVehicleInfo.images ?? rawVehicleInfo.vehicleImages ?? {};
+  const normalizedRawVehicleInfo = normalizeDriverVehicleInfo(rawVehicleInfo);
+  const rawVehicleImages =
+    (rawVehicleInfo && typeof rawVehicleInfo === 'object'
+      ? (rawVehicleInfo.images ?? rawVehicleInfo.vehicleImages ?? {})
+      : {});
   const vehicleFrontImage = normalizeDriverAssetPath(
-    payload.vehicleFrontImage ?? rawVehicleImages.front ?? rawVehicleInfo.frontImage,
+    payload.vehicleFrontImage ?? rawVehicleImages.front ?? rawVehicleInfo.frontImage ?? normalizedRawVehicleInfo.images.front,
   );
   const vehicleSideImage = normalizeDriverAssetPath(
-    payload.vehicleSideImage ?? rawVehicleImages.side ?? rawVehicleInfo.sideImage ?? rawVehicleInfo.image ?? rawVehicleInfo.vehicleImage,
+    payload.vehicleSideImage
+    ?? rawVehicleImages.side
+    ?? rawVehicleInfo.sideImage
+    ?? rawVehicleInfo.image
+    ?? rawVehicleInfo.vehicleImage
+    ?? normalizedRawVehicleInfo.images.side,
   );
   const vehicleRearImage = normalizeDriverAssetPath(
-    payload.vehicleRearImage ?? rawVehicleImages.rear ?? rawVehicleInfo.rearImage,
+    payload.vehicleRearImage ?? rawVehicleImages.rear ?? rawVehicleInfo.rearImage ?? normalizedRawVehicleInfo.images.rear,
+  );
+  const vehicleRegistrationImage = normalizeDriverAssetPath(
+    payload.vehicleRegistrationImage
+    ?? payload.registrationImage
+    ?? rawVehicleInfo.registrationImage
+    ?? rawVehicleInfo.giayDangKyXe
+    ?? rawVehicleImages.side
+    ?? rawVehicleInfo.sideImage
+    ?? normalizedRawVehicleInfo.registrationImage
+    ?? normalizedRawVehicleInfo.images.side,
   );
 
   const vehicleLicensePlate = normalizeText(
-    payload.licensePlate ?? rawVehicleInfo.licensePlate ?? rawVehicleInfo.bienSoXe,
+    payload.licensePlate ?? rawVehicleInfo.licensePlate ?? rawVehicleInfo.bienSoXe ?? normalizedRawVehicleInfo.licensePlate,
   ).toUpperCase();
-  const vehicleName = normalizeText(payload.vehicleName ?? rawVehicleInfo.name ?? rawVehicleInfo.vehicleName ?? rawVehicleInfo.tenXe);
+  const vehicleType = normalizeVehicleType(
+    payload.vehicleType
+    ?? rawVehicleInfo.vehicleType
+    ?? rawVehicleInfo.type
+    ?? rawVehicleInfo.loaiXe
+    ?? normalizedRawVehicleInfo.vehicleType,
+  );
+  const vehicleName = normalizeText(
+    payload.vehicleName
+    ?? rawVehicleInfo.name
+    ?? rawVehicleInfo.vehicleName
+    ?? rawVehicleInfo.tenXe
+    ?? normalizedRawVehicleInfo.name
+    ?? vehicleType,
+  );
+  const vehicleBrand = normalizeText(payload.vehicleBrand ?? rawVehicleInfo.brand ?? rawVehicleInfo.hangXe ?? normalizedRawVehicleInfo.brand);
+  const vehicleModel = normalizeText(payload.vehicleModel ?? rawVehicleInfo.model ?? rawVehicleInfo.dongXe ?? normalizedRawVehicleInfo.model);
+  const vehicleColor = normalizeText(payload.vehicleColor ?? rawVehicleInfo.color ?? rawVehicleInfo.mauXe ?? normalizedRawVehicleInfo.color);
+  const vehicleYear = normalizeText(payload.vehicleYear ?? rawVehicleInfo.year ?? rawVehicleInfo.namSanXuat ?? normalizedRawVehicleInfo.year);
+  const vehicleSeatCount = normalizeText(payload.vehicleSeatCount ?? rawVehicleInfo.seatCount ?? rawVehicleInfo.soCho ?? normalizedRawVehicleInfo.seatCount);
 
   const rawLicenseImages = payload.licenseImages ?? rawVehicleInfo.licenseImages ?? payload.bangLaiImages ?? {};
   const licenseFrontImage = normalizeDriverAssetPath(
@@ -586,12 +758,11 @@ function parseDriverPayload(payload = {}, { forUpdate = false } = {}) {
       licenseBackImage,
       backgroundImage,
       vehicleFrontImage,
-      vehicleSideImage,
-      vehicleRearImage,
+      vehicleRegistrationImage || vehicleSideImage,
     ].filter((value) => !value).length;
 
     if (missingDocumentCount > 0) {
-      throw createHttpError(400, 'Vui lòng tải đầy đủ ảnh hồ sơ tài xế (avatar, CCCD, bằng lái, lý lịch và 3 ảnh xe).');
+      throw createHttpError(400, 'Vui lòng tải đầy đủ ảnh hồ sơ tài xế (avatar, CCCD, bằng lái, lý lịch, ảnh xe và ảnh giấy đăng ký xe).');
     }
   }
 
@@ -637,12 +808,31 @@ function parseDriverPayload(payload = {}, { forUpdate = false } = {}) {
       back: licenseBackImage,
     },
     vehicleInfo: {
-      image: vehicleImage,
+      image: vehicleFrontImage || vehicleImage,
+      vehicleImage: vehicleFrontImage || vehicleImage,
+      hinhXe: vehicleFrontImage || vehicleImage,
+      registrationImage: vehicleRegistrationImage || vehicleSideImage,
+      giayDangKyXe: vehicleRegistrationImage || vehicleSideImage,
       licensePlate: vehicleLicensePlate,
+      bienSoXe: vehicleLicensePlate,
       name: vehicleName,
+      vehicleName,
+      tenXe: vehicleName,
+      vehicleType,
+      loaiXe: vehicleType,
+      brand: vehicleBrand,
+      hangXe: vehicleBrand,
+      model: vehicleModel,
+      dongXe: vehicleModel,
+      color: vehicleColor,
+      mauXe: vehicleColor,
+      year: vehicleYear,
+      namSanXuat: vehicleYear,
+      seatCount: vehicleSeatCount,
+      soCho: vehicleSeatCount,
       images: {
-        front: vehicleFrontImage,
-        side: vehicleSideImage,
+        front: vehicleFrontImage || vehicleImage,
+        side: vehicleRegistrationImage || vehicleSideImage,
         rear: vehicleRearImage,
       },
       identityImages: {
@@ -726,6 +916,7 @@ function buildListDriversSql() {
         OR LOWER(ISNULL(tk.Ten, '')) LIKE '%' + @keyword + '%'
         OR LOWER(ISNULL(tk.SDT, '')) LIKE '%' + @keyword + '%'
         OR LOWER(ISNULL(JSON_VALUE(tx.ThongTinXe, '$.licensePlate'), '')) LIKE '%' + @keyword + '%'
+        OR LOWER(ISNULL(JSON_VALUE(tx.ThongTinXe, '$.bienSoXe'), '')) LIKE '%' + @keyword + '%'
       )
     ORDER BY
       CASE
@@ -1429,7 +1620,7 @@ export async function updateDriver(driverId, payload = {}) {
         WHERE MaTK = @driverId;
       `);
 
-    const currentVehicleInfo = safeJsonParse(existingDriver.ThongTinXe, {});
+    const currentVehicleInfo = normalizeDriverVehicleInfo(existingDriver.ThongTinXe);
     const currentEmergencyContact = parseEmergencyContact(existingDriver.LienHeKC);
 
     const currentVehicleImages = parseDriverVehicleImages(currentVehicleInfo);
@@ -1464,7 +1655,21 @@ export async function updateDriver(driverId, payload = {}) {
       licensePlate:
         parsedPayload.vehicleInfo.licensePlate ||
         normalizeText(currentVehicleInfo.licensePlate ?? currentVehicleInfo.bienSoXe).toUpperCase(),
+      bienSoXe:
+        parsedPayload.vehicleInfo.licensePlate ||
+        normalizeText(currentVehicleInfo.licensePlate ?? currentVehicleInfo.bienSoXe).toUpperCase(),
       name: parsedPayload.vehicleInfo.name || normalizeText(currentVehicleInfo.name ?? currentVehicleInfo.vehicleName),
+      vehicleName: parsedPayload.vehicleInfo.name || normalizeText(currentVehicleInfo.name ?? currentVehicleInfo.vehicleName),
+      vehicleType:
+        normalizeVehicleType(parsedPayload.vehicleInfo.vehicleType)
+        || normalizeVehicleType(currentVehicleInfo.vehicleType)
+        || normalizeVehicleType(parsedPayload.vehicleInfo.name)
+        || normalizeVehicleType(currentVehicleInfo.name),
+      brand: parsedPayload.vehicleInfo.brand || normalizeText(currentVehicleInfo.brand),
+      model: parsedPayload.vehicleInfo.model || normalizeText(currentVehicleInfo.model),
+      color: parsedPayload.vehicleInfo.color || normalizeText(currentVehicleInfo.color),
+      year: parsedPayload.vehicleInfo.year || normalizeText(currentVehicleInfo.year),
+      seatCount: parsedPayload.vehicleInfo.seatCount || normalizeText(currentVehicleInfo.seatCount),
       images: mergedVehicleImages,
       identityImages: mergedIdentityImages,
       licenseImages: mergedLicenseImages,
@@ -2234,14 +2439,17 @@ export async function approveVehicleChangeRequest(requestId, payload = {}) {
     }
 
     const driverRow = await getDriverRowOrThrow(currentRequest.MaTK, transaction);
-    const vehicleInfo = safeJsonParse(driverRow.ThongTinXe, {});
+    const vehicleInfo = normalizeDriverVehicleInfo(driverRow.ThongTinXe);
+    const approvedVehicleName = normalizeText(currentRequest.LoaiXeMoi);
+    const approvedLicensePlate = normalizeText(currentRequest.BienSoMoi).toUpperCase();
 
     const nextVehicleInfo = {
       ...vehicleInfo,
-      name: normalizeText(currentRequest.LoaiXeMoi),
-      vehicleName: normalizeText(currentRequest.LoaiXeMoi),
-      licensePlate: normalizeText(currentRequest.BienSoMoi).toUpperCase(),
-      bienSoXe: normalizeText(currentRequest.BienSoMoi).toUpperCase(),
+      name: approvedVehicleName,
+      vehicleName: approvedVehicleName,
+      vehicleType: normalizeVehicleType(approvedVehicleName) || normalizeVehicleType(vehicleInfo.vehicleType),
+      licensePlate: approvedLicensePlate,
+      bienSoXe: approvedLicensePlate,
     };
 
     await new sql.Request(transaction)

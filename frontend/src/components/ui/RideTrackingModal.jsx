@@ -106,6 +106,10 @@ function extractTripHistoryItems(response) {
 
 function normalizeTripStatusToken(value) {
   return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
 }
@@ -189,6 +193,8 @@ function isDriverAssignedTripStatus(tripStatusToken) {
     'headingpickup',
     'dadon',
     'pickedup',
+    'dangthuchien',
+    'inprogress',
     'hoanthanh',
     'completed',
   ].includes(tripStatusToken);
@@ -199,11 +205,18 @@ function isDriverPrePickupTripStatus(tripStatusToken) {
 }
 
 function isDriverOnTripTripStatus(tripStatusToken) {
-  return ['dadon', 'pickedup', 'hoanthanh', 'completed'].includes(tripStatusToken);
+  return ['dadon', 'pickedup', 'dangthuchien', 'inprogress', 'hoanthanh', 'completed'].includes(tripStatusToken);
 }
 
 function getAssignedStepIndex(tripStatusToken) {
-  if (tripStatusToken === 'dadon' || tripStatusToken === 'pickedup' || tripStatusToken === 'hoanthanh' || tripStatusToken === 'completed') {
+  if (
+    tripStatusToken === 'dadon'
+    || tripStatusToken === 'pickedup'
+    || tripStatusToken === 'dangthuchien'
+    || tripStatusToken === 'inprogress'
+    || tripStatusToken === 'hoanthanh'
+    || tripStatusToken === 'completed'
+  ) {
     return 2;
   }
 
@@ -239,7 +252,12 @@ function getTripStatusCopy(tripStatusToken, driverName = '') {
     };
   }
 
-  if (tripStatusToken === 'dadon' || tripStatusToken === 'pickedup') {
+  if (
+    tripStatusToken === 'dadon'
+    || tripStatusToken === 'pickedup'
+    || tripStatusToken === 'dangthuchien'
+    || tripStatusToken === 'inprogress'
+  ) {
     return {
       title: 'Tài xế đã đón khách',
       description: normalizedDriverName
@@ -409,7 +427,13 @@ export default function RideTrackingModal({
   const priceLabel = String(currentBooking?.priceFormatted ?? '').trim();
   const routeDistanceLabel = formatKilometers(currentBooking?.routeDistanceKm);
   const etaLabel = formatMinutes(currentBooking?.etaMinutes);
-  const tripStatusToken = normalizeTripStatusToken(currentBooking?.tripStatus ?? currentBooking?.status ?? '');
+  const tripStatusToken = normalizeTripStatusToken(
+    currentBooking?.tripStatus
+    ?? currentBooking?.status
+    ?? currentBooking?.tripStatusLabel
+    ?? currentBooking?.statusLabel
+    ?? '',
+  );
   const liveStatus = getTripStatusCopy(tripStatusToken, currentBooking?.driverDisplayName ?? currentBooking?.driverName ?? '');
   const driverName = String(currentBooking?.driverDisplayName ?? currentBooking?.driverName ?? '').trim();
   const driverPhone = String(currentBooking?.driverPhone ?? '').trim();

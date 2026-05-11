@@ -182,7 +182,7 @@ CREATE TABLE dbo.TaiXe
     Avatar       NVARCHAR(500)  NULL,
     DiaChi       NVARCHAR(255)  NULL,
     CCCD         VARCHAR(20)    NOT NULL,              -- PK
-    BangLai      NVARCHAR(500)  NULL,
+    BangLai      NVARCHAR(1200) NULL,
     LyLich       NVARCHAR(500)  NULL,
     MaNH         VARCHAR(20)    NOT NULL,              -- FK → NganHang.MaNH
     ThongTinXe   NVARCHAR(MAX)  NULL,
@@ -427,7 +427,7 @@ CREATE TABLE dbo.DatXe
 
     CONSTRAINT PK_DatXe                    PRIMARY KEY (MaChuyen),
     CONSTRAINT CK_DatXe_LoaiXe             CHECK (LoaiXe                IN ('motorbike','car','intercity')),
-    CONSTRAINT CK_DatXe_PhuongThucThanhToan CHECK (PhuongThucThanhToan   IN ('cash','qr','wallet')),
+    CONSTRAINT CK_DatXe_PhuongThucThanhToan CHECK (PhuongThucThanhToan   IN ('cash','wallet')),
     CONSTRAINT CK_DatXe_NhaCungCapThanhToan CHECK (NhaCungCapThanhToan   IS NULL OR NhaCungCapThanhToan IN ('zalopay','momo','app_wallet')),
     CONSTRAINT CK_DatXe_TrangThaiChuyen     CHECK (TrangThaiChuyen       IN (N'ChoTaiXe',N'DaNhanChuyen',N'DangDen',N'DaDon',N'DangThucHien',N'HoanThanh',N'DaHuy')),
     CONSTRAINT CK_DatXe_TrangThaiThanhToan  CHECK (TrangThaiThanhToan    IN (N'ChoThuTien',N'ChoXacNhan',N'DaThanhToan',N'ThatBai')),
@@ -543,7 +543,7 @@ CREATE TABLE dbo.ThanhToan
 
     CONSTRAINT PK_ThanhToan             PRIMARY KEY (MaTT),
     CONSTRAINT UQ_ThanhToan_MaChuyen    UNIQUE (MaChuyen),
-    CONSTRAINT CK_ThanhToan_PhuongThuc  CHECK (PhuongThucThanhToan  IN ('cash','qr','wallet')),
+    CONSTRAINT CK_ThanhToan_PhuongThuc  CHECK (PhuongThucThanhToan  IN ('cash','wallet')),
     CONSTRAINT CK_ThanhToan_NhaCungCap  CHECK (NhaCungCapThanhToan  IS NULL OR NhaCungCapThanhToan IN ('zalopay','momo','app_wallet')),
     CONSTRAINT CK_ThanhToan_TrangThai   CHECK (TrangThaiThanhToan   IN (N'ChoThuTien',N'ChoXacNhan',N'DaThanhToan',N'ThatBai')),
     CONSTRAINT FK_ThanhToan_DatXe       FOREIGN KEY (MaChuyen)

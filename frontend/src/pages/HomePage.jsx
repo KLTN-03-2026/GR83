@@ -2323,6 +2323,14 @@ export default function HomePage() {
         }
 
         if (!matchedBooking) {
+          const currentTripRequest = activeDriverTripActionRef.current;
+
+          // Keep the current trip action UI when local state already has an active trip
+          // but the immediate history poll has not reflected it yet.
+          if (currentTripRequest && isDriverTrackedRideStatus(currentTripRequest)) {
+            return currentTripRequest;
+          }
+
           // No active tracked booking — if the modal was open it means the trip ended/was cancelled.
           // Close proactively so the driver UI doesn't stay stuck.
           if (driverTripActionModalOpen || activeDriverTripActionRef.current) {
@@ -2548,6 +2556,36 @@ export default function HomePage() {
             resetBodyScrollLock();
 
             return;
+          }
+
+          if (isAcceptedEvent) {
+            const eventDriverAccountId = String(
+              event?.driverAccountId
+                ?? eventBooking?.driverAccountId
+                ?? eventBooking?.driverId
+                ?? eventBooking?.driver?.id
+                ?? eventBooking?.driverAccount?.id
+                ?? '',
+            ).trim();
+            const isOwnAcceptedEvent = !eventDriverAccountId || eventDriverAccountId === accountId;
+
+            if (isOwnAcceptedEvent) {
+              setActiveDriverTripAction((currentRequest) => {
+                if (!eventBooking || typeof eventBooking !== 'object') {
+                  return currentRequest;
+                }
+
+                if (!currentRequest) {
+                  return mergeRideBookingSnapshot(null, eventBooking);
+                }
+
+                return getRideBookingCode(currentRequest) === eventBookingCode
+                  ? mergeRideBookingSnapshot(currentRequest, eventBooking)
+                  : currentRequest;
+              });
+              setDriverTripActionBubbleOpen(false);
+              setDriverTripActionModalOpen(true);
+            }
           }
 
           setActiveDriverTripAction((currentRequest) => {
@@ -3443,9 +3481,13 @@ export default function HomePage() {
   const activeDriverLicenseFrontPreview = String(activeDriverSignupDraft.licenseFrontPreview ?? '').trim();
   const activeDriverLicenseBackPreview = String(activeDriverSignupDraft.licenseBackPreview ?? '').trim();
   const activeDriverBackgroundPreview = String(activeDriverSignupDraft.backgroundPreview ?? '').trim();
+  const activeDriverBackgroundCriminalRecordStatus = String(activeDriverSignupDraft.backgroundCriminalRecordStatus ?? 'Không có').trim();
+  const activeDriverBackgroundCriminalRecordNumber = String(activeDriverSignupDraft.backgroundCriminalRecordNumber ?? '').trim();
+  const activeDriverBackgroundCriminalRecordIssueDate = String(activeDriverSignupDraft.backgroundCriminalRecordIssueDate ?? '').trim();
   const activeDriverVehicleFrontPreview = String(activeDriverSignupDraft.vehicleFrontPreview ?? '').trim();
   const activeDriverVehicleSidePreview = String(activeDriverSignupDraft.vehicleSidePreview ?? '').trim();
   const activeDriverVehicleRearPreview = String(activeDriverSignupDraft.vehicleRearPreview ?? '').trim();
+  const activeDriverVehicleType = String(activeDriverSignupDraft.vehicleType ?? 'motorbike').trim();
   const activeDriverVehicleLicensePlate = String(activeDriverSignupDraft.vehicleLicensePlate ?? '').toUpperCase();
   const activeDriverVehicleName = String(activeDriverSignupDraft.vehicleName ?? '').trimStart();
   const activeDriverResidenceAddress = useMemo(() => {
@@ -3515,6 +3557,7 @@ export default function HomePage() {
   const activeDriverBankHolderName = activeDriverBankAccount.holderName;
   const activeDriverBankName = activeDriverBankAccount.bankName;
   const activeDriverBankAccountNumber = activeDriverBankAccount.accountNumber;
+  const activeDriverBankBranch = String(activeDriverSignupDraft.bankBranch ?? '').trimStart();
   const activeDriverFilteredBankOptions = useMemo(() => {
     const normalizedKeyword = normalizeSearchKeyword(activeDriverBankName);
 
@@ -5560,8 +5603,12 @@ export default function HomePage() {
       return;
     }
 
-    if (!/^image\//i.test(selectedFile.type)) {
-      setDriverDetailStatus('Vui lòng chọn tệp ảnh hợp lệ (JPG, PNG hoặc WEBP).');
+    const normalizedType = String(selectedFile.type ?? '').toLowerCase();
+    const isImageFile = /^image\//i.test(normalizedType);
+    const isPdfFile = normalizedType === 'application/pdf';
+
+    if (!isImageFile && !isPdfFile) {
+      setDriverDetailStatus('Vui lòng chọn tệp PDF hoặc ảnh hợp lệ.');
       event.target.value = '';
       return;
     }
@@ -5569,7 +5616,7 @@ export default function HomePage() {
     const reader = new FileReader();
 
     reader.onload = () => {
-      const previewValue = typeof reader.result === 'string' ? reader.result : '';
+      const previewValue = isImageFile && typeof reader.result === 'string' ? reader.result : '';
 
       setDriverSignupDrafts((current) => ({
         ...current,
@@ -5590,7 +5637,11 @@ export default function HomePage() {
       setDriverDetailStatus('Không thể đọc tệp ảnh. Vui lòng thử lại.');
     };
 
-    reader.readAsDataURL(selectedFile);
+    if (isImageFile) {
+      reader.readAsDataURL(selectedFile);
+    } else {
+      reader.onload();
+    }
     event.target.value = '';
   };
 
@@ -5599,9 +5650,18 @@ export default function HomePage() {
 
     const backgroundDraft = driverSignupDrafts[DRIVER_BACKGROUND_ITEM_ID] ?? { requiredInfo: '', extraInfo: '' };
     const backgroundFileName = String(backgroundDraft.backgroundFileName ?? '').trim();
+    const criminalRecordStatus = String(backgroundDraft.backgroundCriminalRecordStatus ?? '').trim();
+    const criminalRecordNumber = String(backgroundDraft.backgroundCriminalRecordNumber ?? '').trim();
+    const criminalRecordIssueDate = String(backgroundDraft.backgroundCriminalRecordIssueDate ?? '').trim();
+    const criminalRecordIssueDateDisplay = formatBookingPromoValidUntil(criminalRecordIssueDate);
 
     if (!backgroundFileName) {
-      setDriverDetailStatus('Vui lòng tải ảnh lý lịch tư pháp theo chiều dọc trước khi xác nhận nộp.');
+      setDriverDetailStatus('Vui lòng tải lên giấy lý lịch tư pháp trước khi xác nhận nộp.');
+      return;
+    }
+
+    if (!criminalRecordStatus) {
+      setDriverDetailStatus('Vui lòng chọn tình trạng tiền án.');
       return;
     }
 
@@ -5610,10 +5670,14 @@ export default function HomePage() {
       [DRIVER_BACKGROUND_ITEM_ID]: {
         ...current[DRIVER_BACKGROUND_ITEM_ID],
         requiredInfo: backgroundFileName,
+        backgroundCriminalRecordStatus: criminalRecordStatus,
+        backgroundCriminalRecordNumber: criminalRecordNumber,
+        backgroundCriminalRecordIssueDate: criminalRecordIssueDate,
         backgroundSubmitted: true,
         extraInfo:
-          String(current[DRIVER_BACKGROUND_ITEM_ID]?.extraInfo ?? '').trim() ||
-          'Đã đọc và đồng ý điều khoản lý lịch tư pháp.',
+          `Tình trạng tiền án: ${criminalRecordStatus}${
+            criminalRecordNumber ? ` | Số giấy lý lịch: ${criminalRecordNumber}` : ''
+          }${criminalRecordIssueDate ? ` | Ngày cấp: ${criminalRecordIssueDateDisplay}` : ''}`,
       },
     }));
 
@@ -5694,6 +5758,8 @@ export default function HomePage() {
           : String(currentVehicleDraft.vehicleLicensePlate ?? '');
       const nextVehicleName =
         field === 'vehicleName' ? String(value ?? '').trimStart() : String(currentVehicleDraft.vehicleName ?? '');
+      const nextVehicleType =
+        field === 'vehicleType' ? String(value ?? '').trim() : String(currentVehicleDraft.vehicleType ?? '');
 
       return {
         ...current,
@@ -5701,6 +5767,7 @@ export default function HomePage() {
           ...currentVehicleDraft,
           vehicleLicensePlate: nextVehicleLicensePlate,
           vehicleName: nextVehicleName,
+          vehicleType: nextVehicleType,
           requiredInfo: String(currentVehicleDraft.requiredInfo ?? '').trim(),
         },
       };
@@ -5714,13 +5781,12 @@ export default function HomePage() {
 
     const vehicleDraft = driverSignupDrafts[DRIVER_VEHICLE_ITEM_ID] ?? { requiredInfo: '', extraInfo: '' };
     const frontFileName = String(vehicleDraft.vehicleFrontFileName ?? '').trim();
-    const sideFileName = String(vehicleDraft.vehicleSideFileName ?? '').trim();
-    const rearFileName = String(vehicleDraft.vehicleRearFileName ?? '').trim();
+    const registrationFileName = String(vehicleDraft.vehicleSideFileName ?? '').trim();
     const vehicleLicensePlate = String(vehicleDraft.vehicleLicensePlate ?? '').trim().toUpperCase();
-    const vehicleName = String(vehicleDraft.vehicleName ?? '').trim();
+    const vehicleType = String(vehicleDraft.vehicleType ?? '').trim();
 
-    if (!frontFileName || !sideFileName || !rearFileName) {
-      setDriverDetailStatus('Vui lòng tải đủ 3 ảnh xe: góc trước, góc ngang và góc sau (thấy toàn bộ xe).');
+    if (!frontFileName || !registrationFileName) {
+      setDriverDetailStatus('Vui lòng tải đủ 2 tệp: ảnh xe và giấy đăng ký xe.');
       return;
     }
 
@@ -5734,24 +5800,23 @@ export default function HomePage() {
       return;
     }
 
-    if (!vehicleName) {
-      setDriverDetailStatus('Vui lòng nhập tên xe.');
+    if (!vehicleType) {
+      setDriverDetailStatus('Vui lòng chọn loại xe.');
       return;
     }
 
-    const packedVehicleInfo = `${vehicleLicensePlate} | ${vehicleName}`;
+    const packedVehicleInfo = `${vehicleLicensePlate} | ${vehicleType}`;
 
     setDriverSignupDrafts((current) => ({
       ...current,
       [DRIVER_VEHICLE_ITEM_ID]: {
         ...current[DRIVER_VEHICLE_ITEM_ID],
+        vehicleType,
         vehicleLicensePlate,
-        vehicleName,
+        vehicleName: vehicleType,
         requiredInfo: packedVehicleInfo,
         vehicleSubmitted: true,
-        extraInfo:
-          String(current[DRIVER_VEHICLE_ITEM_ID]?.extraInfo ?? '').trim() ||
-          'Đã nộp đủ 3 ảnh xe (trước-ngang-sau) và thông tin xe.',
+        extraInfo: 'Đã nộp ảnh xe và giấy đăng ký xe.',
       },
     }));
 
@@ -5989,6 +6054,7 @@ export default function HomePage() {
     const accountNumber = String(bankAccount.accountNumber ?? '')
       .replace(/\s+/g, '')
       .trim();
+    const branch = String(bankDraft.bankBranch ?? '').trim();
 
     if (!holderName || !bankName || !accountNumber) {
       setDriverDetailStatus('Vui lòng điền đủ Họ và tên chủ thẻ, Ngân hàng và Số tài khoản.');
@@ -6023,11 +6089,10 @@ export default function HomePage() {
         bankHolderName: normalizedBankAccount.holderName,
         bankName: normalizedBankAccount.bankName,
         bankAccountNumber: normalizedBankAccount.accountNumber,
+        bankBranch: branch,
         requiredInfo: buildDriverBankAccountRaw(normalizedBankAccount),
         bankSubmitted: true,
-        extraInfo:
-          String(current[DRIVER_BANK_ITEM_ID]?.extraInfo ?? '').trim() ||
-          'Đã đọc và đồng ý điều khoản tài khoản ngân hàng.',
+        extraInfo: branch ? `Chi nhánh: ${branch}` : 'Đã đọc và đồng ý điều khoản tài khoản ngân hàng.',
       },
     }));
 
@@ -6402,6 +6467,7 @@ export default function HomePage() {
         normalizeUploadedDriverAssetPath(vehicleDraft.vehicleRearUploadedPath),
       ),
     };
+    const vehicleRegistrationImage = vehicleImages.side;
 
     const identityImages = {
       front: resolveFirstNonEmptyText(
@@ -6461,7 +6527,9 @@ export default function HomePage() {
       vehicleInfo: {
         name: String(vehicleDraft.vehicleName ?? '').trim(),
         licensePlate: String(vehicleDraft.vehicleLicensePlate ?? '').trim().toUpperCase(),
-        image: vehicleImages.side || vehicleImages.front || vehicleImages.rear,
+        image: vehicleImages.front || vehicleImages.side || vehicleImages.rear,
+        registrationImage: vehicleRegistrationImage,
+        giayDangKyXe: vehicleRegistrationImage,
         images: vehicleImages,
         identityImages,
         licenseImages,
@@ -6601,8 +6669,11 @@ export default function HomePage() {
         Boolean(normalizeUploadedDriverAssetPath(applicationPayload.licenseImages?.back)) &&
         Boolean(normalizeUploadedDriverAssetPath(applicationPayload.backgroundImage)) &&
         Boolean(normalizeUploadedDriverAssetPath(applicationPayload.vehicleInfo?.images?.front)) &&
-        Boolean(normalizeUploadedDriverAssetPath(applicationPayload.vehicleInfo?.images?.side)) &&
-        Boolean(normalizeUploadedDriverAssetPath(applicationPayload.vehicleInfo?.images?.rear));
+        Boolean(
+          normalizeUploadedDriverAssetPath(
+            applicationPayload.vehicleInfo?.registrationImage ?? applicationPayload.vehicleInfo?.images?.side,
+          ),
+        );
 
       if (!hasRequiredDriverImageUploads) {
         setDriverSignupStatus(
@@ -8276,9 +8347,7 @@ export default function HomePage() {
                     >
                       {driverSignupSubmitting
                         ? 'Đang nộp hồ sơ...'
-                        : isDriverSignupReady
-                          ? 'Nộp hồ sơ chờ duyệt'
-                          : `Hoàn tất ${completedDriverItems}/${DRIVER_SIGNUP_ALL_ITEMS.length} để nộp`}
+                        : 'Gửi Hồ sơ'}
                     </button>
                   </div>
                 </div>
@@ -8292,7 +8361,24 @@ export default function HomePage() {
               <div className="login-popup-modal driver-detail-modal" role="dialog" aria-modal="true" aria-label={`Biểu mẫu ${activeDriverSignupItem.label}`}>
                 <div className="login-popup-modal__backdrop" onClick={closeDriverDetailModal} aria-hidden="true" />
 
-                <div className="login-popup-modal__window driver-detail-modal__window">
+                <div
+                  className={classNames(
+                    'login-popup-modal__window',
+                    'driver-detail-modal__window',
+                    isPortraitDriverItem && 'driver-detail-modal__window--portrait',
+                    isDriverIdentityFormStep && 'driver-detail-modal__window--documents',
+                    isDriverLicenseFormStep && 'driver-detail-modal__window--license',
+                    (isDriverBackgroundFormStep || isDriverEmergencyFormStep || isDriverResidenceFormStep || isDriverBankFormStep) &&
+                      'driver-detail-modal__window--profile',
+                    isDriverVehicleFormStep && 'driver-detail-modal__window--vehicle',
+                    (isDriverIdentityTermsStep ||
+                      isDriverLicenseTermsStep ||
+                      isDriverBackgroundTermsStep ||
+                      isDriverEmergencyTermsStep ||
+                      isDriverResidenceTermsStep ||
+                      isDriverBankTermsStep) && 'driver-detail-modal__window--terms',
+                  )}
+                >
                   <button className="login-popup-modal__close" type="button" onClick={closeDriverDetailModal} aria-label="Đóng biểu mẫu hồ sơ">
                     <img className="login-popup-modal__close-icon" src={closeIcon} alt="" aria-hidden="true" />
                   </button>
@@ -8570,8 +8656,8 @@ export default function HomePage() {
                     <form className="driver-signup-modal__detail-form driver-portrait-modal__upload-form" onSubmit={handleDriverPortraitSubmit}>
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
-                      <div className="driver-signup-modal__detail-field">
-                        <span>Chèn hoặc thay đổi ảnh chân dung</span>
+                      <div className="driver-portrait-modal__layout">
+                        <div className="driver-portrait-modal__upload-block">
                         <input
                           id="driver-portrait-file-input"
                           className="driver-portrait-modal__file-input"
@@ -8587,12 +8673,14 @@ export default function HomePage() {
                           {activeDriverPortraitPreview ? (
                             <img src={activeDriverPortraitPreview} alt="Ảnh chân dung xem trước" />
                           ) : (
-                            <span className="driver-portrait-modal__frame-placeholder">Chọn ảnh</span>
+                            <span className="driver-portrait-modal__frame-placeholder" aria-hidden="true">
+                              <span className="driver-portrait-modal__placeholder-icon">
+                                <span className="driver-portrait-modal__placeholder-icon-back" />
+                                <span className="driver-portrait-modal__placeholder-icon-front" />
+                              </span>
+                              <span className="driver-portrait-modal__choose-button">Chọn ảnh</span>
+                            </span>
                           )}
-
-                          <span className="driver-portrait-modal__frame-hint">
-                            {activeDriverPortraitPreview ? 'Nhấn vào khung để thay đổi ảnh' : 'Nhấn vào khung để tải ảnh chân dung'}
-                          </span>
                         </label>
 
                         {activeDriverSignupDraft.portraitFileName || activeDriverSignupDraft.requiredInfo ? (
@@ -8602,29 +8690,19 @@ export default function HomePage() {
                         ) : null}
                       </div>
 
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Ghi chú ảnh (tùy chọn)</span>
-                        <textarea
-                          className="driver-signup-modal__detail-textarea"
-                          value={activeDriverSignupDraft.extraInfo}
-                          onChange={(event) => handleDriverDraftChange('extraInfo', event.target.value)}
-                          placeholder="Ví dụ: ảnh chụp tại nhà, đủ sáng, rõ mặt"
-                        />
-                      </label>
-
-                      <section className="driver-portrait-modal__guide" aria-label="Hướng dẫn chụp ảnh">
-                        <h5>Hướng dẫn chụp</h5>
+                        <section className="driver-portrait-modal__guide" aria-label="Hướng dẫn chụp ảnh">
                         <ul>
                           {DRIVER_PORTRAIT_CAPTURE_GUIDES.map((guideItem) => (
                             <li key={guideItem}>{guideItem}</li>
                           ))}
                         </ul>
                       </section>
+                      </div>
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
-                      <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                      <button className="driver-signup-modal__save driver-portrait-modal__submit" type="submit">
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverIdentityFormStep ? (
@@ -8632,7 +8710,7 @@ export default function HomePage() {
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
                       <label className="driver-signup-modal__detail-field">
-                        <span>Số CMND/CCCD/Hộ chiếu</span>
+                        <span>CCCD/CMND/hộ chiếu</span>
                         <input
                           className="driver-signup-modal__detail-input"
                           type="text"
@@ -8641,14 +8719,14 @@ export default function HomePage() {
                           autoComplete="off"
                           value={activeDriverIdentityNumber}
                           onChange={(event) => handleDriverIdentityNumberChange(event.target.value)}
-                          placeholder="Nhập số CMND/CCCD/Hộ chiếu"
+                          placeholder="Nhập CCCD/CMND/hộ chiếu"
                           maxLength={12}
                         />
                       </label>
 
                       <div className="driver-identity-modal__frames">
                         <div className="driver-signup-modal__detail-field">
-                          <span>Ảnh mặt trước giấy tờ</span>
+                          <span>Mặt Trước</span>
                           <input
                             id="driver-identity-front-file-input"
                             className="driver-identity-modal__file-input"
@@ -8664,10 +8742,14 @@ export default function HomePage() {
                             {activeDriverIdentityFrontPreview ? (
                               <img src={activeDriverIdentityFrontPreview} alt="Ảnh mặt trước giấy tờ" />
                             ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh mặt trước</span>
+                              <span className="driver-license-modal__frame-empty">
+                                <span className="driver-portrait-modal__placeholder-icon" aria-hidden="true">
+                                  <span className="driver-portrait-modal__placeholder-icon-back" />
+                                  <span className="driver-portrait-modal__placeholder-icon-front" />
+                                </span>
+                                <span className="driver-license-modal__frame-choose">Chọn ảnh</span>
+                              </span>
                             )}
-
-                            <span className="driver-identity-modal__frame-hint">Nhấn vào khung để tải hoặc đổi ảnh mặt trước</span>
                           </label>
 
                           {activeDriverSignupDraft.identityFrontFileName ? (
@@ -8676,7 +8758,7 @@ export default function HomePage() {
                         </div>
 
                         <div className="driver-signup-modal__detail-field">
-                          <span>Ảnh mặt sau giấy tờ</span>
+                          <span>Mặt Sau</span>
                           <input
                             id="driver-identity-back-file-input"
                             className="driver-identity-modal__file-input"
@@ -8692,10 +8774,14 @@ export default function HomePage() {
                             {activeDriverIdentityBackPreview ? (
                               <img src={activeDriverIdentityBackPreview} alt="Ảnh mặt sau giấy tờ" />
                             ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh mặt sau</span>
+                              <span className="driver-license-modal__frame-empty">
+                                <span className="driver-portrait-modal__placeholder-icon" aria-hidden="true">
+                                  <span className="driver-portrait-modal__placeholder-icon-back" />
+                                  <span className="driver-portrait-modal__placeholder-icon-front" />
+                                </span>
+                                <span className="driver-license-modal__frame-choose">Chọn ảnh</span>
+                              </span>
                             )}
-
-                            <span className="driver-identity-modal__frame-hint">Nhấn vào khung để tải hoặc đổi ảnh mặt sau</span>
                           </label>
 
                           {activeDriverSignupDraft.identityBackFileName ? (
@@ -8703,30 +8789,17 @@ export default function HomePage() {
                           ) : null}
                         </div>
                       </div>
-
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Ghi chú giấy tờ (tùy chọn)</span>
-                        <textarea
-                          className="driver-signup-modal__detail-textarea"
-                          value={activeDriverSignupDraft.extraInfo}
-                          onChange={(event) => handleDriverDraftChange('extraInfo', event.target.value)}
-                          placeholder="Ví dụ: CCCD gắn chip, ảnh chụp trong phòng đủ sáng"
-                        />
-                      </label>
-
                       <section className="driver-identity-modal__guide" aria-label="Hướng dẫn chụp giấy tờ tùy thân">
-                        <h5>Hướng dẫn chụp giấy tờ</h5>
                         <ul>
-                          {DRIVER_IDENTITY_CAPTURE_GUIDES.map((guideItem) => (
-                            <li key={guideItem}>{guideItem}</li>
-                          ))}
+                          <li>Tải ảnh rõ nét không mờ</li>
+                          <li>Đảm bảo đầy đủ thông tin</li>
                         </ul>
                       </section>
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverLicenseFormStep ? (
@@ -8735,7 +8808,7 @@ export default function HomePage() {
 
                       <div className="driver-identity-modal__frames">
                         <div className="driver-signup-modal__detail-field">
-                          <span>Ảnh mặt trước bằng lái</span>
+                          <span>Mặt Trước</span>
                           <input
                             id="driver-license-front-file-input"
                             className="driver-identity-modal__file-input"
@@ -8751,10 +8824,14 @@ export default function HomePage() {
                             {activeDriverLicenseFrontPreview ? (
                               <img src={activeDriverLicenseFrontPreview} alt="Ảnh mặt trước bằng lái" />
                             ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh mặt trước</span>
+                              <span className="driver-license-modal__frame-empty">
+                                <span className="driver-portrait-modal__placeholder-icon" aria-hidden="true">
+                                  <span className="driver-portrait-modal__placeholder-icon-back" />
+                                  <span className="driver-portrait-modal__placeholder-icon-front" />
+                                </span>
+                                <span className="driver-license-modal__frame-choose">Chọn ảnh</span>
+                              </span>
                             )}
-
-                            <span className="driver-identity-modal__frame-hint">Nhấn vào khung để tải hoặc đổi ảnh mặt trước</span>
                           </label>
 
                           {activeDriverSignupDraft.licenseFrontFileName ? (
@@ -8763,7 +8840,7 @@ export default function HomePage() {
                         </div>
 
                         <div className="driver-signup-modal__detail-field">
-                          <span>Ảnh mặt sau bằng lái</span>
+                          <span>Mặt Sau</span>
                           <input
                             id="driver-license-back-file-input"
                             className="driver-identity-modal__file-input"
@@ -8779,10 +8856,14 @@ export default function HomePage() {
                             {activeDriverLicenseBackPreview ? (
                               <img src={activeDriverLicenseBackPreview} alt="Ảnh mặt sau bằng lái" />
                             ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh mặt sau</span>
+                              <span className="driver-license-modal__frame-empty">
+                                <span className="driver-portrait-modal__placeholder-icon" aria-hidden="true">
+                                  <span className="driver-portrait-modal__placeholder-icon-back" />
+                                  <span className="driver-portrait-modal__placeholder-icon-front" />
+                                </span>
+                                <span className="driver-license-modal__frame-choose">Chọn ảnh</span>
+                              </span>
                             )}
-
-                            <span className="driver-identity-modal__frame-hint">Nhấn vào khung để tải hoặc đổi ảnh mặt sau</span>
                           </label>
 
                           {activeDriverSignupDraft.licenseBackFileName ? (
@@ -8790,61 +8871,80 @@ export default function HomePage() {
                           ) : null}
                         </div>
                       </div>
-
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Ghi chú bằng lái (tùy chọn)</span>
-                        <textarea
-                          className="driver-signup-modal__detail-textarea"
-                          value={activeDriverSignupDraft.extraInfo}
-                          onChange={(event) => handleDriverDraftChange('extraInfo', event.target.value)}
-                          placeholder="Ví dụ: bằng A1 còn hiệu lực đến 2030"
-                        />
-                      </label>
-
                       <section className="driver-identity-modal__guide" aria-label="Hướng dẫn chụp bằng lái xe">
-                        <h5>Hướng dẫn chụp bằng lái</h5>
                         <ul>
-                          {DRIVER_LICENSE_CAPTURE_GUIDES.map((guideItem) => (
-                            <li key={guideItem}>{guideItem}</li>
-                          ))}
+                          <li>Tải ảnh rõ nét không mờ</li>
+                          <li>Đảm bảo đầy đủ thông tin</li>
                         </ul>
                       </section>
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverBackgroundFormStep ? (
                     <form className="driver-signup-modal__detail-form driver-background-modal__upload-form" onSubmit={handleDriverBackgroundSubmit}>
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
+                      <p className="driver-residence-modal__notice">Vui lòng cung cấp thông tin xác minh</p>
+
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Tình trạng tiền án</span>
+                        <select
+                          className="driver-signup-modal__detail-input"
+                          value={activeDriverBackgroundCriminalRecordStatus}
+                          onChange={(event) => handleDriverDraftChange('backgroundCriminalRecordStatus', event.target.value)}
+                        >
+                          <option value="Không có">Không có</option>
+                          <option value="Có">Có</option>
+                        </select>
+                      </label>
+
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Số giấy lý lịch (nếu có)</span>
+                        <input
+                          className="driver-signup-modal__detail-input"
+                          type="text"
+                          value={activeDriverBackgroundCriminalRecordNumber}
+                          onChange={(event) => handleDriverDraftChange('backgroundCriminalRecordNumber', event.target.value)}
+                          placeholder="Nhập số giấy"
+                        />
+                      </label>
+
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Ngày cấp</span>
+                        <DatePicker
+                          selected={parseDateForPicker(activeDriverBackgroundCriminalRecordIssueDate)}
+                          onChange={(selectedDate) => {
+                            handleDriverDraftChange('backgroundCriminalRecordIssueDate', formatDateForProfileValue(selectedDate));
+                          }}
+                          locale="vi-VN"
+                          dateFormat="dd/MM/yyyy"
+                          placeholderText="dd/mm/yyyy"
+                          showMonthDropdown
+                          showYearDropdown
+                          dropdownMode="select"
+                          maxDate={new Date()}
+                          className="driver-signup-modal__detail-input profile-sheet__date-input"
+                          calendarClassName="profile-sheet__date-calendar"
+                          popperClassName="profile-sheet__date-popper"
+                        />
+                      </label>
+
                       <div className="driver-signup-modal__detail-field">
-                        <span>Ảnh lý lịch tư pháp (chiều dọc)</span>
+                        <span>Tải lên giấy lý lịch tư pháp</span>
                         <input
                           id="driver-background-file-input"
                           className="driver-background-modal__file-input"
                           type="file"
-                          accept="image/*"
+                          accept="image/*,.pdf,application/pdf"
                           onChange={handleDriverBackgroundFileChange}
                         />
 
-                        <label
-                          className={classNames('driver-background-modal__frame', activeDriverBackgroundPreview && 'has-image')}
-                          htmlFor="driver-background-file-input"
-                        >
-                          {activeDriverBackgroundPreview ? (
-                            <img src={activeDriverBackgroundPreview} alt="Ảnh lý lịch tư pháp xem trước" />
-                          ) : (
-                            <span className="driver-background-modal__frame-placeholder">Chọn ảnh chiều dọc</span>
-                          )}
-
-                          <span className="driver-background-modal__frame-hint">
-                            {activeDriverBackgroundPreview
-                              ? 'Nhấn vào khung để thay đổi ảnh'
-                              : 'Nhấn vào khung để tải ảnh lý lịch tư pháp'}
-                          </span>
+                        <label className="driver-signup-modal__detail-input driver-background-modal__file-pick" htmlFor="driver-background-file-input">
+                          Chọn file (PDF / ảnh)
                         </label>
 
                         {activeDriverSignupDraft.backgroundFileName || activeDriverSignupDraft.requiredInfo ? (
@@ -8854,100 +8954,46 @@ export default function HomePage() {
                         ) : null}
                       </div>
 
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Ghi chú lý lịch tư pháp (tùy chọn)</span>
-                        <textarea
-                          className="driver-signup-modal__detail-textarea"
-                          value={activeDriverSignupDraft.extraInfo}
-                          onChange={(event) => handleDriverDraftChange('extraInfo', event.target.value)}
-                          placeholder="Ví dụ: phiếu số 1, cấp trong 3 tháng gần nhất"
-                        />
-                      </label>
-
-                      <section className="driver-background-modal__guide" aria-label="Hướng dẫn chụp lý lịch tư pháp">
-                        <h5>Hướng dẫn chụp lý lịch tư pháp</h5>
-                        <ul>
-                          {DRIVER_BACKGROUND_CAPTURE_GUIDES.map((guideItem) => (
-                            <li key={guideItem}>{guideItem}</li>
-                          ))}
-                        </ul>
-                      </section>
-
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverEmergencyFormStep ? (
                     <form className="driver-signup-modal__detail-form driver-emergency-modal__form" onSubmit={handleDriverEmergencySubmit}>
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Quan hệ với Tài xế</span>
-                        <div className="driver-bank-modal__combobox driver-emergency-modal__combobox">
-                          <input
-                            className="driver-signup-modal__detail-input"
-                            type="text"
-                            value={activeDriverEmergencyRelationship}
-                            onFocus={() => setDriverEmergencyRelationshipDropdownOpen(true)}
-                            onBlur={() => {
-                              window.setTimeout(() => {
-                                setDriverEmergencyRelationshipDropdownOpen(false);
-                              }, 120);
-                            }}
-                            onChange={(event) => handleDriverEmergencyFieldChange('relationship', event.target.value)}
-                            placeholder="Ví dụ: Cha, Mẹ, Ông, Bà..."
-                          />
-
-                          {driverEmergencyRelationshipDropdownOpen ? (
-                            <div
-                              className="driver-bank-modal__dropdown driver-bank-modal__dropdown--relationship"
-                              role="listbox"
-                              aria-label="Danh sách quan hệ với tài xế"
-                            >
-                              {activeDriverFilteredEmergencyRelationshipOptions.length > 0 ? (
-                                activeDriverFilteredEmergencyRelationshipOptions.map((suggestionItem, index) => (
-                                  <button
-                                    key={suggestionItem}
-                                    className={classNames(
-                                      'driver-bank-modal__dropdown-option',
-                                      normalizeSearchKeyword(suggestionItem) === normalizeSearchKeyword(activeDriverEmergencyRelationship) &&
-                                        'is-selected',
-                                    )}
-                                    style={{ '--item-order': index }}
-                                    type="button"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                    }}
-                                    onClick={() => handleDriverEmergencyRelationshipOptionSelect(suggestionItem)}
-                                  >
-                                    {suggestionItem}
-                                  </button>
-                                ))
-                              ) : (
-                                <p className="driver-bank-modal__dropdown-empty">Không tìm thấy quan hệ phù hợp.</p>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <small className="driver-emergency-modal__hint">Chọn từ gợi ý hoặc nhập quan hệ khác.</small>
-                      </label>
+                      <p className="driver-residence-modal__notice">Cung cấp thông tin người có thể liên hệ khi cần thiết</p>
 
                       <label className="driver-signup-modal__detail-field">
-                        <span>Họ và Tên</span>
+                        <span>Họ và tên</span>
                         <input
                           className="driver-signup-modal__detail-input"
                           type="text"
                           value={activeDriverEmergencyFullName}
                           onChange={(event) => handleDriverEmergencyFieldChange('fullName', event.target.value)}
-                          placeholder="Nhập họ và tên người liên hệ khẩn cấp"
+                          placeholder="Nhập họ tên"
                         />
                       </label>
 
                       <label className="driver-signup-modal__detail-field">
-                        <span>Số Điện Thoại</span>
+                        <span>Quan hệ</span>
+                        <select
+                          className="driver-signup-modal__detail-input"
+                          value={activeDriverEmergencyRelationship || 'Cha'}
+                          onChange={(event) => handleDriverEmergencyFieldChange('relationship', event.target.value)}
+                        >
+                          {DRIVER_EMERGENCY_RELATIONSHIP_SUGGESTIONS.map((suggestionItem) => (
+                            <option key={suggestionItem} value={suggestionItem}>
+                              {suggestionItem}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Số điện thoại</span>
                         <input
                           className="driver-signup-modal__detail-input"
                           type="tel"
@@ -8956,245 +9002,193 @@ export default function HomePage() {
                           inputMode="numeric"
                           pattern="[0-9]*"
                           maxLength={15}
-                          placeholder="Nhập số điện thoại liên hệ khẩn cấp"
+                          placeholder="Nhập số điện thoại"
                         />
                       </label>
 
                       <label className="driver-signup-modal__detail-field">
-                        <span>Địa chỉ</span>
+                        <span>Địa chỉ (không bắt buộc)</span>
                         <input
                           className="driver-signup-modal__detail-input"
                           type="text"
                           value={activeDriverEmergencyAddress}
                           onChange={(event) => handleDriverEmergencyFieldChange('address', event.target.value)}
-                          placeholder="Nhập địa chỉ người liên hệ khẩn cấp"
+                          placeholder="Nhập địa chỉ"
                         />
                       </label>
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverResidenceFormStep ? (
                     <form className="driver-signup-modal__detail-form driver-residence-modal__form" onSubmit={handleDriverResidenceSubmit}>
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
-                      <p className="driver-residence-modal__notice">
-                        Lưu ý: Đây là địa chỉ dùng để nhận thư từ, bưu phẩm và đồng phục từ SmartRide. Vui lòng nhập đúng địa chỉ thật.
-                      </p>
+                      <p className="driver-residence-modal__notice">Vui lòng cung cấp nơi bạn đang sinh sống hiện tại</p>
 
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Chế độ nhập địa chỉ</span>
-
-                        <div className="driver-residence-modal__mode-group" role="group" aria-label="Chế độ nhập địa chỉ tạm trú">
-                          <label className="driver-residence-modal__mode-item">
-                            <input
-                              type="radio"
-                              name="driver-residence-mode"
-                              checked={activeDriverResidenceMode !== 'manual'}
-                              onChange={() => handleDriverResidenceFieldChange('mode', 'droplist')}
-                            />
-                            <span>Chọn theo danh sách</span>
-                          </label>
-
-                          <label className="driver-residence-modal__mode-item">
-                            <input
-                              type="radio"
-                              name="driver-residence-mode"
-                              checked={activeDriverResidenceMode === 'manual'}
-                              onChange={() => handleDriverResidenceFieldChange('mode', 'manual')}
-                            />
-                            <span>Nhập địa chỉ một dòng</span>
-                          </label>
-                        </div>
-                      </label>
-
-                      {activeDriverResidenceMode === 'manual' ? (
+                      <div className="driver-form-grid-2">
                         <label className="driver-signup-modal__detail-field">
-                          <span>Địa chỉ một dòng</span>
+                          <span>Tỉnh / Thành phố</span>
                           <input
                             className="driver-signup-modal__detail-input"
                             type="text"
-                            value={activeDriverResidenceManualAddress}
-                            onChange={(event) => handleDriverResidenceFieldChange('manualAddress', event.target.value)}
-                            placeholder="Ví dụ: 12 Nguyễn Văn Linh, Hải Châu 1, Hải Châu, Đà Nẵng"
+                            value={activeDriverResidenceProvince}
+                            onChange={(event) => handleDriverResidenceFieldChange('province', event.target.value)}
+                            placeholder="VD: Đà Nẵng"
                           />
                         </label>
-                      ) : (
-                        <>
-                          <label className="driver-signup-modal__detail-field">
-                            <span>Tỉnh / Thành phố</span>
-                            <select
-                              className="driver-signup-modal__detail-input"
-                              value={activeDriverResidenceProvince}
-                              onChange={(event) => handleDriverResidenceFieldChange('province', event.target.value)}
-                            >
-                              <option value="">Chọn Tỉnh / Thành phố</option>
-                              {DRIVER_RESIDENCE_ADDRESS_OPTIONS.map((provinceOption) => (
-                                <option key={provinceOption.province} value={provinceOption.province}>
-                                  {provinceOption.province}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
 
-                          <label className="driver-signup-modal__detail-field">
-                            <span>Quận / Huyện</span>
-                            <select
-                              className="driver-signup-modal__detail-input"
-                              value={activeDriverResidenceDistrict}
-                              onChange={(event) => handleDriverResidenceFieldChange('district', event.target.value)}
-                              disabled={!activeDriverResidenceProvince}
-                            >
-                              <option value="">Chọn Quận / Huyện</option>
-                              {activeDriverResidenceDistrictOptions.map((districtOption) => (
-                                <option key={districtOption.district} value={districtOption.district}>
-                                  {districtOption.district}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                        <label className="driver-signup-modal__detail-field">
+                          <span>Quận / Huyện</span>
+                          <input
+                            className="driver-signup-modal__detail-input"
+                            type="text"
+                            value={activeDriverResidenceDistrict}
+                            onChange={(event) => handleDriverResidenceFieldChange('district', event.target.value)}
+                            placeholder="VD: Hải Châu"
+                          />
+                        </label>
 
-                          <label className="driver-signup-modal__detail-field">
-                            <span>Phường / Xã</span>
-                            <select
-                              className="driver-signup-modal__detail-input"
-                              value={activeDriverResidenceWard}
-                              onChange={(event) => handleDriverResidenceFieldChange('ward', event.target.value)}
-                              disabled={!activeDriverResidenceDistrict}
-                            >
-                              <option value="">Chọn Phường / Xã</option>
-                              {activeDriverResidenceWardOptions.map((wardOption) => (
-                                <option key={wardOption} value={wardOption}>
-                                  {wardOption}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                        <label className="driver-signup-modal__detail-field">
+                          <span>Phường / Xã</span>
+                          <input
+                            className="driver-signup-modal__detail-input"
+                            type="text"
+                            value={activeDriverResidenceWard}
+                            onChange={(event) => handleDriverResidenceFieldChange('ward', event.target.value)}
+                            placeholder="VD: Hòa Thuận Tây"
+                          />
+                        </label>
 
-                          <label className="driver-signup-modal__detail-field">
-                            <span>Số nhà, tên đường</span>
-                            <input
-                              className="driver-signup-modal__detail-input"
-                              type="text"
-                              value={activeDriverResidenceHouseNumber}
-                              onChange={(event) => handleDriverResidenceFieldChange('houseNumber', event.target.value)}
-                              placeholder="Ví dụ: 12 Nguyễn Văn Linh"
-                            />
-                          </label>
-                        </>
-                      )}
+                        <label className="driver-signup-modal__detail-field">
+                          <span>Thời gian cư trú</span>
+                          <input
+                            className="driver-signup-modal__detail-input"
+                            type="text"
+                            value={activeDriverResidenceHouseNumber}
+                            onChange={(event) => handleDriverResidenceFieldChange('houseNumber', event.target.value)}
+                            placeholder="VD: 2 năm"
+                          />
+                        </label>
+                      </div>
 
-                      {activeDriverResidenceDisplayAddress ? (
-                        <p className="driver-residence-modal__preview">Địa chỉ xem trước: {activeDriverResidenceDisplayAddress}</p>
-                      ) : null}
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Địa chỉ cụ thể</span>
+                        <input
+                          className="driver-signup-modal__detail-input"
+                          type="text"
+                          value={activeDriverResidenceManualAddress}
+                          onChange={(event) => handleDriverResidenceFieldChange('manualAddress', event.target.value)}
+                          placeholder="Số nhà, tên đường..."
+                        />
+                      </label>
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverBankFormStep ? (
                     <form className="driver-signup-modal__detail-form driver-bank-modal__form" onSubmit={handleDriverBankSubmit}>
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
-                      <p className="driver-bank-modal__notice">
-                        Lưu ý: Thu nhập từ các chuyến xe hoàn tất sẽ được đối soát và chuyển về tài khoản ngân hàng này.
-                      </p>
+                      <p className="driver-residence-modal__notice">Thông tin này dùng để nhận thanh toán từ hệ thống</p>
 
                       <label className="driver-signup-modal__detail-field">
-                        <span>Họ và tên chủ thẻ (không dấu)</span>
+                        <span>Tên chủ tài khoản</span>
                         <input
                           className="driver-signup-modal__detail-input"
                           type="text"
                           value={activeDriverBankHolderName}
                           onChange={(event) => handleDriverBankFieldChange('holderName', event.target.value)}
-                          placeholder="Ví dụ: NGUYEN VAN A"
+                          placeholder="Nhập đúng như trên thẻ ngân hàng"
                         />
                       </label>
 
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Ngân hàng</span>
-                        <div className="driver-bank-modal__combobox">
+                      <div className="driver-form-grid-2">
+                        <label className="driver-signup-modal__detail-field">
+                          <span>Số tài khoản</span>
                           <input
                             className="driver-signup-modal__detail-input"
                             type="text"
-                            value={activeDriverBankName}
-                            onFocus={() => setDriverBankDropdownOpen(true)}
-                            onBlur={() => {
-                              window.setTimeout(() => {
-                                setDriverBankDropdownOpen(false);
-                              }, 120);
-                            }}
-                            onChange={(event) => handleDriverBankFieldChange('bankName', event.target.value)}
-                            placeholder="Gõ để tìm hoặc chọn ngân hàng"
+                            inputMode="numeric"
+                            value={activeDriverBankAccountNumber}
+                            onChange={(event) => handleDriverBankFieldChange('accountNumber', event.target.value)}
+                            placeholder="Nhập số tài khoản"
                           />
+                        </label>
 
-                          {driverBankDropdownOpen ? (
-                            <div className="driver-bank-modal__dropdown" role="listbox" aria-label="Danh sách ngân hàng">
-                              {activeDriverFilteredBankOptions.length > 0 ? (
-                                activeDriverFilteredBankOptions.map((bankOption, index) => (
-                                  <button
-                                    key={bankOption}
-                                    className={classNames(
-                                      'driver-bank-modal__dropdown-option',
-                                      normalizeSearchKeyword(bankOption) === normalizeSearchKeyword(activeDriverBankName) &&
-                                        'is-selected',
-                                    )}
-                                    style={{ '--item-order': index }}
-                                    type="button"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                    }}
-                                    onClick={() => handleDriverBankOptionSelect(bankOption)}
-                                  >
-                                    {bankOption}
-                                  </button>
-                                ))
-                              ) : (
-                                <p className="driver-bank-modal__dropdown-empty">Không tìm thấy ngân hàng phù hợp.</p>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                      </label>
+                        <label className="driver-signup-modal__detail-field">
+                          <span>Ngân hàng</span>
+                          <select
+                            className="driver-signup-modal__detail-input"
+                            value={activeDriverBankName}
+                            onChange={(event) => handleDriverBankFieldChange('bankName', event.target.value)}
+                          >
+                            <option value="">Chọn ngân hàng</option>
+                            {DRIVER_BANK_NAME_OPTIONS.map((bankOption) => (
+                              <option key={bankOption} value={bankOption}>
+                                {bankOption}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
 
                       <label className="driver-signup-modal__detail-field">
-                        <span>Số tài khoản</span>
+                        <span>Chi nhánh (không bắt buộc)</span>
                         <input
                           className="driver-signup-modal__detail-input"
                           type="text"
-                          inputMode="numeric"
-                          value={activeDriverBankAccountNumber}
-                          onChange={(event) => handleDriverBankFieldChange('accountNumber', event.target.value)}
-                          placeholder="Nhập số tài khoản ngân hàng"
+                          value={activeDriverBankBranch}
+                          onChange={(event) => handleDriverDraftChange('bankBranch', event.target.value)}
+                          placeholder="VD: Đà Nẵng"
                         />
                       </label>
-
-                      {activeDriverBankPreview ? (
-                        <p className="driver-residence-modal__preview">Thông tin xem trước: {activeDriverBankPreview}</p>
-                      ) : null}
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverVehicleFormStep ? (
                     <form className="driver-signup-modal__detail-form driver-vehicle-modal__upload-form" onSubmit={handleDriverVehicleSubmit}>
                       <h4 className="driver-signup-modal__detail-title">{activeDriverSignupItem.label}</h4>
 
-                      <p className="driver-portrait-modal__lead">
-                        Tải đủ 3 ảnh xe ở góc trước, ngang và sau. Mỗi ảnh phải rõ nét và thấy toàn bộ xe trong khung hình.
-                      </p>
+                      <p className="driver-residence-modal__notice">Cung cấp thông tin phương tiện của bạn</p>
+
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Loại xe</span>
+                        <select
+                          className="driver-signup-modal__detail-input"
+                          value={activeDriverVehicleType}
+                          onChange={(event) => handleDriverVehicleFieldChange('vehicleType', event.target.value)}
+                        >
+                          <option value="motorbike">Xe máy</option>
+                          <option value="car">Ô tô</option>
+                          <option value="intercity">Xe liên tỉnh</option>
+                        </select>
+                      </label>
+
+                      <label className="driver-signup-modal__detail-field">
+                        <span>Biển số xe</span>
+                        <input
+                          className="driver-signup-modal__detail-input"
+                          type="text"
+                          value={activeDriverVehicleLicensePlate}
+                          onChange={(event) => handleDriverVehicleFieldChange('vehicleLicensePlate', event.target.value)}
+                          placeholder="VD: 43A-123 45"
+                        />
+                      </label>
 
                       <div className="driver-vehicle-modal__frames">
                         <div className="driver-signup-modal__detail-field">
-                          <span>Hình xe - Góc trước (thấy toàn bộ xe)</span>
+                          <span>Ảnh xe</span>
                           <input
                             id="driver-vehicle-front-file-input"
                             className="driver-identity-modal__file-input"
@@ -9210,14 +9204,14 @@ export default function HomePage() {
                             {activeDriverVehicleFrontPreview ? (
                               <img src={activeDriverVehicleFrontPreview} alt="Ảnh xe góc trước" />
                             ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh góc trước</span>
+                              <span className="driver-license-modal__frame-empty">
+                                <span className="driver-portrait-modal__placeholder-icon" aria-hidden="true">
+                                  <span className="driver-portrait-modal__placeholder-icon-back" />
+                                  <span className="driver-portrait-modal__placeholder-icon-front" />
+                                </span>
+                                <span className="driver-license-modal__frame-choose">Chọn ảnh</span>
+                              </span>
                             )}
-
-                            <span className="driver-identity-modal__frame-hint">
-                              {activeDriverVehicleFrontPreview
-                                ? 'Nhấn vào khung để thay đổi ảnh góc trước'
-                                : 'Ảnh cần thấy toàn bộ phần trước của xe'}
-                            </span>
                           </label>
 
                           {activeDriverSignupDraft.vehicleFrontFileName ? (
@@ -9226,7 +9220,7 @@ export default function HomePage() {
                         </div>
 
                         <div className="driver-signup-modal__detail-field">
-                          <span>Hình xe - Góc ngang (thấy toàn bộ xe)</span>
+                          <span>Giấy đăng ký xe</span>
                           <input
                             id="driver-vehicle-side-file-input"
                             className="driver-identity-modal__file-input"
@@ -9240,97 +9234,28 @@ export default function HomePage() {
                             htmlFor="driver-vehicle-side-file-input"
                           >
                             {activeDriverVehicleSidePreview ? (
-                              <img src={activeDriverVehicleSidePreview} alt="Ảnh xe góc ngang" />
+                              <img src={activeDriverVehicleSidePreview} alt="Giấy đăng ký xe" />
                             ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh góc ngang</span>
+                              <span className="driver-license-modal__frame-empty">
+                                <span className="driver-portrait-modal__placeholder-icon" aria-hidden="true">
+                                  <span className="driver-portrait-modal__placeholder-icon-back" />
+                                  <span className="driver-portrait-modal__placeholder-icon-front" />
+                                </span>
+                                <span className="driver-license-modal__frame-choose">Chọn file</span>
+                              </span>
                             )}
-
-                            <span className="driver-identity-modal__frame-hint">
-                              {activeDriverVehicleSidePreview
-                                ? 'Nhấn vào khung để thay đổi ảnh góc ngang'
-                                : 'Ảnh cần thấy toàn bộ phần thân xe'}
-                            </span>
                           </label>
 
                           {activeDriverSignupDraft.vehicleSideFileName ? (
                             <p className="driver-identity-modal__file-name">{activeDriverSignupDraft.vehicleSideFileName}</p>
                           ) : null}
                         </div>
-
-                        <div className="driver-signup-modal__detail-field">
-                          <span>Hình xe - Góc sau (thấy toàn bộ xe)</span>
-                          <input
-                            id="driver-vehicle-rear-file-input"
-                            className="driver-identity-modal__file-input"
-                            type="file"
-                            accept="image/*"
-                            onChange={(event) => handleDriverVehicleFileChange('rear', event)}
-                          />
-
-                          <label
-                            className={classNames('driver-identity-modal__frame', activeDriverVehicleRearPreview && 'has-image')}
-                            htmlFor="driver-vehicle-rear-file-input"
-                          >
-                            {activeDriverVehicleRearPreview ? (
-                              <img src={activeDriverVehicleRearPreview} alt="Ảnh xe góc sau" />
-                            ) : (
-                              <span className="driver-identity-modal__frame-placeholder">Chọn ảnh góc sau</span>
-                            )}
-
-                            <span className="driver-identity-modal__frame-hint">
-                              {activeDriverVehicleRearPreview
-                                ? 'Nhấn vào khung để thay đổi ảnh góc sau'
-                                : 'Ảnh cần thấy toàn bộ phần sau của xe'}
-                            </span>
-                          </label>
-
-                          {activeDriverSignupDraft.vehicleRearFileName ? (
-                            <p className="driver-identity-modal__file-name">{activeDriverSignupDraft.vehicleRearFileName}</p>
-                          ) : null}
-                        </div>
                       </div>
-
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Biển số xe</span>
-                        <input
-                          className="driver-signup-modal__detail-input"
-                          type="text"
-                          value={activeDriverVehicleLicensePlate}
-                          onChange={(event) => handleDriverVehicleFieldChange('vehicleLicensePlate', event.target.value)}
-                          placeholder="Ví dụ: 43A-12345"
-                        />
-                      </label>
-
-                      <label className="driver-signup-modal__detail-field">
-                        <span>Tên xe</span>
-                        <input
-                          className="driver-signup-modal__detail-input"
-                          type="text"
-                          value={activeDriverVehicleName}
-                          onChange={(event) => handleDriverVehicleFieldChange('vehicleName', event.target.value)}
-                          placeholder="Ví dụ: HONDA WAVE ALPHA"
-                        />
-                      </label>
-
-                      {activeDriverVehicleLicensePlate || activeDriverVehicleName ? (
-                        <p className="driver-residence-modal__preview">
-                          Thông tin xem trước: {[activeDriverVehicleLicensePlate, activeDriverVehicleName].filter(Boolean).join(' | ')}
-                        </p>
-                      ) : null}
-
-                      <section className="driver-identity-modal__guide" aria-label="Yêu cầu ảnh thông tin xe">
-                        <h5>Yêu cầu ảnh thông tin xe</h5>
-                        <ul>
-                          {DRIVER_VEHICLE_CAPTURE_GUIDES.map((guideItem) => (
-                            <li key={guideItem}>{guideItem}</li>
-                          ))}
-                        </ul>
-                      </section>
 
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverServiceTermsFormStep ? (
@@ -9408,7 +9333,7 @@ export default function HomePage() {
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : isDriverCommitmentFormStep ? (
@@ -9487,7 +9412,7 @@ export default function HomePage() {
                       {driverDetailStatus ? <p className="driver-signup-modal__detail-status">{driverDetailStatus}</p> : null}
 
                       <button className="driver-signup-modal__save" type="submit">
-                        Xác nhận và nộp
+                        Gửi Thông tin
                       </button>
                     </form>
                   ) : (

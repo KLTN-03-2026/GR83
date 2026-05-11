@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { closeIcon, locationIcon } from '../../assets/icons';
 import { DA_NANG_AIRPORT } from '../../data/defaultLocations';
-import { searchGooglePlaces } from '../../services/googlePlacesService';
+import { reverseGeocodeCoordinates, searchGooglePlaces } from '../../services/googlePlacesService';
 import { loadGoogleMapsApi } from '../../services/googleMapsLoader';
 
 const DEFAULT_CENTER = {
@@ -78,6 +78,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
   const mapProviderRef = useRef('none');
   const listenersRef = useRef([]);
   const authFailureObserverRef = useRef(null);
+  const reverseGeocodeRequestIdRef = useRef(0);
 
   const focusMapOnLocation = (position) => {
     if (!position) {
@@ -238,14 +239,36 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     let cancelled = false;
     const abortController = new AbortController();
 
-    const syncLocation = (latLng) => {
+    const syncLocation = async (latLng) => {
       if (cancelled) {
         return;
       }
 
-      const label = formatCoordinates(latLng.lat, latLng.lng);
+      const fallbackLabel = formatCoordinates(latLng.lat, latLng.lng);
+      const currentRequestId = reverseGeocodeRequestIdRef.current + 1;
+      reverseGeocodeRequestIdRef.current = currentRequestId;
 
-      applySelection(label, latLng);
+      applySelection(fallbackLabel, latLng);
+
+      try {
+        const reverseResult = await reverseGeocodeCoordinates(latLng.lat, latLng.lng, {
+          signal: abortController.signal,
+        });
+
+        if (cancelled || currentRequestId !== reverseGeocodeRequestIdRef.current) {
+          return;
+        }
+
+        const resolvedLabel = String(reverseResult?.label ?? '').trim();
+
+        if (resolvedLabel) {
+          applySelection(resolvedLabel, latLng);
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError' || cancelled || currentRequestId !== reverseGeocodeRequestIdRef.current) {
+          return;
+        }
+      }
     };
 
     const centerMapFromQuery = async (initialQuery) => {
@@ -343,7 +366,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
 
       const handleMapClick = (event) => {
         if (event.latLng) {
-          syncLocation(toLatLngLiteral(event.latLng));
+          void syncLocation(toLatLngLiteral(event.latLng));
         }
       };
 
@@ -351,7 +374,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
         const position = marker.getPosition();
 
         if (position) {
-          syncLocation(toLatLngLiteral(position));
+          void syncLocation(toLatLngLiteral(position));
         }
       };
 
@@ -413,13 +436,13 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
       setMapError(statusMessage);
 
       const handleMapClick = (event) => {
-        syncLocation(event.latlng);
+        void syncLocation(event.latlng);
       };
 
       const handleMarkerDragEnd = () => {
         const position = marker.getLatLng();
 
-        syncLocation({ lat: position.lat, lng: position.lng });
+        void syncLocation({ lat: position.lat, lng: position.lng });
       };
 
       map.on('click', handleMapClick);

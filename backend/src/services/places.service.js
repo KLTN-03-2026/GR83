@@ -33,6 +33,117 @@ function normalizeCoordinate(value) {
   return Number.isFinite(coordinate) ? coordinate : null;
 }
 
+function isCoordinateLikeLabel(value) {
+  const normalizedValue = String(value ?? '').trim();
+
+  if (!normalizedValue) {
+    return false;
+  }
+
+  return /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(normalizedValue);
+}
+
+function joinAddressParts(parts) {
+  const seen = new Set();
+  const normalizedParts = [];
+
+  for (const part of parts) {
+    const value = String(part ?? '').trim();
+
+    if (!value) {
+      continue;
+    }
+
+    const token = normalizeSearchText(value);
+
+    if (!token || seen.has(token)) {
+      continue;
+    }
+
+    seen.add(token);
+    normalizedParts.push(value);
+  }
+
+  return normalizedParts.join(', ');
+}
+
+function formatReverseAddressLabel(address, fallbackLabel) {
+  const normalizedAddress = address && typeof address === 'object' ? address : null;
+
+  if (!normalizedAddress) {
+    return String(fallbackLabel ?? '').trim();
+  }
+
+  const houseNumber = String(normalizedAddress.house_number ?? normalizedAddress.housenumber ?? '').trim();
+  const road = String(
+    normalizedAddress.road
+      ?? normalizedAddress.pedestrian
+      ?? normalizedAddress.residential
+      ?? normalizedAddress.footway
+      ?? normalizedAddress.path
+      ?? normalizedAddress.cycleway
+      ?? normalizedAddress.neighbourhood
+      ?? '',
+  ).trim();
+
+  const primaryLine = joinAddressParts([
+    houseNumber && road ? `Số ${houseNumber} ${road}` : '',
+    !houseNumber && road ? road : '',
+    !road ? normalizedAddress.house ?? normalizedAddress.building ?? '' : '',
+  ]);
+
+  const localityLine = joinAddressParts([
+    normalizedAddress.hamlet,
+    normalizedAddress.suburb,
+    normalizedAddress.quarter,
+    normalizedAddress.city_district,
+    normalizedAddress.town,
+    normalizedAddress.city,
+    normalizedAddress.state,
+    normalizedAddress.country,
+  ]);
+
+  const mergedLabel = joinAddressParts([primaryLine, localityLine]);
+
+  if (mergedLabel) {
+    return mergedLabel;
+  }
+
+  return String(fallbackLabel ?? '').trim();
+}
+
+function normalizeGoogleAddressObject(addressComponents) {
+  if (!Array.isArray(addressComponents)) {
+    return null;
+  }
+
+  const byType = new Map();
+
+  for (const component of addressComponents) {
+    const longName = String(component?.long_name ?? '').trim();
+
+    if (!longName) {
+      continue;
+    }
+
+    for (const type of component?.types ?? []) {
+      if (!byType.has(type)) {
+        byType.set(type, longName);
+      }
+    }
+  }
+
+  return {
+    house_number: byType.get('street_number') ?? '',
+    road: byType.get('route') ?? '',
+    suburb: byType.get('sublocality') ?? byType.get('sublocality_level_1') ?? '',
+    city_district: byType.get('administrative_area_level_3') ?? '',
+    city: byType.get('administrative_area_level_2') ?? byType.get('locality') ?? '',
+    state: byType.get('administrative_area_level_1') ?? '',
+    country: byType.get('country') ?? '',
+  };
+}
+
 function normalizeSearchText(text) {
   return String(text)
     .normalize('NFD')
@@ -554,6 +665,8 @@ async function fetchFallbackReverseGeocode(lat, lng) {
   url.searchParams.set('lon', String(lng));
   url.searchParams.set('addressdetails', '1');
   url.searchParams.set('zoom', '18');
+  url.searchParams.set('namedetails', '1');
+  url.searchParams.set('extratags', '1');
 
   const response = await fetch(url, {
     headers: NOMINATIM_HEADERS,
@@ -566,10 +679,11 @@ async function fetchFallbackReverseGeocode(lat, lng) {
   }
 
   const data = await response.json();
+  const label = formatReverseAddressLabel(data?.address, data?.display_name ?? `${lat}, ${lng}`);
 
   return {
     provider: 'nominatim',
-    label: data.display_name ?? `${lat}, ${lng}`,
+    label,
     lat: normalizeCoordinate(data.lat) ?? lat,
     lng: normalizeCoordinate(data.lon) ?? lng,
     address: data,
@@ -701,16 +815,23 @@ export async function reverseGeocodePlace(lat, lng) {
 
         if (data.status === 'OK' && data.results?.length) {
           const place = data.results[0];
+          const label = formatReverseAddressLabel(
+            normalizeGoogleAddressObject(place?.address_components),
+            place.formatted_address ?? `${latitude}, ${longitude}`,
+          );
 
           const googleResult = {
             provider: 'google',
-            label: place.formatted_address ?? `${latitude}, ${longitude}`,
+            label,
             lat: latitude,
             lng: longitude,
             address: place,
           };
 
-          setCachedReverseGeocode(cacheKey, googleResult);
+          if (!isCoordinateLikeLabel(googleResult.label)) {
+            setCachedReverseGeocode(cacheKey, googleResult);
+          }
+
           return googleResult;
         }
 
@@ -730,7 +851,10 @@ export async function reverseGeocodePlace(lat, lng) {
   if (nominatimGeocodingAvailable) {
     try {
       const fallbackResult = await fetchFallbackReverseGeocode(latitude, longitude);
-      setCachedReverseGeocode(cacheKey, fallbackResult);
+
+      if (!isCoordinateLikeLabel(fallbackResult.label)) {
+        setCachedReverseGeocode(cacheKey, fallbackResult);
+      }
 
       return fallbackResult;
     } catch (error) {

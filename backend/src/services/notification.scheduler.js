@@ -1,5 +1,6 @@
 import { isSqlServerConfigured } from './database.service.js';
 import { syncDueNotifications } from './notification.service.js';
+import { runTimedOutDispatchSweep } from './ride.service.js';
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
@@ -13,20 +14,32 @@ async function runNotificationSweep() {
 
   sweepPromise = (async () => {
     try {
-      const result = await syncDueNotifications();
+      const [notificationResult, dispatchTimeoutResult] = await Promise.all([
+        syncDueNotifications(),
+        runTimedOutDispatchSweep(),
+      ]);
 
-      if (result.updatedCount > 0) {
+      if (notificationResult.updatedCount > 0) {
         console.log(
-          `[notifications] Đã chuyển ${result.updatedCount} thông báo đến hạn sang trạng thái đã gửi.`,
+          `[notifications] Đã chuyển ${notificationResult.updatedCount} thông báo đến hạn sang trạng thái đã gửi.`,
         );
       }
 
-      return result;
+      if (dispatchTimeoutResult?.processedCount > 0) {
+        console.log(
+          `[dispatch-timeout] Đã xử lý ${dispatchTimeoutResult.processedCount} cuốc quá hạn (${dispatchTimeoutResult.redispatchedCount} điều phối lại, ${dispatchTimeoutResult.cancelledCount} hủy do hết tài xế).`,
+        );
+      }
+
+      return {
+        notificationResult,
+        dispatchTimeoutResult,
+      };
     } catch (error) {
       const message = String(error?.message ?? error);
       const logMessage = error?.code === 'ETIMEOUT' || /Failed to connect to/i.test(message)
-        ? `[notifications] Không thể đồng bộ thông báo đến hạn: ${message}`
-        : '[notifications] Không thể đồng bộ thông báo đến hạn.';
+        ? `[scheduler] Không thể đồng bộ định kỳ: ${message}`
+        : '[scheduler] Không thể đồng bộ định kỳ.';
 
       console.error(logMessage);
       return null;

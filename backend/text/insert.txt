@@ -4,6 +4,10 @@
 -- Chay sau khi da chay script tao schema: backend/text/db.txt
 -- ============================================================================
 
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+GO
+
 -- 1) Quyen
 INSERT INTO dbo.Quyen (MaQuyen, TenQuyen, MoTa)
 SELECT v.MaQuyen, v.TenQuyen, v.MoTa
@@ -28,6 +32,9 @@ FROM (VALUES
 ('TK0002','nguyenvana@smartride.local','123','Q3',N'Nguyen Van A','nguyenvana@smartride.local','0901111111',N'Lien Chieu, Da Nang',N'/uploads/avatars/tx-a.png','1994-05-12',N'Nam',N'HoatDong'),
 ('TK0003','tranvanb@smartride.local','123','Q3',N'Tran Van B','tranvanb@smartride.local','0902222222',N'Hai Chau, Da Nang',N'/uploads/avatars/tx-b.png','1992-09-01',N'Nam',N'HoatDong'),
 ('TK0004','levanc@smartride.local','123','Q3',N'Le Van C','levanc@smartride.local','0903333333',N'Thanh Khe, Da Nang',N'/uploads/avatars/tx-c.png','1991-11-21',N'Nam',N'HoatDong'),
+('TK0005','phamvand@smartride.local','123','Q3',N'Pham Van D','phamvand@smartride.local','0904444444',N'Cam Le, Da Nang',N'/uploads/avatars/tx-d.png','1990-08-18',N'Nam',N'HoatDong'),
+('TK0006','hoangthie@smartride.local','123','Q3',N'Hoang Thi E','hoangthie@smartride.local','0905555555',N'Son Tra, Da Nang',N'/uploads/avatars/tx-e.png','1989-03-27',N'Nu',N'HoatDong'),
+('TK0007','buithif@smartride.local','123','Q3',N'Bui Thi F','buithif@smartride.local','0906666666',N'Ngu Hanh Son, Da Nang',N'/uploads/avatars/tx-f.png','1993-07-09',N'Nu',N'HoatDong'),
 ('TK0101','phamthid@smartride.local','123','Q2',N'Pham Thi D','phamthid@smartride.local','0910000001',N'Hai Chau, Da Nang',N'/uploads/avatars/cus-d.png','1998-02-10',N'Nu',N'HoatDong'),
 ('TK0102','nguyenhie@smartride.local','123','Q2',N'Nguyen H E','nguyenhie@smartride.local','0910000002',N'Ngu Hanh Son, Da Nang',N'/uploads/avatars/cus-e.png','1997-06-15',N'Nam',N'HoatDong'),
 ('TK0103','tranf@smartride.local','123','Q2',N'Tran F','tranf@smartride.local','0910000003',N'Son Tra, Da Nang',N'/uploads/avatars/cus-f.png','2000-09-01',N'Nu',N'HoatDong'),
@@ -47,7 +54,10 @@ SELECT v.MaNH, v.HoVaTen, v.STK, v.NganHang
 FROM (VALUES
 ('NH0001',N'Nguyen Van A','1234567890',N'Vietcombank'),
 ('NH0002',N'Tran Van B','2234567890',N'BIDV'),
-('NH0003',N'Le Van C','3234567890',N'VietinBank')
+('NH0003',N'Le Van C','3234567890',N'VietinBank'),
+('NH0004',N'Pham Van D','4234567890',N'ACB'),
+('NH0005',N'Hoang Thi E','5234567890',N'Techcombank'),
+('NH0006',N'Bui Thi F','6234567890',N'MB Bank')
 ) AS v(MaNH, HoVaTen, STK, NganHang)
 WHERE NOT EXISTS (
     SELECT 1
@@ -56,27 +66,85 @@ WHERE NOT EXISTS (
 );
 GO
 
+-- 3.1) Mo ta cau truc ThongTinXe (JSON luu trong dbo.TaiXe.ThongTinXe)
+-- image: Ảnh đại diện của xe
+-- hinhXe: Ảnh xe (theo giao diện mới)
+-- giayDangKyXe: Ảnh giấy đăng ký xe (theo giao diện mới)
+-- licensePlate: Biển số xe chuẩn hệ thống
+-- bienSoXe: Biển số xe (key tiếng Việt, dùng chính)
+-- name: Tên xe hiển thị
+-- tenXe: Tên xe (key tiếng Việt, dùng chính)
+-- loaiXe: Loại xe (motorbike, car, intercity)
+-- hangXe: Hãng xe
+-- dongXe: Dòng/phiên bản xe
+-- mauXe: Màu xe
+-- namSanXuat: Năm sản xuất
+-- soCho: Số chỗ ngồi
+-- hinhAnhXe.front: Ảnh xe
+-- hinhAnhXe.side: Ảnh giấy đăng ký xe
+-- hinhAnhXe.rear: Ảnh sau xe (legacy, có thể bỏ trống)
+-- identityImages.front: Ảnh CCCD mặt trước
+-- identityImages.back: Ảnh CCCD mặt sau
+-- licenseImages.front: Ảnh bằng lái mặt trước
+-- licenseImages.back: Ảnh bằng lái mặt sau
+
 INSERT INTO dbo.TaiXe (MaTK, Avatar, DiaChi, CCCD, BangLai, LyLich, MaNH, ThongTinXe, LienHeKC, TrangThai)
 SELECT v.MaTK, v.Avatar, v.DiaChi, v.CCCD, v.BangLai, v.LyLich, v.MaNH, v.ThongTinXe, v.LienHeKC, v.TrangThai
 FROM (VALUES
 ('TK0002',N'/uploads/avatars/tx-a.png',N'Lien Chieu, Da Nang','201234567890',
- N'/uploads/drivers/licenses/tx-a-license.png',N'/uploads/drivers/backgrounds/tx-a-lylich.png','NH0001',
- N'{"vehicleImage":"/uploads/drivers/vehicles/tx-a-bike.png","licensePlate":"43A-12345","vehicleName":"Honda Wave"}',
+ N'{"front":"/uploads/drivers/licenses/tx-a-license-front.png","back":"/uploads/drivers/licenses/tx-a-license-back.png"}',N'/uploads/drivers/backgrounds/tx-a-lylich.png','NH0001',
+ N'{"image":"/uploads/drivers/vehicles/tx-a-bike-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-a-bike-side.png","hinhXe":"/uploads/drivers/vehicles/tx-a-bike-front.png","licensePlate":"43A-12345","bienSoXe":"43A-12345","name":"Honda Wave","tenXe":"Honda Wave","loaiXe":"motorbike","hangXe":"Honda","dongXe":"Wave Alpha","mauXe":"Do den","namSanXuat":"2022","soCho":"2","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-a-bike-front.png","side":"/uploads/drivers/vehicles/tx-a-bike-side.png","rear":"/uploads/drivers/vehicles/tx-a-bike-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-a-identity-front.png","back":"/uploads/drivers/identities/tx-a-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-a-license-front.png","back":"/uploads/drivers/licenses/tx-a-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-a-bike-side.png","registrationImage":"/uploads/drivers/vehicles/tx-a-bike-side.png"}',
  N'{"relationship":"Anh","fullName":"Nguyen Van D","phone":"0911111111","address":"Thanh Khe, Da Nang"}',N'HoatDong'),
 ('TK0003',N'/uploads/avatars/tx-b.png',N'Hai Chau, Da Nang','202234567890',
- N'/uploads/drivers/licenses/tx-b-license.png',N'/uploads/drivers/backgrounds/tx-b-lylich.png','NH0002',
- N'{"vehicleImage":"/uploads/drivers/vehicles/tx-b-car.png","licensePlate":"43B-45678","vehicleName":"Toyota Vios"}',
+ N'{"front":"/uploads/drivers/licenses/tx-b-license-front.png","back":"/uploads/drivers/licenses/tx-b-license-back.png"}',N'/uploads/drivers/backgrounds/tx-b-lylich.png','NH0002',
+ N'{"image":"/uploads/drivers/vehicles/tx-b-car-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-b-car-side.png","hinhXe":"/uploads/drivers/vehicles/tx-b-car-front.png","licensePlate":"43B-45678","bienSoXe":"43B-45678","name":"Toyota Vios","tenXe":"Toyota Vios","loaiXe":"car","hangXe":"Toyota","dongXe":"Vios E CVT","mauXe":"Trang","namSanXuat":"2023","soCho":"4","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-b-car-front.png","side":"/uploads/drivers/vehicles/tx-b-car-side.png","rear":"/uploads/drivers/vehicles/tx-b-car-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-b-identity-front.png","back":"/uploads/drivers/identities/tx-b-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-b-license-front.png","back":"/uploads/drivers/licenses/tx-b-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-b-car-side.png","registrationImage":"/uploads/drivers/vehicles/tx-b-car-side.png"}',
  N'{"relationship":"Chi","fullName":"Tran Thi E","phone":"0922222222","address":"Hai Chau, Da Nang"}',N'HoatDong'),
 ('TK0004',N'/uploads/avatars/tx-c.png',N'Thanh Khe, Da Nang','203334567890',
- N'/uploads/drivers/licenses/tx-c-license.png',N'/uploads/drivers/backgrounds/tx-c-lylich.png','NH0003',
- N'{"vehicleImage":"/uploads/drivers/vehicles/tx-c-bike.png","licensePlate":"43C-78901","vehicleName":"Yamaha Sirius"}',
- N'{"relationship":"Em","fullName":"Le Thi F","phone":"0933333333","address":"Lien Chieu, Da Nang"}',N'HoatDong')
+ N'{"front":"/uploads/drivers/licenses/tx-c-license-front.png","back":"/uploads/drivers/licenses/tx-c-license-back.png"}',N'/uploads/drivers/backgrounds/tx-c-lylich.png','NH0003',
+ N'{"image":"/uploads/drivers/vehicles/tx-c-bike-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-c-bike-side.png","hinhXe":"/uploads/drivers/vehicles/tx-c-bike-front.png","licensePlate":"43C-78901","bienSoXe":"43C-78901","name":"Yamaha Sirius","tenXe":"Yamaha Sirius","loaiXe":"motorbike","hangXe":"Yamaha","dongXe":"Sirius FI","mauXe":"Xanh den","namSanXuat":"2021","soCho":"2","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-c-bike-front.png","side":"/uploads/drivers/vehicles/tx-c-bike-side.png","rear":"/uploads/drivers/vehicles/tx-c-bike-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-c-identity-front.png","back":"/uploads/drivers/identities/tx-c-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-c-license-front.png","back":"/uploads/drivers/licenses/tx-c-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-c-bike-side.png","registrationImage":"/uploads/drivers/vehicles/tx-c-bike-side.png"}',
+ N'{"relationship":"Em","fullName":"Le Thi F","phone":"0933333333","address":"Lien Chieu, Da Nang"}',N'HoatDong'),
+('TK0005',N'/uploads/avatars/tx-d.png',N'Cam Le, Da Nang','204445678901',
+ N'{"front":"/uploads/drivers/licenses/tx-d-license-front.png","back":"/uploads/drivers/licenses/tx-d-license-back.png"}',N'/uploads/drivers/backgrounds/tx-d-lylich.png','NH0004',
+ N'{"image":"/uploads/drivers/vehicles/tx-d-car-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-d-car-side.png","hinhXe":"/uploads/drivers/vehicles/tx-d-car-front.png","licensePlate":"43D-24680","bienSoXe":"43D-24680","name":"Hyundai Accent","tenXe":"Hyundai Accent","loaiXe":"car","hangXe":"Hyundai","dongXe":"Accent AT","mauXe":"Bac","namSanXuat":"2022","soCho":"4","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-d-car-front.png","side":"/uploads/drivers/vehicles/tx-d-car-side.png","rear":"/uploads/drivers/vehicles/tx-d-car-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-d-identity-front.png","back":"/uploads/drivers/identities/tx-d-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-d-license-front.png","back":"/uploads/drivers/licenses/tx-d-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-d-car-side.png","registrationImage":"/uploads/drivers/vehicles/tx-d-car-side.png"}',
+ N'{"relationship":"Vo","fullName":"Pham Thi H","phone":"0944444444","address":"Cam Le, Da Nang"}',N'HoatDong'),
+('TK0006',N'/uploads/avatars/tx-e.png',N'Son Tra, Da Nang','205556789012',
+ N'{"front":"/uploads/drivers/licenses/tx-e-license-front.png","back":"/uploads/drivers/licenses/tx-e-license-back.png"}',N'/uploads/drivers/backgrounds/tx-e-lylich.png','NH0005',
+ N'{"image":"/uploads/drivers/vehicles/tx-e-bus-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-e-bus-side.png","hinhXe":"/uploads/drivers/vehicles/tx-e-bus-front.png","licensePlate":"43E-13579","bienSoXe":"43E-13579","name":"Ford Transit","tenXe":"Ford Transit","loaiXe":"intercity","hangXe":"Ford","dongXe":"Transit Premium","mauXe":"Den","namSanXuat":"2021","soCho":"16","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-e-bus-front.png","side":"/uploads/drivers/vehicles/tx-e-bus-side.png","rear":"/uploads/drivers/vehicles/tx-e-bus-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-e-identity-front.png","back":"/uploads/drivers/identities/tx-e-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-e-license-front.png","back":"/uploads/drivers/licenses/tx-e-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-e-bus-side.png","registrationImage":"/uploads/drivers/vehicles/tx-e-bus-side.png"}',
+ N'{"relationship":"Chong","fullName":"Hoang Van K","phone":"0955555555","address":"Son Tra, Da Nang"}',N'HoatDong'),
+('TK0007',N'/uploads/avatars/tx-f.png',N'Ngu Hanh Son, Da Nang','206667890123',
+ N'{"front":"/uploads/drivers/licenses/tx-f-license-front.png","back":"/uploads/drivers/licenses/tx-f-license-back.png"}',N'/uploads/drivers/backgrounds/tx-f-lylich.png','NH0006',
+ N'{"image":"/uploads/drivers/vehicles/tx-f-bus-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-f-bus-side.png","hinhXe":"/uploads/drivers/vehicles/tx-f-bus-front.png","licensePlate":"43F-86420","bienSoXe":"43F-86420","name":"Thaco Bluesky","tenXe":"Thaco Bluesky","loaiXe":"intercity","hangXe":"Thaco","dongXe":"Bluesky 120","mauXe":"Trang xanh","namSanXuat":"2020","soCho":"29","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-f-bus-front.png","side":"/uploads/drivers/vehicles/tx-f-bus-side.png","rear":"/uploads/drivers/vehicles/tx-f-bus-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-f-identity-front.png","back":"/uploads/drivers/identities/tx-f-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-f-license-front.png","back":"/uploads/drivers/licenses/tx-f-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-f-bus-side.png","registrationImage":"/uploads/drivers/vehicles/tx-f-bus-side.png"}',
+ N'{"relationship":"Me","fullName":"Bui Thi L","phone":"0966666666","address":"Ngu Hanh Son, Da Nang"}',N'HoatDong')
 ) AS v(MaTK, Avatar, DiaChi, CCCD, BangLai, LyLich, MaNH, ThongTinXe, LienHeKC, TrangThai)
 WHERE NOT EXISTS (
     SELECT 1
     FROM dbo.TaiXe AS tx
     WHERE tx.CCCD = v.CCCD
 );
+GO
+
+UPDATE tx
+SET
+    tx.Avatar = v.Avatar,
+    tx.DiaChi = v.DiaChi,
+    tx.CCCD = v.CCCD,
+    tx.BangLai = v.BangLai,
+    tx.LyLich = v.LyLich,
+    tx.MaNH = v.MaNH,
+    tx.ThongTinXe = v.ThongTinXe,
+    tx.LienHeKC = v.LienHeKC,
+    tx.TrangThai = v.TrangThai,
+    tx.NgayCapNhat = SYSDATETIME()
+FROM dbo.TaiXe AS tx
+INNER JOIN (VALUES
+('TK0002',N'/uploads/avatars/tx-a.png',N'Lien Chieu, Da Nang','201234567890',N'{"front":"/uploads/drivers/licenses/tx-a-license-front.png","back":"/uploads/drivers/licenses/tx-a-license-back.png"}',N'/uploads/drivers/backgrounds/tx-a-lylich.png','NH0001',N'{"image":"/uploads/drivers/vehicles/tx-a-bike-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-a-bike-side.png","hinhXe":"/uploads/drivers/vehicles/tx-a-bike-front.png","licensePlate":"43A-12345","bienSoXe":"43A-12345","name":"Honda Wave","tenXe":"Honda Wave","loaiXe":"motorbike","hangXe":"Honda","dongXe":"Wave Alpha","mauXe":"Do den","namSanXuat":"2022","soCho":"2","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-a-bike-front.png","side":"/uploads/drivers/vehicles/tx-a-bike-side.png","rear":"/uploads/drivers/vehicles/tx-a-bike-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-a-identity-front.png","back":"/uploads/drivers/identities/tx-a-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-a-license-front.png","back":"/uploads/drivers/licenses/tx-a-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-a-bike-side.png","registrationImage":"/uploads/drivers/vehicles/tx-a-bike-side.png"}',N'{"relationship":"Anh","fullName":"Nguyen Van D","phone":"0911111111","address":"Thanh Khe, Da Nang"}',N'HoatDong'),
+('TK0003',N'/uploads/avatars/tx-b.png',N'Hai Chau, Da Nang','202234567890',N'{"front":"/uploads/drivers/licenses/tx-b-license-front.png","back":"/uploads/drivers/licenses/tx-b-license-back.png"}',N'/uploads/drivers/backgrounds/tx-b-lylich.png','NH0002',N'{"image":"/uploads/drivers/vehicles/tx-b-car-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-b-car-side.png","hinhXe":"/uploads/drivers/vehicles/tx-b-car-front.png","licensePlate":"43B-45678","bienSoXe":"43B-45678","name":"Toyota Vios","tenXe":"Toyota Vios","loaiXe":"car","hangXe":"Toyota","dongXe":"Vios E CVT","mauXe":"Trang","namSanXuat":"2023","soCho":"4","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-b-car-front.png","side":"/uploads/drivers/vehicles/tx-b-car-side.png","rear":"/uploads/drivers/vehicles/tx-b-car-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-b-identity-front.png","back":"/uploads/drivers/identities/tx-b-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-b-license-front.png","back":"/uploads/drivers/licenses/tx-b-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-b-car-side.png","registrationImage":"/uploads/drivers/vehicles/tx-b-car-side.png"}',N'{"relationship":"Chi","fullName":"Tran Thi E","phone":"0922222222","address":"Hai Chau, Da Nang"}',N'HoatDong'),
+('TK0004',N'/uploads/avatars/tx-c.png',N'Thanh Khe, Da Nang','203334567890',N'{"front":"/uploads/drivers/licenses/tx-c-license-front.png","back":"/uploads/drivers/licenses/tx-c-license-back.png"}',N'/uploads/drivers/backgrounds/tx-c-lylich.png','NH0003',N'{"image":"/uploads/drivers/vehicles/tx-c-bike-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-c-bike-side.png","hinhXe":"/uploads/drivers/vehicles/tx-c-bike-front.png","licensePlate":"43C-78901","bienSoXe":"43C-78901","name":"Yamaha Sirius","tenXe":"Yamaha Sirius","loaiXe":"motorbike","hangXe":"Yamaha","dongXe":"Sirius FI","mauXe":"Xanh den","namSanXuat":"2021","soCho":"2","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-c-bike-front.png","side":"/uploads/drivers/vehicles/tx-c-bike-side.png","rear":"/uploads/drivers/vehicles/tx-c-bike-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-c-identity-front.png","back":"/uploads/drivers/identities/tx-c-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-c-license-front.png","back":"/uploads/drivers/licenses/tx-c-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-c-bike-side.png","registrationImage":"/uploads/drivers/vehicles/tx-c-bike-side.png"}',N'{"relationship":"Em","fullName":"Le Thi F","phone":"0933333333","address":"Lien Chieu, Da Nang"}',N'HoatDong'),
+('TK0005',N'/uploads/avatars/tx-d.png',N'Cam Le, Da Nang','204445678901',N'{"front":"/uploads/drivers/licenses/tx-d-license-front.png","back":"/uploads/drivers/licenses/tx-d-license-back.png"}',N'/uploads/drivers/backgrounds/tx-d-lylich.png','NH0004',N'{"image":"/uploads/drivers/vehicles/tx-d-car-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-d-car-side.png","hinhXe":"/uploads/drivers/vehicles/tx-d-car-front.png","licensePlate":"43D-24680","bienSoXe":"43D-24680","name":"Hyundai Accent","tenXe":"Hyundai Accent","loaiXe":"car","hangXe":"Hyundai","dongXe":"Accent AT","mauXe":"Bac","namSanXuat":"2022","soCho":"4","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-d-car-front.png","side":"/uploads/drivers/vehicles/tx-d-car-side.png","rear":"/uploads/drivers/vehicles/tx-d-car-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-d-identity-front.png","back":"/uploads/drivers/identities/tx-d-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-d-license-front.png","back":"/uploads/drivers/licenses/tx-d-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-d-car-side.png","registrationImage":"/uploads/drivers/vehicles/tx-d-car-side.png"}',N'{"relationship":"Vo","fullName":"Pham Thi H","phone":"0944444444","address":"Cam Le, Da Nang"}',N'HoatDong'),
+('TK0006',N'/uploads/avatars/tx-e.png',N'Son Tra, Da Nang','205556789012',N'{"front":"/uploads/drivers/licenses/tx-e-license-front.png","back":"/uploads/drivers/licenses/tx-e-license-back.png"}',N'/uploads/drivers/backgrounds/tx-e-lylich.png','NH0005',N'{"image":"/uploads/drivers/vehicles/tx-e-bus-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-e-bus-side.png","hinhXe":"/uploads/drivers/vehicles/tx-e-bus-front.png","licensePlate":"43E-13579","bienSoXe":"43E-13579","name":"Ford Transit","tenXe":"Ford Transit","loaiXe":"intercity","hangXe":"Ford","dongXe":"Transit Premium","mauXe":"Den","namSanXuat":"2021","soCho":"16","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-e-bus-front.png","side":"/uploads/drivers/vehicles/tx-e-bus-side.png","rear":"/uploads/drivers/vehicles/tx-e-bus-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-e-identity-front.png","back":"/uploads/drivers/identities/tx-e-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-e-license-front.png","back":"/uploads/drivers/licenses/tx-e-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-e-bus-side.png","registrationImage":"/uploads/drivers/vehicles/tx-e-bus-side.png"}',N'{"relationship":"Chong","fullName":"Hoang Van K","phone":"0955555555","address":"Son Tra, Da Nang"}',N'HoatDong'),
+('TK0007',N'/uploads/avatars/tx-f.png',N'Ngu Hanh Son, Da Nang','206667890123',N'{"front":"/uploads/drivers/licenses/tx-f-license-front.png","back":"/uploads/drivers/licenses/tx-f-license-back.png"}',N'/uploads/drivers/backgrounds/tx-f-lylich.png','NH0006',N'{"image":"/uploads/drivers/vehicles/tx-f-bus-front.png","vehicleImage":"/uploads/drivers/vehicles/tx-f-bus-side.png","hinhXe":"/uploads/drivers/vehicles/tx-f-bus-front.png","licensePlate":"43F-86420","bienSoXe":"43F-86420","name":"Thaco Bluesky","tenXe":"Thaco Bluesky","loaiXe":"intercity","hangXe":"Thaco","dongXe":"Bluesky 120","mauXe":"Trang xanh","namSanXuat":"2020","soCho":"29","hinhAnhXe":{"front":"/uploads/drivers/vehicles/tx-f-bus-front.png","side":"/uploads/drivers/vehicles/tx-f-bus-side.png","rear":"/uploads/drivers/vehicles/tx-f-bus-rear.png"},"identityImages":{"front":"/uploads/drivers/identities/tx-f-identity-front.png","back":"/uploads/drivers/identities/tx-f-identity-back.png"},"licenseImages":{"front":"/uploads/drivers/licenses/tx-f-license-front.png","back":"/uploads/drivers/licenses/tx-f-license-back.png"},"giayDangKyXe":"/uploads/drivers/vehicles/tx-f-bus-side.png","registrationImage":"/uploads/drivers/vehicles/tx-f-bus-side.png"}',N'{"relationship":"Me","fullName":"Bui Thi L","phone":"0966666666","address":"Ngu Hanh Son, Da Nang"}',N'HoatDong')
+) AS v(MaTK, Avatar, DiaChi, CCCD, BangLai, LyLich, MaNH, ThongTinXe, LienHeKC, TrangThai)
+    ON v.MaTK = tx.MaTK;
 GO
 
 -- 4) Vi + giao dich vi
@@ -86,6 +154,9 @@ FROM (VALUES
 ('TK0002',320000),
 ('TK0003',150000),
 ('TK0004',50000),
+('TK0005',210000),
+('TK0006',275000),
+('TK0007',190000),
 ('TK0101',250000),
 ('TK0102',120000),
 ('TK0103',80000),
@@ -105,6 +176,9 @@ FROM (VALUES
 ('TK0002','topup',   200000,120000,320000,N'Nap tien vi qua Momo',NULL,NULL,'TX2-TOPUP-001','completed'),
 ('TK0002','transfer',-50000,320000,270000,N'Chuyen tien cho khach quen','0910000001','0901111111','TX2-TRANSFER-001','completed'),
 ('TK0003','topup',   150000,0,150000,N'Nap tien vi qua ngan hang',NULL,NULL,'TX3-TOPUP-001','completed'),
+('TK0005','topup',   210000,0,210000,N'Nap tien vi qua VietQR',NULL,NULL,'TX5-TOPUP-001','completed'),
+('TK0006','topup',   275000,0,275000,N'Nap tien vi qua ngan hang',NULL,NULL,'TX6-TOPUP-001','completed'),
+('TK0007','topup',   190000,0,190000,N'Nap tien vi qua Momo',NULL,NULL,'TX7-TOPUP-001','completed'),
 ('TK0101','topup',   250000,0,250000,N'Khach nap vi de dat xe',NULL,NULL,'CUS1-TOPUP-001','completed'),
 ('TK0102','topup',   120000,0,120000,N'Khach nap vi de dat xe',NULL,NULL,'CUS2-TOPUP-001','completed')
 ) AS v(MaTK, LoaiGiaoDich, SoTien, SoDuTruoc, SoDuSau, MoTa, SoDTNguoiNhan, SoDTNguoiGui, MaThamChieu, TrangThai)
@@ -123,12 +197,12 @@ SELECT v.MaUuDai, v.TenUuDai, v.MoTa, v.LoaiUuDai, v.PhanTramGiam, v.SoTienGiam,
        v.DoiTuong, v.HienThi, v.TrangThai, v.SoLuotDaDung, v.GioiHanLuotDung,
        v.NgayBatDau, v.NgayHetHan, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('SALE10',N'Giam gia chuyen ngan',N'Uu dai giam cho chuyen ngan','percent',10,NULL,50000,0,'customer','public','active',186,500,'2026-06-10','2026-05-30','2026-05-23T08:00:00','2026-05-23T08:00:00'),
+('SALE10',N'Giam gia chuyen ngan',N'Uu dai giam cho chuyen ngan','percent',10,NULL,50000,0,'customer','public','active',186,500,'2026-05-10','2026-06-30','2026-05-23T08:00:00','2026-05-23T08:00:00'),
 ('NEWUSER',N'Uu dai khach moi',N'Ma uu dai danh cho nguoi dung lan dau dat xe','percent',20,NULL,100000,0,'customer','public','active',92,300,'2026-06-10','2026-06-10','2026-05-26T09:00:00','2026-05-26T09:00:00'),
-('SALE15',N'Khuyen mai cuoi tuan',N'Khuyen mai cuoi tuan cho toan bo chuyen xe','percent',15,NULL,50000,0,'customer','public','active',120,450,'2026-06-10','2026-05-15','2026-05-23T11:00:00','2026-05-23T11:00:00'),
-('BIKE20',N'Uu dai xe may',N'Uu dai rieng cho cac chuyen xe may','percent',20,NULL,80000,0,'customer','public','active',68,250,'2026-06-10','2026-06-12','2026-05-21T08:30:00','2026-05-21T08:30:00'),
-('SPRING25',N'Uu dai mua moi',N'Uu dai mua moi danh cho nguoi dung quay lai','percent',25,NULL,75000,0,'customer','public','active',44,200,'2026-06-10','2026-05-22','2026-05-27T07:00:00','2026-05-27T07:00:00'),
-('WEEKEND10',N'Cuoi tuan tiet kiem',N'Khuyen mai dung cho khung gio cuoi tuan','fixed',NULL,20000,NULL,50000,'all','hidden','active',77,400,'2026-06-10','2026-06-01','2026-05-25T08:00:00','2026-05-25T08:00:00'),
+('SALE15',N'Khuyen mai cuoi tuan',N'Khuyen mai cuoi tuan cho toan bo chuyen xe','percent',15,NULL,50000,0,'customer','public','active',120,450,'2026-05-15','2026-06-30','2026-05-23T11:00:00','2026-05-23T11:00:00'),
+('BIKE20',N'Uu dai xe may',N'Uu dai rieng cho cac chuyen xe may','percent',20,NULL,80000,0,'customer','public','active',68,250,'2026-05-20','2026-06-12','2026-05-21T08:30:00','2026-05-21T08:30:00'),
+('SPRING25',N'Uu dai mua moi',N'Uu dai mua moi danh cho nguoi dung quay lai','percent',25,NULL,75000,0,'customer','public','active',44,200,'2026-05-22','2026-06-22','2026-05-27T07:00:00','2026-05-27T07:00:00'),
+('WEEKEND10',N'Cuoi tuan tiet kiem',N'Khuyen mai dung cho khung gio cuoi tuan','fixed',NULL,20000,NULL,50000,'all','hidden','active',77,400,'2026-05-20','2026-06-01','2026-05-25T08:00:00','2026-05-25T08:00:00'),
 ('OLD5',N'Uu dai cu',N'Ma cu da het hieu luc va duoc giu de doi soat','percent',5,NULL,20000,0,'customer','public','expired',210,600,'2026-05-17','2026-06-15','2026-06-14T08:00:00','2026-06-14T08:00:00'),
 ('WELCOME5',N'Ma chao mung',N'Uu dai chao mung cho dot tiep theo','percent',5,NULL,40000,0,'customer','public','scheduled',0,250,'2026-06-05','2026-06-30','2026-05-24T08:00:00','2026-05-24T08:00:00')
 ) AS v(MaUuDai, TenUuDai, MoTa, LoaiUuDai, PhanTramGiam, SoTienGiam, GiaTriToiDa, DonToiThieu,
@@ -416,20 +490,20 @@ SELECT v.MaTT, v.MaChuyen, v.SoTien, v.GiaGoc, v.TienGiam, v.PhanTramPhiNenTang,
 FROM (VALUES
 ('TT2026041001','CX2026041001',36000,42000,6000,30,10800,25200,'SALE10','wallet','momo','MOMO-2026041001','TOKEN-1001','2026-05-15T08:06:00',1,N'DaThanhToan','2026-05-15T08:05:00',N'Thanh toan vi momo','2026-05-15T08:05:00','2026-05-15T08:06:00'),
 ('TT2026041201','CX2026041201',141000,141000,0,30,42300,98700,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-17T16:59:00',N'Thu tien mat','2026-05-17T17:00:00','2026-05-17T17:00:00'),
-('TT2026041401','CX2026041401',46000,56000,10000,30,13800,32200,'SALE10','wallet','momo','MOMO-2026041401','TOKEN-1401','2026-05-19T11:39:00',1,N'DaThanhToan','2026-05-19T11:38:00',N'Thanh toan QR Momo','2026-05-19T11:38:00','2026-05-19T11:39:00'),
+('TT2026041401','CX2026041401',46000,56000,10000,30,13800,32200,'SALE10','wallet','momo','MOMO-2026041401','TOKEN-1401','2026-05-19T11:39:00',1,N'DaThanhToan','2026-05-19T11:38:00',N'Thanh toan vi Momo','2026-05-19T11:38:00','2026-05-19T11:39:00'),
 ('TT2026041601','CX2026041601',102000,122000,20000,30,30600,71400,'NEWUSER','wallet','app_wallet','APPW-2026041601','TOKEN-1601','2026-05-21T10:01:00',1,N'DaThanhToan','2026-05-21T10:00:00',N'Thanh toan vi noi bo','2026-05-21T10:00:00','2026-05-21T10:01:00'),
-('TT2026041801','CX2026041801',610000,640000,30000,30,183000,427000,'SPRING25','wallet','zalopay','ZP-2026041801','TOKEN-1801','2026-05-23T08:06:00',1,N'DaThanhToan','2026-05-23T08:05:00',N'Thanh toan QR ZaloPay','2026-05-23T08:05:00','2026-05-23T08:06:00'),
+('TT2026041801','CX2026041801',610000,640000,30000,30,183000,427000,'SPRING25','wallet','zalopay','ZP-2026041801','TOKEN-1801','2026-05-23T08:06:00',1,N'DaThanhToan','2026-05-23T08:05:00',N'Thanh toan vi ZaloPay','2026-05-23T08:05:00','2026-05-23T08:06:00'),
 ('TT2026042001','CX2026042001',24000,30000,6000,30,7200,16800,'SALE10','cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-25T20:50:00',N'Thu tien mat','2026-05-25T20:50:00','2026-05-25T20:50:00'),
 ('TT2026042201','CX2026042201',149000,149000,0,30,44700,104300,NULL,'wallet','momo','MOMO-2026042201','TOKEN-2201','2026-05-27T13:47:00',1,N'DaThanhToan','2026-05-27T13:46:00',N'Thanh toan vi momo','2026-05-27T13:46:00','2026-05-27T13:47:00'),
-('TT2026042401','CX2026042401',39000,39000,0,30,11700,27300,NULL,'wallet','momo','MOMO-2026042401','TOKEN-2401','2026-05-29T18:59:00',1,N'DaThanhToan','2026-05-29T18:58:00',N'Thanh toan QR Momo','2026-05-29T18:58:00','2026-05-29T18:59:00'),
+('TT2026042401','CX2026042401',39000,39000,0,30,11700,27300,NULL,'wallet','momo','MOMO-2026042401','TOKEN-2401','2026-05-29T18:59:00',1,N'DaThanhToan','2026-05-29T18:58:00',N'Thanh toan vi Momo','2026-05-29T18:58:00','2026-05-29T18:59:00'),
 ('TT2026042501','CX2026042501',42000,50000,8000,30,12600,29400,'SALE10','wallet','momo','MOMO-2026042501','TOKEN-2501','2026-05-30T08:36:00',1,N'DaThanhToan','2026-05-30T08:35:30',N'Thanh toan vi momo','2026-05-30T08:35:00','2026-05-30T08:36:00'),
 ('TT2026042601','CX2026042601',118000,118000,0,30,35400,82600,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-05-31T10:44:00',N'Thu tien mat','2026-05-31T10:45:00','2026-05-31T10:45:00'),
-('TT2026042701','CX2026042701',32000,40000,8000,30,9600,22400,'SALE10','wallet','zalopay','ZP-2026042701','TOKEN-2701','2026-06-01T07:56:00',1,N'DaThanhToan','2026-06-01T07:55:45',N'Thanh toan QR ZaloPay','2026-06-01T07:55:00','2026-06-01T07:56:00'),
+('TT2026042701','CX2026042701',32000,40000,8000,30,9600,22400,'SALE10','wallet','zalopay','ZP-2026042701','TOKEN-2701','2026-06-01T07:56:00',1,N'DaThanhToan','2026-06-01T07:55:45',N'Thanh toan vi ZaloPay','2026-06-01T07:55:00','2026-06-01T07:56:00'),
 ('TT2026042801','CX2026042801',265000,280000,15000,30,79500,185500,'SALE15','wallet','app_wallet','APPW-2026042801','TOKEN-2801','2026-06-02T16:31:00',1,N'DaThanhToan','2026-06-02T16:30:00',N'Thanh toan vi noi bo','2026-06-02T16:30:00','2026-06-02T16:31:00'),
-('TT2026043001','CX2026043001',98000,98000,0,30,29400,68600,NULL,'wallet','momo','MOMO-2026043001','TOKEN-3001','2026-06-04T19:46:00',1,N'DaThanhToan','2026-06-04T19:45:00',N'Thanh toan QR Momo','2026-06-04T19:45:00','2026-06-04T19:46:00'),
+('TT2026043001','CX2026043001',98000,98000,0,30,29400,68600,NULL,'wallet','momo','MOMO-2026043001','TOKEN-3001','2026-06-04T19:46:00',1,N'DaThanhToan','2026-06-04T19:45:00',N'Thanh toan vi Momo','2026-06-04T19:45:00','2026-06-04T19:46:00'),
 ('TT2026050101','CX2026050101',51000,60000,9000,30,15300,35700,'SALE15','wallet','momo','MOMO-2026050101','TOKEN-0101','2026-06-05T09:37:00',1,N'DaThanhToan','2026-06-05T09:36:00',N'Thanh toan vi momo','2026-06-05T09:36:00','2026-06-05T09:37:00'),
 ('TT2026050201','CX2026050201',132000,150000,18000,30,39600,92400,'NEWUSER','wallet','app_wallet','APPW-2026050201','TOKEN-0201','2026-06-06T12:31:00',1,N'DaThanhToan','2026-06-06T12:30:00',N'Thanh toan vi noi bo','2026-06-06T12:30:00','2026-06-06T12:31:00'),
-('TT2026050301','CX2026050301',780000,820000,40000,30,234000,546000,'SPRING25','wallet','momo','MOMO-2026050301','TOKEN-0301','2026-06-07T09:11:00',1,N'DaThanhToan','2026-06-07T09:10:00',N'Thanh toan QR Momo','2026-06-07T09:10:00','2026-06-07T09:11:00'),
+('TT2026050301','CX2026050301',780000,820000,40000,30,234000,546000,'SPRING25','wallet','momo','MOMO-2026050301','TOKEN-0301','2026-06-07T09:11:00',1,N'DaThanhToan','2026-06-07T09:10:00',N'Thanh toan vi Momo','2026-06-07T09:10:00','2026-06-07T09:11:00'),
 ('TT2026050401','CX2026050401',28000,35000,7000,30,8400,19600,'SALE10','cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-06-08T14:34:00',N'Thu tien mat','2026-06-08T14:34:00','2026-06-08T14:34:00'),
 ('TT2026050501','CX2026050501',176000,196000,20000,30,52800,123200,'NEWUSER','wallet','zalopay','ZP-2026050501','TOKEN-0501','2026-06-09T18:06:00',1,N'DaThanhToan','2026-06-09T18:05:00',N'Thanh toan vi ZaloPay','2026-06-09T18:05:00','2026-06-09T18:06:00'),
 ('TT2026050602','CX2026050602',99000,99000,0,30,29700,69300,NULL,'cash',NULL,NULL,NULL,NULL,NULL,N'DaThanhToan','2026-06-10T09:32:00',N'Thu tien mat','2026-06-10T09:32:00','2026-06-10T09:32:00')
@@ -600,7 +674,7 @@ SELECT
     CASE dx.PhuongThucThanhToan
         WHEN 'cash' THEN N'Thu tien mat'
         WHEN 'wallet' THEN N'Thanh toan vi dien tu'
-        ELSE N'Thanh toan QR'
+        ELSE N'Thanh toan vi dien tu'
     END,
     dx.NgayCapNhat, dx.NgayCapNhat
 FROM dbo.DatXe dx
@@ -670,5 +744,6 @@ WHERE NOT EXISTS (
     WHERE vp.Fingerprint = v.Fingerprint
 );
 GO
+
 
 

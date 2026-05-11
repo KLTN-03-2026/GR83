@@ -48,6 +48,7 @@ const routeCache = new Map();
 const LOCATION_CACHE_TTL_MS = 10 * 60 * 1000;
 const locationCache = new Map();
 let googleDirectionsAvailable = Boolean(env.googleMapsServerApiKey);
+let googleDirectionsWarningLogged = false;
 const MAX_RECENT_BOOKINGS = 200;
 const recentBookings = [];
 let rideSchemaPromise = null;
@@ -116,6 +117,8 @@ const DRIVER_DISPATCH_ATTEMPT_STATUS = {
 const DRIVER_DISPATCH_WARNING_REJECT_STREAK = 3;
 const DRIVER_DISPATCH_LOCK_REJECT_STREAK = 5;
 const DRIVER_DISPATCH_LOCK_WINDOW_MS = 60 * 60 * 1000;
+const DRIVER_DISPATCH_RESPONSE_TIMEOUT_MS = 60 * 1000;
+const DRIVER_DISPATCH_FAILURE_REASON = 'Hết thời gian phản hồi và không còn tài xế phù hợp.';
 const PAYMENT_STATUS_LABELS = {
   ChoThuTien: 'Chờ thu tiền',
   ChoXacNhan: 'Chờ xác nhận',
@@ -288,6 +291,70 @@ function stripVietnameseDiacritics(value) {
     .replace(/\p{Diacritic}/gu, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
+}
+
+function normalizeVehicleCategory(value) {
+  const normalizedToken = stripVietnameseDiacritics(value)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+
+  if (!normalizedToken) {
+    return '';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(VEHICLE_CONFIG, normalizedToken)) {
+    return normalizedToken;
+  }
+
+  if (
+    normalizedToken.includes('motorbike')
+    || normalizedToken.includes('xemay')
+    || normalizedToken.includes('bike')
+    || normalizedToken.includes('moto')
+    || normalizedToken.includes('wave')
+    || normalizedToken.includes('sirius')
+    || normalizedToken.includes('airblade')
+    || normalizedToken.includes('exciter')
+    || normalizedToken.includes('winner')
+    || normalizedToken.includes('vario')
+    || normalizedToken.includes('vision')
+    || normalizedToken.includes('shmode')
+  ) {
+    return 'motorbike';
+  }
+
+  if (
+    normalizedToken.includes('intercity')
+    || normalizedToken.includes('lientinh')
+    || normalizedToken.includes('minibus')
+    || normalizedToken.includes('bus')
+    || normalizedToken.includes('16cho')
+    || normalizedToken.includes('30cho')
+    || normalizedToken.includes('transit')
+  ) {
+    return 'intercity';
+  }
+
+  if (
+    normalizedToken.includes('car')
+    || normalizedToken.includes('oto')
+    || normalizedToken.includes('xehoi')
+    || normalizedToken.includes('sedan')
+    || normalizedToken.includes('4cho')
+    || normalizedToken.includes('7cho')
+    || normalizedToken.includes('toyota')
+    || normalizedToken.includes('vios')
+    || normalizedToken.includes('hyundai')
+    || normalizedToken.includes('accent')
+    || normalizedToken.includes('kia')
+    || normalizedToken.includes('morning')
+    || normalizedToken.includes('mazda')
+    || normalizedToken.includes('mitsubishi')
+  ) {
+    return 'car';
+  }
+
+  return '';
 }
 
 function normalizeStatusToken(value) {
@@ -565,11 +632,21 @@ async function getGoogleRouteMetrics(startPosition, endPosition) {
     };
   } catch (error) {
     if (isGoogleDirectionsUnavailableError(error)) {
+      if (!googleDirectionsWarningLogged) {
+        const fallbackReason = normalizeText(error?.message ?? 'Unknown Google Directions error');
+        console.warn(
+          `Google Directions unavailable (reason: ${fallbackReason}). Falling back to OSRM for this runtime.`,
+        );
+        googleDirectionsWarningLogged = true;
+      }
+
       googleDirectionsAvailable = false;
+      return null;
     }
 
     if (error?.name !== 'AbortError') {
-      console.warn('Google Directions unavailable, falling back to OSRM.', error);
+      const fallbackReason = normalizeText(error?.message ?? 'Unknown route provider error');
+      console.warn(`Google Directions request failed, fallback to OSRM. Reason: ${fallbackReason}`);
     }
 
     return null;
@@ -1763,7 +1840,9 @@ async function resolveDriverDispatchState(transaction, driverIdentifier) {
       SELECT TOP 1
         tx.TrangThai AS DriverStatus,
         tx.KhoaTamDen AS TemporaryLockUntil,
-        tx.LyDoKhoaTam AS TemporaryLockReason
+        tx.LyDoKhoaTam AS TemporaryLockReason,
+        JSON_VALUE(tx.ThongTinXe, '$.name') AS DriverVehicleName,
+        JSON_VALUE(tx.ThongTinXe, '$.vehicleType') AS DriverVehicleType
       FROM TaiXe tx
       WHERE
         LOWER(ISNULL(tx.CCCD, '')) = LOWER(@driverIdentifier)
@@ -1778,15 +1857,26 @@ async function resolveDriverDispatchState(transaction, driverIdentifier) {
     driverStatus: normalizeText(row?.DriverStatus),
     temporaryLockUntil: temporaryLockUntil && !Number.isNaN(temporaryLockUntil.getTime()) ? temporaryLockUntil : null,
     temporaryLockReason: normalizeText(row?.TemporaryLockReason),
+    vehicleCategory:
+      normalizeVehicleCategory(row?.DriverVehicleType)
+      || normalizeVehicleCategory(row?.DriverVehicleName),
   };
 }
 
-async function resolveDriverDispatchCandidates(transaction, pickup = {}, excludedDriverSystemAccountIds = []) {
+async function resolveDriverDispatchCandidates(
+  transaction,
+  pickup = {},
+  excludedDriverSystemAccountIds = [],
+  requiredVehicleCategory = '',
+) {
+  const normalizedRequiredVehicleCategory = normalizeVehicleCategory(requiredVehicleCategory);
   const queryResult = await new sql.Request(transaction).query(`
     SELECT
       tx.MaTK AS driverSystemAccountId,
       tx.CCCD AS driverAccountId,
       tx.DiaChi AS driverAddress,
+      JSON_VALUE(tx.ThongTinXe, '$.name') AS driverVehicleName,
+      JSON_VALUE(tx.ThongTinXe, '$.vehicleType') AS driverVehicleType,
       tx.TrangThai AS driverStatus,
       tx.KhoaTamDen AS temporaryLockUntil,
       tx.LyDoKhoaTam AS temporaryLockReason,
@@ -1851,6 +1941,19 @@ async function resolveDriverDispatchCandidates(transaction, pickup = {}, exclude
       label: normalizeText(row.driverAddress),
       position: null,
     });
+
+    const driverVehicleCategory =
+      normalizeVehicleCategory(row.driverVehicleType)
+      || normalizeVehicleCategory(row.driverVehicleName);
+
+    if (!driverVehicleCategory) {
+      return null;
+    }
+
+    if (normalizedRequiredVehicleCategory && driverVehicleCategory !== normalizedRequiredVehicleCategory) {
+      return null;
+    }
+
     const distanceKm = pickupPosition && driverPosition
       ? calculateDistanceKm(pickupPosition, driverPosition)
       : null;
@@ -1861,6 +1964,7 @@ async function resolveDriverDispatchCandidates(transaction, pickup = {}, exclude
       driverName: normalizeText(row.driverName),
       driverPhone: normalizeText(row.driverPhone),
       driverAddress: normalizeText(row.driverAddress),
+      driverVehicleCategory,
       distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(3)) : null,
     };
   }));
@@ -2526,8 +2630,10 @@ function generatePaymentCode(bookingCode) {
 function generateBookingCode() {
   const now = new Date();
   const dateStamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  return `SR-${dateStamp}-${randomSuffix}`;
+  const timeStamp = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}${String(Math.floor(now.getMilliseconds() / 10)).padStart(2, '0')}`;
+  const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+
+  return `SR-${dateStamp}-${timeStamp}-${randomSuffix}`;
 }
 
 function isZaloPayConfigured() {
@@ -3487,6 +3593,7 @@ async function dispatchBookingToNextDriver(transaction, booking, excludedDriverS
     transaction,
     booking?.pickup ?? {},
     Array.from(attemptedDriverIds),
+    booking?.vehicle,
   );
 
   const nextCandidate = candidates[0] ?? null;
@@ -3584,6 +3691,107 @@ async function dispatchBookingToNextDriver(transaction, booking, excludedDriverS
   };
 }
 
+async function createDispatchFailureNotification(transaction, payload = {}) {
+  const customerAccountId = normalizeText(payload.customerAccountId);
+
+  if (!customerAccountId) {
+    return null;
+  }
+
+  const bookingCode = normalizeText(payload.bookingCode);
+  const notificationTitle = bookingCode
+    ? `Không tìm thấy tài xế cho chuyến ${bookingCode}`
+    : 'Không tìm thấy tài xế phù hợp';
+  const notificationContent = payload.message || DRIVER_DISPATCH_FAILURE_REASON;
+  const now = new Date();
+
+  const notificationResult = await new sql.Request(transaction)
+    .input('accountId', sql.VarChar(20), customerAccountId)
+    .input('title', sql.NVarChar(200), notificationTitle)
+    .input('content', sql.NVarChar(sql.MAX), notificationContent)
+    .input('recipient', sql.VarChar(20), 'customer')
+    .input('status', sql.VarChar(20), 'sent')
+    .input('sendAt', sql.DateTime2(0), now)
+    .input('createdAt', sql.DateTime2(0), now)
+    .query(`
+      INSERT INTO dbo.ThongBao
+      (
+        MaTK,
+        TieuDe,
+        NoiDung,
+        NguoiNhan,
+        TrangThai,
+        ThoiGianGuiDuKien,
+        NgayTao,
+        NgayCapNhat
+      )
+      OUTPUT INSERTED.MaTB
+      VALUES
+      (
+        @accountId,
+        @title,
+        @content,
+        @recipient,
+        @status,
+        @sendAt,
+        @createdAt,
+        @createdAt
+      );
+    `);
+
+  return Number(notificationResult.recordset?.[0]?.MaTB ?? 0) || null;
+}
+
+async function markBookingDispatchFailed(transaction, payload = {}) {
+  const bookingCode = normalizeText(payload.bookingCode);
+  const customerAccountId = normalizeText(payload.customerAccountId);
+  const failureReason = normalizeText(payload.failureReason || DRIVER_DISPATCH_FAILURE_REASON);
+
+  if (!bookingCode) {
+    return null;
+  }
+
+  const cancelMeta = {
+    cancelledByRoleCode: 'q1',
+    cancelledByAccountId: 'system',
+    cancelReason: failureReason,
+  };
+
+  await new sql.Request(transaction)
+    .input('bookingCode', sql.VarChar(30), bookingCode)
+    .input('tripStatus', sql.NVarChar(20), 'DaHuy')
+    .input('cancelReasonPayload', sql.NVarChar(500), serializeCancellationMeta(cancelMeta))
+    .query(`
+      UPDATE dbo.DatXe
+      SET
+        TrangThaiChuyen = @tripStatus,
+        TrangThaiThanhToan = N'ThatBai',
+        MaTKTaiXeDuocMoi = NULL,
+        MaTBThongBaoTaiXe = NULL,
+        LyDoHuy = @cancelReasonPayload,
+        NgayCapNhat = SYSDATETIME()
+      WHERE MaChuyen = @bookingCode;
+
+      UPDATE dbo.ThanhToan
+      SET
+        TrangThaiThanhToan = N'ThatBai',
+        GatewayLastReturnCode = COALESCE(GatewayLastReturnCode, -1)
+      WHERE MaChuyen = @bookingCode
+        AND TrangThaiThanhToan <> N'ThatBai';
+    `);
+
+  const notificationId = await createDispatchFailureNotification(transaction, {
+    bookingCode,
+    customerAccountId,
+    message: failureReason,
+  });
+
+  return {
+    cancelMeta,
+    notificationId,
+  };
+}
+
 async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccountId = '', cancelMeta = {}) {
   await ensureRideSchema();
   await ensureDriverSchema();
@@ -3609,10 +3817,12 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       : '';
     const resolvedDriverDispatchState = normalizedDriverAccountId
       ? await resolveDriverDispatchState(transaction, normalizedDriverAccountId)
-      : { driverStatus: '', temporaryLockUntil: null, temporaryLockReason: '' };
+      : { driverStatus: '', temporaryLockUntil: null, temporaryLockReason: '', vehicleCategory: '' };
     const resolvedDriverStatus = resolvedDriverDispatchState.driverStatus;
+    const resolvedDriverVehicleCategory = resolvedDriverDispatchState.vehicleCategory;
     const driverTripId = resolvedDriverCccd || normalizedDriverAccountId;
     const dispatchedDriverSystemAccountId = normalizeText(currentRow.dispatchedDriverSystemAccountId);
+    const requestedVehicleCategory = normalizeVehicleCategory(currentRow.vehicle);
 
     if (!normalizedTripStatus) {
       throw createValidationError('Trang thai chuyen khong hop le.');
@@ -3646,6 +3856,16 @@ async function updateTripStatusInDatabase(bookingCode, tripStatus, driverAccount
       && dispatchedDriverSystemAccountId.toLowerCase() !== normalizedDriverAccountId.toLowerCase()
     ) {
       throw createValidationError('Chuyến này đang được gửi cho tài xế khác.');
+    }
+
+    if (normalizedTripStatus === 'DaNhanChuyen' && requestedVehicleCategory) {
+      if (!resolvedDriverVehicleCategory) {
+        throw createValidationError('Không xác định được loại xe của tài xế. Vui lòng cập nhật hồ sơ xe trước khi nhận chuyến.');
+      }
+
+      if (resolvedDriverVehicleCategory !== requestedVehicleCategory) {
+        throw createValidationError('Loại xe của tài xế không phù hợp với cuốc xe này.');
+      }
     }
 
     if (normalizedTripStatus === 'DaNhanChuyen' && !isDriverReadyStatus(resolvedDriverStatus)) {
@@ -4001,6 +4221,16 @@ async function rejectTripDispatchInDatabase(payload = {}) {
       [driverSystemAccountId],
     );
 
+    let failureMeta = null;
+
+    if (!nextDispatch) {
+      failureMeta = await markBookingDispatchFailed(transaction, {
+        bookingCode,
+        customerAccountId: normalizeText(currentRow?.MaTK ?? recentBooking?.customerAccountId),
+        failureReason: DRIVER_DISPATCH_FAILURE_REASON,
+      });
+    }
+
     await transaction.commit();
 
     if (nextDispatch) {
@@ -4015,6 +4245,32 @@ async function rejectTripDispatchInDatabase(payload = {}) {
         driverAccountId: normalizeText(nextDispatch.driverSystemAccountId),
         driverRequestNotificationId: Number(nextDispatch.notificationId ?? 0) || null,
       }));
+    } else {
+      const updatedBooking = updateRecentBookingTripStatus(
+        bookingCode,
+        'DaHuy',
+        '',
+        failureMeta?.cancelMeta,
+      );
+
+      publishRideEventSafely(
+        buildRideTripStatusUpdatedEvent(
+          bookingCode,
+          buildTripStatusResult(
+            bookingCode,
+            'DaHuy',
+            new Date(),
+            '',
+            failureMeta?.cancelMeta,
+          ),
+          {
+            ...currentRow,
+            TrangThaiChuyen: 'DaHuy',
+            cancelReasonRaw: serializeCancellationMeta(failureMeta?.cancelMeta),
+          },
+          updatedBooking,
+        ),
+      );
     }
 
     return {
@@ -5112,6 +5368,319 @@ export async function rejectTripDispatch(payload = {}) {
     () => rejectTripDispatchInDatabase(payload),
     'rejectTripDispatchInDatabase',
   );
+}
+
+async function processTimedOutDispatchBookingInDatabase(bookingCode, referenceTime = new Date()) {
+  const normalizedBookingCode = normalizeText(bookingCode);
+
+  if (!normalizedBookingCode) {
+    return {
+      processed: false,
+      redispatched: false,
+      cancelled: false,
+    };
+  }
+
+  await ensureRideSchema();
+  await ensureNotificationSchema();
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+  const now = referenceTime instanceof Date ? new Date(referenceTime.getTime()) : new Date(referenceTime);
+
+  if (Number.isNaN(now.getTime())) {
+    throw createValidationError('Thời điểm xử lý timeout điều phối không hợp lệ.');
+  }
+
+  await transaction.begin();
+
+  try {
+    const currentRow = await readTripStatusRow(transaction, normalizedBookingCode);
+
+    if (!currentRow) {
+      await transaction.commit();
+      return {
+        bookingCode: normalizedBookingCode,
+        processed: false,
+        redispatched: false,
+        cancelled: false,
+      };
+    }
+
+    const currentTripStatus = normalizeTripStatus(currentRow.TrangThaiChuyen);
+    const currentDispatchedDriverSystemAccountId = normalizeText(currentRow.dispatchedDriverSystemAccountId);
+
+    if (currentTripStatus !== 'ChoTaiXe') {
+      await transaction.commit();
+      return {
+        bookingCode: normalizedBookingCode,
+        processed: false,
+        redispatched: false,
+        cancelled: false,
+      };
+    }
+
+    const pendingDispatchResult = await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), normalizedBookingCode)
+      .input('driverSystemAccountId', sql.VarChar(20), currentDispatchedDriverSystemAccountId)
+      .query(`
+        SELECT TOP 1
+          dp.MaDieuPhoi,
+          dp.MaTKTaiXe,
+          dp.NgayTao,
+          dp.ThuTuDieuPhoi
+        FROM dbo.DatXeDieuPhoi dp WITH (UPDLOCK, ROWLOCK)
+        WHERE dp.MaChuyen = @bookingCode
+          AND dp.TrangThai = 'pending'
+          AND (
+            NULLIF(@driverSystemAccountId, '') IS NULL
+            OR dp.MaTKTaiXe = @driverSystemAccountId
+          )
+        ORDER BY dp.MaDieuPhoi DESC;
+      `);
+
+    const pendingDispatchRow = pendingDispatchResult.recordset?.[0] ?? null;
+    const timedOutDriverSystemAccountId = normalizeText(
+      pendingDispatchRow?.MaTKTaiXe ?? currentDispatchedDriverSystemAccountId,
+    );
+
+    if (!pendingDispatchRow || !timedOutDriverSystemAccountId) {
+      await transaction.commit();
+      return {
+        bookingCode: normalizedBookingCode,
+        processed: false,
+        redispatched: false,
+        cancelled: false,
+      };
+    }
+
+    const dispatchCreatedAt = pendingDispatchRow?.NgayTao ? new Date(pendingDispatchRow.NgayTao) : null;
+
+    if (!dispatchCreatedAt || Number.isNaN(dispatchCreatedAt.getTime())) {
+      await transaction.commit();
+      return {
+        bookingCode: normalizedBookingCode,
+        processed: false,
+        redispatched: false,
+        cancelled: false,
+      };
+    }
+
+    if ((now.getTime() - dispatchCreatedAt.getTime()) < DRIVER_DISPATCH_RESPONSE_TIMEOUT_MS) {
+      await transaction.commit();
+      return {
+        bookingCode: normalizedBookingCode,
+        processed: false,
+        redispatched: false,
+        cancelled: false,
+      };
+    }
+
+    await new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), normalizedBookingCode)
+      .input('driverSystemAccountId', sql.VarChar(20), timedOutDriverSystemAccountId)
+      .query(`
+        UPDATE dbo.DatXeDieuPhoi
+        SET
+          TrangThai = 'rejected',
+          LyDoTuChoi = N'Timeout quá hạn phản hồi',
+          NgayPhanHoi = SYSDATETIME(),
+          NgayCapNhat = SYSDATETIME()
+        WHERE MaChuyen = @bookingCode
+          AND MaTKTaiXe = @driverSystemAccountId
+          AND TrangThai = 'pending';
+      `);
+
+    const currentNotificationId = Number(currentRow?.driverRequestNotificationId ?? 0);
+
+    if (currentNotificationId > 0) {
+      await new sql.Request(transaction)
+        .input('notificationId', sql.Int, currentNotificationId)
+        .query(`
+          DELETE FROM dbo.ThongBao
+          WHERE MaTB = @notificationId;
+        `);
+    }
+
+    const recentBooking = findRecentBookingByCode(normalizedBookingCode);
+    const nextDispatch = await dispatchBookingToNextDriver(
+      transaction,
+      {
+        ...(recentBooking ?? {}),
+        bookingCode: normalizedBookingCode,
+        vehicle: normalizeText(currentRow?.vehicle ?? recentBooking?.vehicle),
+        customerAccountId: normalizeText(currentRow?.MaTK ?? recentBooking?.customerAccountId),
+        pickup: recentBooking?.pickup ?? {
+          label: normalizeText(currentRow?.pickupLabel),
+          position: null,
+        },
+        dispatchAttemptOrder: Number(currentRow?.dispatchAttemptOrder ?? 0),
+      },
+      [timedOutDriverSystemAccountId],
+    );
+
+    let failureMeta = null;
+
+    if (!nextDispatch) {
+      failureMeta = await markBookingDispatchFailed(transaction, {
+        bookingCode: normalizedBookingCode,
+        customerAccountId: normalizeText(currentRow?.MaTK ?? recentBooking?.customerAccountId),
+        failureReason: DRIVER_DISPATCH_FAILURE_REASON,
+      });
+    }
+
+    await transaction.commit();
+
+    if (nextDispatch) {
+      if (recentBooking) {
+        recentBooking.driverAccountId = normalizeText(nextDispatch.driverSystemAccountId);
+        recentBooking.driverRequestNotificationId = Number(nextDispatch.notificationId ?? 0) || null;
+      }
+
+      publishRideEventSafely(buildRideBookingCreatedEvent({
+        ...(recentBooking ?? { bookingCode: normalizedBookingCode }),
+        bookingCode: normalizedBookingCode,
+        driverAccountId: normalizeText(nextDispatch.driverSystemAccountId),
+        driverRequestNotificationId: Number(nextDispatch.notificationId ?? 0) || null,
+      }));
+
+      return {
+        bookingCode: normalizedBookingCode,
+        processed: true,
+        redispatched: true,
+        cancelled: false,
+        nextDriverAccountId: normalizeText(nextDispatch.driverSystemAccountId),
+      };
+    }
+
+    const updatedBooking = updateRecentBookingTripStatus(
+      normalizedBookingCode,
+      'DaHuy',
+      '',
+      failureMeta?.cancelMeta,
+    );
+
+    publishRideEventSafely(
+      buildRideTripStatusUpdatedEvent(
+        normalizedBookingCode,
+        buildTripStatusResult(
+          normalizedBookingCode,
+          'DaHuy',
+          new Date(),
+          '',
+          failureMeta?.cancelMeta,
+        ),
+        {
+          ...currentRow,
+          TrangThaiChuyen: 'DaHuy',
+          cancelReasonRaw: serializeCancellationMeta(failureMeta?.cancelMeta),
+        },
+        updatedBooking,
+      ),
+    );
+
+    return {
+      bookingCode: normalizedBookingCode,
+      processed: true,
+      redispatched: false,
+      cancelled: true,
+      nextDriverAccountId: '',
+    };
+  } catch (error) {
+    await transaction.rollback().catch(() => {});
+    throw error;
+  }
+}
+
+export async function runTimedOutDispatchSweep(payload = {}) {
+  if (!isSqlServerConfigured()) {
+    return {
+      success: true,
+      message: 'Bỏ qua sweep timeout điều phối vì chưa cấu hình SQL Server.',
+      checkedCount: 0,
+      processedCount: 0,
+      redispatchedCount: 0,
+      cancelledCount: 0,
+      items: [],
+    };
+  }
+
+  await ensureRideSchema();
+
+  const pool = await getSqlServerPool();
+  let referenceTime = null;
+
+  if (payload?.referenceTime !== undefined && payload?.referenceTime !== null) {
+    const referenceTimeSource = payload.referenceTime;
+
+    referenceTime = referenceTimeSource instanceof Date
+      ? new Date(referenceTimeSource.getTime())
+      : new Date(referenceTimeSource);
+  } else {
+    const serverNowResult = await new sql.Request(pool).query('SELECT SYSDATETIME() AS referenceTime;');
+    const serverNowRaw = serverNowResult.recordset?.[0]?.referenceTime;
+
+    referenceTime = serverNowRaw ? new Date(serverNowRaw) : new Date();
+  }
+
+  if (Number.isNaN(referenceTime.getTime())) {
+    throw createValidationError('Thời điểm sweep timeout điều phối không hợp lệ.');
+  }
+  const maxRowsRaw = Number(payload?.maxRows ?? 20);
+  const maxRows = Number.isInteger(maxRowsRaw) && maxRowsRaw > 0 ? Math.min(maxRowsRaw, 200) : 20;
+
+  const timeoutCandidatesResult = await new sql.Request(pool)
+    .input('maxRows', sql.Int, maxRows)
+    .input('referenceTime', sql.DateTime2(0), referenceTime)
+    .input('timeoutMs', sql.Int, DRIVER_DISPATCH_RESPONSE_TIMEOUT_MS)
+    .query(`
+      WITH PendingDispatch AS (
+        SELECT
+          dp.MaChuyen,
+          MAX(dp.NgayTao) AS LatestPendingAt
+        FROM dbo.DatXeDieuPhoi dp
+        WHERE dp.TrangThai = 'pending'
+        GROUP BY dp.MaChuyen
+      )
+      SELECT TOP (@maxRows)
+        dx.MaChuyen AS bookingCode
+      FROM dbo.DatXe dx
+      INNER JOIN PendingDispatch pd
+        ON pd.MaChuyen = dx.MaChuyen
+      WHERE dx.TrangThaiChuyen = N'ChoTaiXe'
+        AND pd.LatestPendingAt <= DATEADD(MILLISECOND, -@timeoutMs, @referenceTime)
+      ORDER BY pd.LatestPendingAt ASC;
+    `);
+
+  const bookingCodes = (timeoutCandidatesResult.recordset ?? [])
+    .map((row) => normalizeText(row?.bookingCode))
+    .filter(Boolean);
+  const items = [];
+
+  for (const bookingCode of bookingCodes) {
+    const result = await runWithSqlDeadlockRetry(
+      () => processTimedOutDispatchBookingInDatabase(bookingCode, referenceTime),
+      'processTimedOutDispatchBookingInDatabase',
+    );
+
+    items.push(result);
+  }
+
+  const processedItems = items.filter((item) => item?.processed);
+  const redispatchedCount = processedItems.filter((item) => item?.redispatched).length;
+  const cancelledCount = processedItems.filter((item) => item?.cancelled).length;
+
+  return {
+    success: true,
+    message: processedItems.length > 0
+      ? 'Đã xử lý timeout điều phối chuyến xe.'
+      : 'Không có cuốc nào cần xử lý timeout điều phối.',
+    checkedCount: bookingCodes.length,
+    processedCount: processedItems.length,
+    redispatchedCount,
+    cancelledCount,
+    items,
+  };
 }
 
 export async function submitRideRating(payload = {}) {
