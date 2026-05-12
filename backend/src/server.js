@@ -18,6 +18,23 @@ const allowedOrigins = String(env.corsOrigin ?? '')
   .map((value) => value.trim())
   .filter(Boolean);
 
+function normalizeOrigin(value) {
+  const trimmed = String(value ?? '').trim();
+
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)) {
+    return trimmed.replace(/\/+$/, '');
+  }
+
+  const isLocalTarget = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmed);
+  return `${isLocalTarget ? 'http' : 'https'}://${trimmed.replace(/\/+$/, '')}`;
+}
+
+const normalizedAllowedOrigins = allowedOrigins.map(normalizeOrigin).filter(Boolean);
+
 function isLocalhostOrigin(origin) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 }
@@ -58,7 +75,7 @@ function createCorsOriginChecker() {
       return;
     }
 
-    if (allowedOrigins.includes(origin) || isLocalhostOrigin(origin) || isPrivateNetworkOrigin(origin)) {
+    if (normalizedAllowedOrigins.includes(origin) || isLocalhostOrigin(origin) || isPrivateNetworkOrigin(origin)) {
       callback(null, true);
       return;
     }

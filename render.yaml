@@ -16,7 +16,7 @@ services:
         fromService:
           type: web
           name: smartride-frontend
-          property: url
+          property: host
 
   - type: web
     name: smartride-frontend
@@ -32,4 +32,4 @@ services:
         fromService:
           type: web
           name: smartride-backend
-          property: url
+          property: host
