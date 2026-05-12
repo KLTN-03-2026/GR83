@@ -1,4 +1,8 @@
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const rawApiBaseUrl = String(import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api').trim();
+const normalizedApiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
+const apiBaseUrl = /\/api$/i.test(normalizedApiBaseUrl)
+  ? normalizedApiBaseUrl
+  : `${normalizedApiBaseUrl}/api`;
 
 export async function request(path, options = {}) {
   let response;
