@@ -62,6 +62,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
   const [query, setQuery] = useState(value);
   const [predictions, setPredictions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResolvingCurrentLocation, setIsResolvingCurrentLocation] = useState(false);
   const [error, setError] = useState('');
   const [mapError, setMapError] = useState('');
   const [mapReady, setMapReady] = useState(false);
@@ -223,6 +224,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     }
 
     setIsLoading(false);
+    setIsResolvingCurrentLocation(false);
     setPredictions([]);
     setError('');
     setMapError('');
@@ -605,11 +607,17 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
       return;
     }
 
+    if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+      setError('Trang web cần chạy trên HTTPS để lấy vị trí hiện tại.');
+      return;
+    }
+
     if (!navigator.geolocation) {
       setError('Trình duyệt không hỗ trợ lấy vị trí hiện tại.');
       return;
     }
 
+    setIsResolvingCurrentLocation(true);
     setIsLoading(true);
     setError('');
     setMapError('');
@@ -621,16 +629,48 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
           lng: position.coords.longitude,
         };
 
+        let resolvedLabel = `Vị trí hiện tại (${formatCoordinates(latLng.lat, latLng.lng)})`;
+
+        try {
+          const reverseResult = await reverseGeocodeCoordinates(latLng.lat, latLng.lng);
+          const address = String(reverseResult?.label ?? '').trim();
+
+          if (address) {
+            resolvedLabel = address;
+          }
+        } catch {
+          // Keep coordinate label when reverse geocode is unavailable.
+        }
+
         focusMapOnLocation(latLng);
+        setIsResolvingCurrentLocation(false);
+        setIsLoading(false);
         commitSelection({
-          label: 'Vị trí hiện tại',
+          label: resolvedLabel,
           position: latLng,
           kind: 'pickup',
           source: 'current-location',
         });
       },
-      () => {
+      (geoError) => {
+        setIsResolvingCurrentLocation(false);
         setIsLoading(false);
+
+        if (geoError?.code === 1) {
+          setError('Bạn đã từ chối quyền vị trí. Hãy cho phép truy cập vị trí trên trình duyệt.');
+          return;
+        }
+
+        if (geoError?.code === 2) {
+          setError('Không thể xác định vị trí hiện tại. Hãy kiểm tra GPS hoặc mạng.');
+          return;
+        }
+
+        if (geoError?.code === 3) {
+          setError('Yêu cầu lấy vị trí bị quá thời gian. Vui lòng thử lại.');
+          return;
+        }
+
         setError('Không thể lấy vị trí hiện tại. Hãy cho phép truy cập vị trí trên trình duyệt.');
       },
       {
@@ -726,6 +766,11 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
   const pickerPlaceholder = mode === 'pickup' ? 'Nhập điểm đón' : 'Nhập địa điểm muốn đến';
   const pickerHint = mode === 'pickup' ? 'Nhấp vào bản đồ hoặc kéo ghim để chọn điểm đón' : 'Nhấp vào bản đồ hoặc kéo ghim để chọn điểm đến';
   const mapLabel = previewLocation?.label ?? selectedLocation?.label ?? '';
+  const statusMessage = isResolvingCurrentLocation
+    ? 'Đang lấy vị trí hiện tại...'
+    : isLoading
+      ? 'Đang tìm kiếm địa điểm...'
+      : error || 'Chọn một gợi ý hoặc nhấp trực tiếp lên bản đồ để chốt vị trí.';
 
   return createPortal(
     <div className="destination-modal" role="dialog" aria-modal="true" aria-label={pickerTitle}>
@@ -772,9 +817,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
             ) : null}
 
             <div className="destination-modal__status">
-              {isLoading
-                ? 'Đang tìm kiếm địa điểm...'
-                : error || 'Chọn một gợi ý hoặc nhấp trực tiếp lên bản đồ để chốt vị trí.'}
+              {statusMessage}
             </div>
 
             <div className="destination-modal__results" role="listbox" aria-label="Kết quả gợi ý">
