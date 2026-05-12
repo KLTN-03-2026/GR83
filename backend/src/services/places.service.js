@@ -21,11 +21,32 @@ const DA_NANG_VIEWBOX = {
 
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const PHOTON_FETCH_TIMEOUT_MS = 2500;
+const NOMINATIM_FETCH_TIMEOUT_MS = 2500;
+const GEOCODER_WARNING_THROTTLE_MS = 10 * 60 * 1000;
 const searchCache = new Map();
 const reverseGeocodeCache = new Map();
+const geocoderWarningTimestamps = new Map();
 let googleGeocodingAvailable = Boolean(env.googleMapsServerApiKey);
 let photonGeocodingAvailable = true;
 let nominatimGeocodingAvailable = true;
+
+function warnGeocoderThrottled(key, message, detail = null) {
+  const now = Date.now();
+  const lastTimestamp = geocoderWarningTimestamps.get(key) ?? 0;
+
+  if (now - lastTimestamp < GEOCODER_WARNING_THROTTLE_MS) {
+    return;
+  }
+
+  geocoderWarningTimestamps.set(key, now);
+
+  if (detail !== null && detail !== undefined) {
+    console.warn(message, detail);
+    return;
+  }
+
+  console.warn(message);
+}
 
 function normalizeCoordinate(value) {
   const coordinate = Number(value);
@@ -223,6 +244,18 @@ function setCachedSearchResult(cacheKey, value) {
     provider: value.provider,
     results: value.results.map((result) => ({ ...result })),
   });
+}
+
+function getSearchCacheKeys(normalizedQuery) {
+  return {
+    googleKey: `google:${normalizedQuery}`,
+    fallbackKey: `fallback:${normalizedQuery}`,
+  };
+}
+
+function setCachedSearchResultForAllModes(cacheKeys, value) {
+  setCachedSearchResult(cacheKeys.googleKey, value);
+  setCachedSearchResult(cacheKeys.fallbackKey, value);
 }
 
 function getCachedReverseGeocode(cacheKey) {
@@ -591,6 +624,7 @@ async function fetchFallbackPredictions(query) {
 
   const response = await fetch(url, {
     headers: NOMINATIM_HEADERS,
+    signal: AbortSignal.timeout(NOMINATIM_FETCH_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -618,6 +652,7 @@ async function fetchStructuredFallbackPredictions(query) {
 
   const response = await fetch(url, {
     headers: NOMINATIM_HEADERS,
+    signal: AbortSignal.timeout(NOMINATIM_FETCH_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -670,6 +705,7 @@ async function fetchFallbackReverseGeocode(lat, lng) {
 
   const response = await fetch(url, {
     headers: NOMINATIM_HEADERS,
+    signal: AbortSignal.timeout(NOMINATIM_FETCH_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -693,9 +729,12 @@ async function fetchFallbackReverseGeocode(lat, lng) {
 export async function searchPlaces(query, options = {}) {
   const trimmedQuery = query.trim();
   const preferFallback = options.preferFallback === true;
-  const cacheKey = `${preferFallback ? 'fallback' : 'google'}:${normalizeCacheKey(trimmedQuery)}`;
+  const normalizedQuery = normalizeCacheKey(trimmedQuery);
+  const cacheKeys = getSearchCacheKeys(normalizedQuery);
+  const cacheKey = preferFallback ? cacheKeys.fallbackKey : cacheKeys.googleKey;
+  const alternateCacheKey = preferFallback ? cacheKeys.googleKey : cacheKeys.fallbackKey;
 
-  const cachedResult = getCachedSearchResult(cacheKey);
+  const cachedResult = getCachedSearchResult(cacheKey) ?? getCachedSearchResult(alternateCacheKey);
 
   if (cachedResult) {
     return cachedResult;
@@ -707,7 +746,7 @@ export async function searchPlaces(query, options = {}) {
       results: [],
     };
 
-    setCachedSearchResult(cacheKey, emptyResult);
+    setCachedSearchResultForAllModes(cacheKeys, emptyResult);
     return emptyResult;
   }
 
@@ -719,14 +758,14 @@ export async function searchPlaces(query, options = {}) {
         results: rankSearchResults(trimmedQuery, pickDaNangResults(googleResults.results)),
       };
 
-      setCachedSearchResult(cacheKey, rankedGoogleResults);
+      setCachedSearchResultForAllModes(cacheKeys, rankedGoogleResults);
       return rankedGoogleResults;
     } catch (error) {
       if (isGoogleGeocoderUnavailableError(error)) {
         googleGeocodingAvailable = false;
       }
 
-      console.warn('Google Places search failed, falling back to Photon/Nominatim.', error);
+      warnGeocoderThrottled('google-search-fallback', 'Google Places search failed, falling back to Photon/Nominatim.', error);
     }
   }
 
@@ -740,17 +779,17 @@ export async function searchPlaces(query, options = {}) {
           results: rankSearchResults(trimmedQuery, pickDaNangResults(photonResults.results)),
         };
 
-        setCachedSearchResult(cacheKey, rankedPhotonResults);
+        setCachedSearchResultForAllModes(cacheKeys, rankedPhotonResults);
         return rankedPhotonResults;
       }
     } catch (error) {
       if (isPhotonGeocoderUnavailableError(error)) {
         if (photonGeocodingAvailable) {
           photonGeocodingAvailable = false;
-          console.warn('Photon geocoder unavailable; using Nominatim fallback for the rest of this session.');
+          warnGeocoderThrottled('photon-unavailable', 'Photon geocoder unavailable; using Nominatim fallback for the rest of this session.');
         }
       } else {
-        console.warn('Photon geocoder failed, continuing with free-text Nominatim fallback.', error?.message ?? error);
+        warnGeocoderThrottled('photon-search-fallback', 'Photon geocoder failed, continuing with free-text Nominatim fallback.', error?.message ?? error);
       }
     }
   }
@@ -765,14 +804,14 @@ export async function searchPlaces(query, options = {}) {
           results: rankSearchResults(trimmedQuery, pickDaNangResults(fallbackResults.results)),
         };
 
-        setCachedSearchResult(cacheKey, fallbackResult);
+        setCachedSearchResultForAllModes(cacheKeys, fallbackResult);
         return fallbackResult;
       }
     } catch (error) {
       if (isNominatimRateLimitedError(error)) {
         nominatimGeocodingAvailable = false;
       } else {
-        console.warn('Free-text Nominatim search failed.', error);
+        warnGeocoderThrottled('nominatim-search-failed', 'Free-text Nominatim search failed.', error);
       }
     }
   }
@@ -782,7 +821,7 @@ export async function searchPlaces(query, options = {}) {
     results: [],
   };
 
-  setCachedSearchResult(cacheKey, fallbackResult);
+  setCachedSearchResultForAllModes(cacheKeys, fallbackResult);
   return fallbackResult;
 }
 
@@ -844,7 +883,7 @@ export async function reverseGeocodePlace(lat, lng) {
         googleGeocodingAvailable = false;
       }
 
-      console.warn('Google reverse geocoding failed, falling back to Nominatim.', error);
+      warnGeocoderThrottled('google-reverse-fallback', 'Google reverse geocoding failed, falling back to Nominatim.', error);
     }
   }
 
@@ -861,7 +900,7 @@ export async function reverseGeocodePlace(lat, lng) {
       if (isNominatimRateLimitedError(error)) {
         nominatimGeocodingAvailable = false;
       } else {
-        console.warn('Nominatim reverse geocoding failed.', error);
+        warnGeocoderThrottled('nominatim-reverse-failed', 'Nominatim reverse geocoding failed.', error);
       }
     }
   }

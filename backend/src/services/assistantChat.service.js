@@ -759,64 +759,147 @@ async function ensureAssistantChatSchema() {
       const pool = await getSqlServerPool();
 
       await pool.request().query(`
-        IF OBJECT_ID(N'dbo.ChatbotConversation', N'U') IS NULL
+        IF OBJECT_ID(N'dbo.ChatbotConversation', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.HoiThoaiChatbot', N'U') IS NULL
+          EXEC sp_rename N'dbo.ChatbotConversation', N'HoiThoaiChatbot';
+        IF OBJECT_ID(N'dbo.ChatbotMessage', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.TinNhanChatbot', N'U') IS NULL
+          EXEC sp_rename N'dbo.ChatbotMessage', N'TinNhanChatbot';
+
+        IF OBJECT_ID(N'dbo.HoiThoaiChatbot', N'U') IS NULL
         BEGIN
-          CREATE TABLE dbo.ChatbotConversation (
-            ConversationId VARCHAR(40) NOT NULL,
-            AccountId VARCHAR(20) NOT NULL,
-            RoleCode VARCHAR(4) NULL,
-            Title NVARCHAR(200) NULL,
-            CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotConversation_CreatedAt DEFAULT SYSUTCDATETIME(),
-            UpdatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotConversation_UpdatedAt DEFAULT SYSUTCDATETIME(),
-            CONSTRAINT PK_ChatbotConversation PRIMARY KEY (ConversationId),
-            CONSTRAINT FK_ChatbotConversation_TaiKhoan FOREIGN KEY (AccountId)
+          CREATE TABLE dbo.HoiThoaiChatbot (
+            MaHoiThoai VARCHAR(40) NOT NULL,
+            MaTK VARCHAR(20) NOT NULL,
+            MaQuyen CHAR(2) NULL,
+            TieuDe NVARCHAR(200) NULL,
+            NgayTao DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotConversation_CreatedAt DEFAULT SYSUTCDATETIME(),
+            NgayCapNhat DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotConversation_UpdatedAt DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT PK_ChatbotConversation PRIMARY KEY (MaHoiThoai),
+            CONSTRAINT FK_ChatbotConversation_TaiKhoan FOREIGN KEY (MaTK)
               REFERENCES dbo.TaiKhoan(MaTK)
-              ON UPDATE CASCADE ON DELETE CASCADE
+              ON UPDATE CASCADE ON DELETE CASCADE,
+            CONSTRAINT FK_ChatbotConversation_Quyen FOREIGN KEY (MaQuyen)
+              REFERENCES dbo.Quyen(MaQuyen)
+              ON UPDATE NO ACTION ON DELETE NO ACTION
           );
         END;
 
-        IF OBJECT_ID(N'dbo.ChatbotMessage', N'U') IS NULL
+        IF OBJECT_ID(N'dbo.TinNhanChatbot', N'U') IS NULL
         BEGIN
-          CREATE TABLE dbo.ChatbotMessage (
-            MessageId BIGINT IDENTITY(1,1) NOT NULL,
-            ConversationId VARCHAR(40) NOT NULL,
-            SenderRole VARCHAR(20) NOT NULL,
-            MessageText NVARCHAR(4000) NOT NULL,
-            Provider VARCHAR(40) NULL,
-            ModelName VARCHAR(120) NULL,
-            CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotMessage_CreatedAt DEFAULT SYSUTCDATETIME(),
-            CONSTRAINT PK_ChatbotMessage PRIMARY KEY (MessageId),
-            CONSTRAINT FK_ChatbotMessage_Conversation FOREIGN KEY (ConversationId)
-              REFERENCES dbo.ChatbotConversation(ConversationId)
+          CREATE TABLE dbo.TinNhanChatbot (
+            MaTinNhan BIGINT IDENTITY(1,1) NOT NULL,
+            MaHoiThoai VARCHAR(40) NOT NULL,
+            VaiTroNguoiGui VARCHAR(20) NOT NULL,
+            NoiDungTinNhan NVARCHAR(4000) NOT NULL,
+            NhaCungCap VARCHAR(40) NULL,
+            TenMoHinh VARCHAR(120) NULL,
+            NgayTao DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotMessage_CreatedAt DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT PK_ChatbotMessage PRIMARY KEY (MaTinNhan),
+            CONSTRAINT FK_ChatbotMessage_Conversation FOREIGN KEY (MaHoiThoai)
+              REFERENCES dbo.HoiThoaiChatbot(MaHoiThoai)
               ON DELETE CASCADE
           );
         END;
 
+        -- Migrate old English column names to Vietnamese names.
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'ConversationId') IS NOT NULL AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'MaHoiThoai') IS NULL
+          EXEC sp_rename N'dbo.HoiThoaiChatbot.ConversationId', N'MaHoiThoai', N'COLUMN';
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'AccountId') IS NOT NULL AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'MaTK') IS NULL
+          EXEC sp_rename N'dbo.HoiThoaiChatbot.AccountId', N'MaTK', N'COLUMN';
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'RoleCode') IS NOT NULL AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'MaQuyen') IS NULL
+          EXEC sp_rename N'dbo.HoiThoaiChatbot.RoleCode', N'MaQuyen', N'COLUMN';
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'Title') IS NOT NULL AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'TieuDe') IS NULL
+          EXEC sp_rename N'dbo.HoiThoaiChatbot.Title', N'TieuDe', N'COLUMN';
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'CreatedAt') IS NOT NULL AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'NgayTao') IS NULL
+          EXEC sp_rename N'dbo.HoiThoaiChatbot.CreatedAt', N'NgayTao', N'COLUMN';
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'UpdatedAt') IS NOT NULL AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'NgayCapNhat') IS NULL
+          EXEC sp_rename N'dbo.HoiThoaiChatbot.UpdatedAt', N'NgayCapNhat', N'COLUMN';
+
+        IF COL_LENGTH(N'dbo.HoiThoaiChatbot', N'MaQuyen') IS NOT NULL
+        BEGIN
+          EXEC sp_executesql N'
+            UPDATE dbo.HoiThoaiChatbot
+            SET MaQuyen = NULL
+            WHERE LTRIM(RTRIM(CONVERT(NVARCHAR(10), MaQuyen))) = N'''';
+
+            UPDATE htc
+            SET htc.MaQuyen = NULL
+            FROM dbo.HoiThoaiChatbot AS htc
+            LEFT JOIN dbo.Quyen AS q
+              ON q.MaQuyen = CONVERT(CHAR(2), htc.MaQuyen)
+            WHERE htc.MaQuyen IS NOT NULL
+              AND q.MaQuyen IS NULL;
+          ';
+
+          IF EXISTS (
+            SELECT 1
+            FROM sys.columns
+            WHERE object_id = OBJECT_ID(N'dbo.HoiThoaiChatbot')
+              AND name = N'MaQuyen'
+              AND (
+                system_type_id <> TYPE_ID(N'char')
+                OR max_length <> 2
+                OR is_nullable <> 1
+              )
+          )
+          BEGIN
+            EXEC sp_executesql N'ALTER TABLE dbo.HoiThoaiChatbot ALTER COLUMN MaQuyen CHAR(2) NULL;';
+          END
+        END;
+
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'MessageId') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'MaTinNhan') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.MessageId', N'MaTinNhan', N'COLUMN';
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'ConversationId') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'MaHoiThoai') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.ConversationId', N'MaHoiThoai', N'COLUMN';
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'SenderRole') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'VaiTroNguoiGui') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.SenderRole', N'VaiTroNguoiGui', N'COLUMN';
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'MessageText') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'NoiDungTinNhan') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.MessageText', N'NoiDungTinNhan', N'COLUMN';
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'Provider') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'NhaCungCap') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.Provider', N'NhaCungCap', N'COLUMN';
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'ModelName') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'TenMoHinh') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.ModelName', N'TenMoHinh', N'COLUMN';
+        IF COL_LENGTH(N'dbo.TinNhanChatbot', N'CreatedAt') IS NOT NULL AND COL_LENGTH(N'dbo.TinNhanChatbot', N'NgayTao') IS NULL
+          EXEC sp_rename N'dbo.TinNhanChatbot.CreatedAt', N'NgayTao', N'COLUMN';
+
         -- Add FK on ChatbotConversation → TaiKhoan if missing (table existed before FK was defined)
-        IF OBJECT_ID(N'dbo.ChatbotConversation', N'U') IS NOT NULL
+        IF OBJECT_ID(N'dbo.HoiThoaiChatbot', N'U') IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM sys.foreign_keys
             WHERE name = N'FK_ChatbotConversation_TaiKhoan'
-              AND parent_object_id = OBJECT_ID(N'dbo.ChatbotConversation')
+              AND parent_object_id = OBJECT_ID(N'dbo.HoiThoaiChatbot')
           )
         BEGIN
-          ALTER TABLE dbo.ChatbotConversation
+          ALTER TABLE dbo.HoiThoaiChatbot
             ADD CONSTRAINT FK_ChatbotConversation_TaiKhoan
-            FOREIGN KEY (AccountId) REFERENCES dbo.TaiKhoan(MaTK)
+            FOREIGN KEY (MaTK) REFERENCES dbo.TaiKhoan(MaTK)
             ON UPDATE CASCADE ON DELETE CASCADE;
         END;
 
+        IF OBJECT_ID(N'dbo.HoiThoaiChatbot', N'U') IS NOT NULL
+          AND COL_LENGTH(N'dbo.HoiThoaiChatbot', N'MaQuyen') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM sys.foreign_keys
+            WHERE name = N'FK_ChatbotConversation_Quyen'
+              AND parent_object_id = OBJECT_ID(N'dbo.HoiThoaiChatbot')
+          )
+        BEGIN
+          ALTER TABLE dbo.HoiThoaiChatbot
+            ADD CONSTRAINT FK_ChatbotConversation_Quyen
+            FOREIGN KEY (MaQuyen) REFERENCES dbo.Quyen(MaQuyen)
+            ON UPDATE NO ACTION ON DELETE NO ACTION;
+        END;
+
         -- Add FK on ChatbotMessage → ChatbotConversation if missing
-        IF OBJECT_ID(N'dbo.ChatbotMessage', N'U') IS NOT NULL
+        IF OBJECT_ID(N'dbo.TinNhanChatbot', N'U') IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM sys.foreign_keys
             WHERE name = N'FK_ChatbotMessage_Conversation'
-              AND parent_object_id = OBJECT_ID(N'dbo.ChatbotMessage')
+              AND parent_object_id = OBJECT_ID(N'dbo.TinNhanChatbot')
           )
         BEGIN
-          ALTER TABLE dbo.ChatbotMessage
+          ALTER TABLE dbo.TinNhanChatbot
             ADD CONSTRAINT FK_ChatbotMessage_Conversation
-            FOREIGN KEY (ConversationId) REFERENCES dbo.ChatbotConversation(ConversationId)
+            FOREIGN KEY (MaHoiThoai) REFERENCES dbo.HoiThoaiChatbot(MaHoiThoai)
             ON DELETE CASCADE;
         END;
 
@@ -824,22 +907,22 @@ async function ensureAssistantChatSchema() {
           SELECT 1
           FROM sys.indexes
           WHERE name = N'IX_ChatbotConversation_Account_UpdatedAt'
-            AND object_id = OBJECT_ID(N'dbo.ChatbotConversation')
+            AND object_id = OBJECT_ID(N'dbo.HoiThoaiChatbot')
         )
         BEGIN
           CREATE INDEX IX_ChatbotConversation_Account_UpdatedAt
-          ON dbo.ChatbotConversation(AccountId, UpdatedAt DESC);
+          ON dbo.HoiThoaiChatbot(MaTK, NgayCapNhat DESC);
         END;
 
         IF NOT EXISTS (
           SELECT 1
           FROM sys.indexes
           WHERE name = N'IX_ChatbotMessage_Conversation_CreatedAt'
-            AND object_id = OBJECT_ID(N'dbo.ChatbotMessage')
+            AND object_id = OBJECT_ID(N'dbo.TinNhanChatbot')
         )
         BEGIN
           CREATE INDEX IX_ChatbotMessage_Conversation_CreatedAt
-          ON dbo.ChatbotMessage(ConversationId, CreatedAt ASC);
+          ON dbo.TinNhanChatbot(MaHoiThoai, NgayTao ASC);
         END;
       `);
     })().catch((error) => {
@@ -857,14 +940,14 @@ async function readConversationById(connection, conversationId) {
     .input('conversationId', sql.VarChar(40), conversationId)
     .query(`
       SELECT TOP 1
-        ConversationId AS conversationId,
-        AccountId AS accountId,
-        RoleCode AS roleCode,
-        Title AS title,
-        CreatedAt AS createdAt,
-        UpdatedAt AS updatedAt
-      FROM dbo.ChatbotConversation
-      WHERE ConversationId = @conversationId;
+        MaHoiThoai AS conversationId,
+        MaTK AS accountId,
+        MaQuyen AS roleCode,
+        TieuDe AS title,
+        NgayTao AS createdAt,
+        NgayCapNhat AS updatedAt
+      FROM dbo.HoiThoaiChatbot
+      WHERE MaHoiThoai = @conversationId;
     `);
 
   return result.recordset?.[0] ?? null;
@@ -897,21 +980,21 @@ async function createConversation(connection, { conversationId, accountId, roleC
     .input('roleCode', sql.VarChar(4), normalizeRoleCode(roleCode) || null)
     .input('title', sql.NVarChar(200), normalizeText(title) || 'Hội thoại mới')
     .query(`
-      INSERT INTO dbo.ChatbotConversation (
-        ConversationId,
-        AccountId,
-        RoleCode,
-        Title,
-        CreatedAt,
-        UpdatedAt
+      INSERT INTO dbo.HoiThoaiChatbot (
+        MaHoiThoai,
+        MaTK,
+        MaQuyen,
+        TieuDe,
+        NgayTao,
+        NgayCapNhat
       )
       OUTPUT
-        inserted.ConversationId AS conversationId,
-        inserted.AccountId AS accountId,
-        inserted.RoleCode AS roleCode,
-        inserted.Title AS title,
-        inserted.CreatedAt AS createdAt,
-        inserted.UpdatedAt AS updatedAt
+        inserted.MaHoiThoai AS conversationId,
+        inserted.MaTK AS accountId,
+        inserted.MaQuyen AS roleCode,
+        inserted.TieuDe AS title,
+        inserted.NgayTao AS createdAt,
+        inserted.NgayCapNhat AS updatedAt
       VALUES (
         @conversationId,
         @accountId,
@@ -937,15 +1020,15 @@ async function findLatestConversationByAccount(connection, accountId) {
     .input('accountId', sql.VarChar(20), normalizedAccountId)
     .query(`
       SELECT TOP 1
-        ConversationId AS conversationId,
-        AccountId AS accountId,
-        RoleCode AS roleCode,
-        Title AS title,
-        CreatedAt AS createdAt,
-        UpdatedAt AS updatedAt
-      FROM dbo.ChatbotConversation
-      WHERE AccountId = @accountId
-      ORDER BY UpdatedAt DESC, CreatedAt DESC;
+        MaHoiThoai AS conversationId,
+        MaTK AS accountId,
+        MaQuyen AS roleCode,
+        TieuDe AS title,
+        NgayTao AS createdAt,
+        NgayCapNhat AS updatedAt
+      FROM dbo.HoiThoaiChatbot
+      WHERE MaTK = @accountId
+      ORDER BY NgayCapNhat DESC, NgayTao DESC;
     `);
 
   return result.recordset?.[0] ?? null;
@@ -998,18 +1081,18 @@ async function listConversationMessages(connection, conversationId, limit = CHAT
       SELECT *
       FROM (
         SELECT TOP (@limit)
-          MessageId AS messageId,
-          ConversationId AS conversationId,
-          SenderRole AS senderRole,
-          MessageText AS messageText,
-          Provider AS provider,
-          ModelName AS modelName,
-          CreatedAt AS createdAt
-        FROM dbo.ChatbotMessage
-        WHERE ConversationId = @conversationId
-        ORDER BY CreatedAt DESC, MessageId DESC
+          MaTinNhan AS messageId,
+          MaHoiThoai AS conversationId,
+          VaiTroNguoiGui AS senderRole,
+          NoiDungTinNhan AS messageText,
+          NhaCungCap AS provider,
+          TenMoHinh AS modelName,
+          NgayTao AS createdAt
+        FROM dbo.TinNhanChatbot
+        WHERE MaHoiThoai = @conversationId
+        ORDER BY NgayTao DESC, MaTinNhan DESC
       ) AS recentMessages
-      ORDER BY CreatedAt ASC, MessageId ASC;
+      ORDER BY NgayTao ASC, MaTinNhan ASC;
     `);
 
   return (result.recordset ?? [])
@@ -1046,20 +1129,20 @@ async function listConversations(connection, {
     .input('limit', sql.Int, effectiveLimit)
     .query(`
       SELECT TOP (@limit)
-        ConversationId AS conversationId,
-        AccountId AS accountId,
-        RoleCode AS roleCode,
-        Title AS title,
-        CreatedAt AS createdAt,
-        UpdatedAt AS updatedAt
-      FROM dbo.ChatbotConversation
-      WHERE AccountId = @accountId
+        MaHoiThoai AS conversationId,
+        MaTK AS accountId,
+        MaQuyen AS roleCode,
+        TieuDe AS title,
+        NgayTao AS createdAt,
+        NgayCapNhat AS updatedAt
+      FROM dbo.HoiThoaiChatbot
+      WHERE MaTK = @accountId
         AND (
           @keyword IS NULL
           OR LTRIM(RTRIM(@keyword)) = ''
-          OR LOWER(ISNULL(Title, '')) LIKE N'%' + LOWER(@keyword) + N'%'
+          OR LOWER(ISNULL(TieuDe, '')) LIKE N'%' + LOWER(@keyword) + N'%'
         )
-      ORDER BY UpdatedAt DESC, CreatedAt DESC;
+      ORDER BY NgayCapNhat DESC, NgayTao DESC;
     `);
 
   return (result.recordset ?? [])
@@ -1073,18 +1156,18 @@ async function updateConversationTitle(connection, conversationId, title) {
     .input('conversationId', sql.VarChar(40), conversationId)
     .input('title', sql.NVarChar(200), normalizeText(title) || 'Hội thoại mới')
     .query(`
-      UPDATE dbo.ChatbotConversation
+      UPDATE dbo.HoiThoaiChatbot
       SET
-        Title = @title,
-        UpdatedAt = SYSUTCDATETIME()
+        TieuDe = @title,
+        NgayCapNhat = SYSUTCDATETIME()
       OUTPUT
-        inserted.ConversationId AS conversationId,
-        inserted.AccountId AS accountId,
-        inserted.RoleCode AS roleCode,
-        inserted.Title AS title,
-        inserted.CreatedAt AS createdAt,
-        inserted.UpdatedAt AS updatedAt
-      WHERE ConversationId = @conversationId;
+        inserted.MaHoiThoai AS conversationId,
+        inserted.MaTK AS accountId,
+        inserted.MaQuyen AS roleCode,
+        inserted.TieuDe AS title,
+        inserted.NgayTao AS createdAt,
+        inserted.NgayCapNhat AS updatedAt
+      WHERE MaHoiThoai = @conversationId;
     `);
 
   return result.recordset?.[0] ?? null;
@@ -1095,9 +1178,9 @@ async function removeConversation(connection, conversationId) {
     .request()
     .input('conversationId', sql.VarChar(40), conversationId)
     .query(`
-      DELETE FROM dbo.ChatbotConversation
-      OUTPUT deleted.ConversationId AS conversationId
-      WHERE ConversationId = @conversationId;
+      DELETE FROM dbo.HoiThoaiChatbot
+      OUTPUT deleted.MaHoiThoai AS conversationId
+      WHERE MaHoiThoai = @conversationId;
     `);
 
   return normalizeText(result.recordset?.[0]?.conversationId);
@@ -1118,22 +1201,22 @@ async function insertConversationMessage(connection, {
     .input('provider', sql.VarChar(40), normalizeText(provider) || null)
     .input('modelName', sql.VarChar(120), normalizeText(model) || null)
     .query(`
-      INSERT INTO dbo.ChatbotMessage (
-        ConversationId,
-        SenderRole,
-        MessageText,
-        Provider,
-        ModelName,
-        CreatedAt
+      INSERT INTO dbo.TinNhanChatbot (
+        MaHoiThoai,
+        VaiTroNguoiGui,
+        NoiDungTinNhan,
+        NhaCungCap,
+        TenMoHinh,
+        NgayTao
       )
       OUTPUT
-        inserted.MessageId AS messageId,
-        inserted.ConversationId AS conversationId,
-        inserted.SenderRole AS senderRole,
-        inserted.MessageText AS messageText,
-        inserted.Provider AS provider,
-        inserted.ModelName AS modelName,
-        inserted.CreatedAt AS createdAt
+        inserted.MaTinNhan AS messageId,
+        inserted.MaHoiThoai AS conversationId,
+        inserted.VaiTroNguoiGui AS senderRole,
+        inserted.NoiDungTinNhan AS messageText,
+        inserted.NhaCungCap AS provider,
+        inserted.TenMoHinh AS modelName,
+        inserted.NgayTao AS createdAt
       VALUES (
         @conversationId,
         @senderRole,
@@ -1143,15 +1226,15 @@ async function insertConversationMessage(connection, {
         SYSUTCDATETIME()
       );
 
-      UPDATE dbo.ChatbotConversation
+      UPDATE dbo.HoiThoaiChatbot
       SET
-        UpdatedAt = SYSUTCDATETIME(),
-        Title = CASE
-          WHEN @senderRole = 'user' AND (Title IS NULL OR LTRIM(RTRIM(Title)) = '' OR Title = N'Hội thoại mới')
+        NgayCapNhat = SYSUTCDATETIME(),
+        TieuDe = CASE
+          WHEN @senderRole = 'user' AND (TieuDe IS NULL OR LTRIM(RTRIM(TieuDe)) = '' OR TieuDe = N'Hội thoại mới')
             THEN LEFT(@messageText, 120)
-          ELSE Title
+          ELSE TieuDe
         END
-      WHERE ConversationId = @conversationId;
+      WHERE MaHoiThoai = @conversationId;
     `);
 
   return buildChatMessageResponse(insertResult.recordset?.[0] ?? null);

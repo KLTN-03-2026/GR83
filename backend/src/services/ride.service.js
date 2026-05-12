@@ -46,6 +46,8 @@ const ROUTING_SERVICE_URL = 'https://router.project-osrm.org/route/v1/driving';
 const ROUTE_CACHE_TTL_MS = 5 * 60 * 1000;
 const routeCache = new Map();
 const LOCATION_CACHE_TTL_MS = 10 * 60 * 1000;
+const RIDE_HISTORY_LOCATION_LOOKUP_TIMEOUT_MS = 700;
+const RIDE_HISTORY_FALLBACK_MAX_ROWS = 4;
 const locationCache = new Map();
 let googleDirectionsAvailable = Boolean(env.googleMapsServerApiKey);
 let googleDirectionsWarningLogged = false;
@@ -796,6 +798,31 @@ async function resolveLocationPosition(location) {
   return null;
 }
 
+async function resolveLocationPositionWithTimeout(location, timeoutMs = RIDE_HISTORY_LOCATION_LOOKUP_TIMEOUT_MS) {
+  const effectiveTimeoutMs = Number(timeoutMs);
+
+  if (!Number.isFinite(effectiveTimeoutMs) || effectiveTimeoutMs <= 0) {
+    return resolveLocationPosition(location);
+  }
+
+  let timeoutId = null;
+
+  try {
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve(null), effectiveTimeoutMs);
+    });
+
+    return await Promise.race([
+      resolveLocationPosition(location),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function createRouteCacheKey(startPosition, endPosition) {
   return [startPosition, endPosition]
     .map((position) => `${position.lat.toFixed(5)},${position.lng.toFixed(5)}`)
@@ -1305,6 +1332,10 @@ export async function ensureRideSchema() {
               REFERENCES dbo.TaiKhoan(MaTK)
               ON UPDATE NO ACTION
               ON DELETE NO ACTION,
+            CONSTRAINT FK_DatXeDieuPhoi_TaiXe FOREIGN KEY (MaTX)
+              REFERENCES dbo.TaiXe(CCCD)
+              ON UPDATE NO ACTION
+              ON DELETE SET NULL,
             CONSTRAINT CK_DatXeDieuPhoi_TrangThai CHECK (TrangThai IN ('pending', 'rejected', 'accepted')),
             CONSTRAINT CK_DatXeDieuPhoi_ThuTu CHECK (ThuTuDieuPhoi > 0)
           );
@@ -1422,6 +1453,53 @@ export async function ensureRideSchema() {
           )
         BEGIN
           EXEC sp_executesql N'ALTER TABLE dbo.DatXeDieuPhoi ADD CONSTRAINT DF_DatXeDieuPhoi_NgayCapNhat DEFAULT SYSDATETIME() FOR NgayCapNhat;';
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'MaTX') IS NOT NULL
+        BEGIN
+          EXEC sp_executesql N'
+            UPDATE dp
+            SET dp.MaTX = tx.CCCD
+            FROM dbo.DatXeDieuPhoi AS dp
+            INNER JOIN dbo.TaiXe AS tx
+              ON tx.MaTK = dp.MaTKTaiXe
+            WHERE dp.MaTX IS NULL OR LTRIM(RTRIM(dp.MaTX)) = '''';
+          ';
+
+          EXEC sp_executesql N'
+            UPDATE dp
+            SET dp.MaTX = NULL
+            FROM dbo.DatXeDieuPhoi AS dp
+            LEFT JOIN dbo.TaiXe AS tx
+              ON tx.CCCD = dp.MaTX
+            WHERE dp.MaTX IS NOT NULL
+              AND tx.CCCD IS NULL;
+          ';
+        END
+
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'MaTX') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sys.foreign_key_columns AS fkc
+            INNER JOIN sys.columns AS pc
+              ON pc.object_id = fkc.parent_object_id
+             AND pc.column_id = fkc.parent_column_id
+            INNER JOIN sys.columns AS rc
+              ON rc.object_id = fkc.referenced_object_id
+             AND rc.column_id = fkc.referenced_column_id
+            WHERE fkc.parent_object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+              AND fkc.referenced_object_id = OBJECT_ID(N'dbo.TaiXe')
+              AND pc.name = N'MaTX'
+              AND rc.name = N'CCCD'
+          )
+        BEGIN
+          EXEC sp_executesql N'
+            ALTER TABLE dbo.DatXeDieuPhoi
+            ADD CONSTRAINT FK_DatXeDieuPhoi_TaiXe FOREIGN KEY (MaTX)
+              REFERENCES dbo.TaiXe(CCCD)
+              ON UPDATE NO ACTION
+              ON DELETE SET NULL;
+          ';
         END
       `);
 
@@ -1677,28 +1755,62 @@ export async function ensureRideSchema() {
       `);
 
       await pool.request().query(`
-        IF OBJECT_ID(N'dbo.PaymentGatewayAudit', N'U') IS NULL
+        IF OBJECT_ID(N'dbo.PaymentGatewayAudit', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.NhatKyCongThanhToan', N'U') IS NULL
+          EXEC sp_rename N'dbo.PaymentGatewayAudit', N'NhatKyCongThanhToan';
+
+        IF OBJECT_ID(N'dbo.NhatKyCongThanhToan', N'U') IS NULL
         BEGIN
-          CREATE TABLE dbo.PaymentGatewayAudit
+          CREATE TABLE dbo.NhatKyCongThanhToan
           (
-            AuditId BIGINT IDENTITY(1,1) NOT NULL,
-            PaymentCode VARCHAR(30) NULL,
-            BookingCode VARCHAR(30) NULL,
-            Provider VARCHAR(20) NOT NULL,
-            EventType VARCHAR(40) NOT NULL,
-            Source VARCHAR(30) NOT NULL,
-            VerifyStatus VARCHAR(20) NOT NULL,
-            RequestMac VARCHAR(128) NULL,
-            ComputedMac VARCHAR(128) NULL,
-            AppTransId VARCHAR(80) NULL,
-            GatewayReturnCode INT NULL,
-            Message NVARCHAR(500) NULL,
-            RequestPayload NVARCHAR(MAX) NULL,
-            ResponsePayload NVARCHAR(MAX) NULL,
-            CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_PaymentGatewayAudit_CreatedAt DEFAULT SYSUTCDATETIME(),
-            CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (AuditId)
+            MaNhatKy BIGINT IDENTITY(1,1) NOT NULL,
+            MaThanhToan VARCHAR(30) NULL,
+            MaChuyen VARCHAR(30) NULL,
+            NhaCungCap VARCHAR(20) NOT NULL,
+            LoaiSuKien VARCHAR(40) NOT NULL,
+            Nguon VARCHAR(30) NOT NULL,
+            TrangThaiXacThuc VARCHAR(20) NOT NULL,
+            MacYeuCau VARCHAR(128) NULL,
+            MacTinhToan VARCHAR(128) NULL,
+            MaGiaoDichNCC VARCHAR(80) NULL,
+            MaPhanHoiNCC INT NULL,
+            NoiDung NVARCHAR(500) NULL,
+            DuLieuYeuCau NVARCHAR(MAX) NULL,
+            DuLieuPhanHoi NVARCHAR(MAX) NULL,
+            NgayTao DATETIME2(0) NOT NULL CONSTRAINT DF_PaymentGatewayAudit_CreatedAt DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (MaNhatKy)
           );
         END
+
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'AuditId') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MaNhatKy') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.AuditId', N'MaNhatKy', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'PaymentCode') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MaThanhToan') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.PaymentCode', N'MaThanhToan', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'BookingCode') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MaChuyen') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.BookingCode', N'MaChuyen', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'Provider') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'NhaCungCap') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.Provider', N'NhaCungCap', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'EventType') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'LoaiSuKien') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.EventType', N'LoaiSuKien', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'Source') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'Nguon') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.Source', N'Nguon', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'VerifyStatus') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'TrangThaiXacThuc') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.VerifyStatus', N'TrangThaiXacThuc', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'RequestMac') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MacYeuCau') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.RequestMac', N'MacYeuCau', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'ComputedMac') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MacTinhToan') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.ComputedMac', N'MacTinhToan', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'AppTransId') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MaGiaoDichNCC') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.AppTransId', N'MaGiaoDichNCC', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'GatewayReturnCode') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'MaPhanHoiNCC') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.GatewayReturnCode', N'MaPhanHoiNCC', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'Message') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'NoiDung') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.Message', N'NoiDung', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'RequestPayload') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'DuLieuYeuCau') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.RequestPayload', N'DuLieuYeuCau', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'ResponsePayload') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'DuLieuPhanHoi') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.ResponsePayload', N'DuLieuPhanHoi', N'COLUMN';
+        IF COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'CreatedAt') IS NOT NULL AND COL_LENGTH(N'dbo.NhatKyCongThanhToan', N'NgayTao') IS NULL
+          EXEC sp_rename N'dbo.NhatKyCongThanhToan.CreatedAt', N'NgayTao', N'COLUMN';
       `);
 
       await pool.request().query(`
@@ -1706,11 +1818,11 @@ export async function ensureRideSchema() {
           SELECT 1
           FROM sys.indexes
           WHERE name = N'IX_PaymentGatewayAudit_BookingCode_CreatedAt'
-            AND object_id = OBJECT_ID(N'dbo.PaymentGatewayAudit')
+            AND object_id = OBJECT_ID(N'dbo.NhatKyCongThanhToan')
         )
         BEGIN
           CREATE INDEX IX_PaymentGatewayAudit_BookingCode_CreatedAt
-          ON dbo.PaymentGatewayAudit(BookingCode, CreatedAt DESC);
+          ON dbo.NhatKyCongThanhToan(MaChuyen, NgayTao DESC);
         END
 
         IF NOT EXISTS (
@@ -2720,22 +2832,22 @@ async function logPaymentGatewayAudit(payload = {}) {
       .input('requestPayload', sql.NVarChar(sql.MAX), payload.requestPayload ? JSON.stringify(payload.requestPayload) : null)
       .input('responsePayload', sql.NVarChar(sql.MAX), payload.responsePayload ? JSON.stringify(payload.responsePayload) : null)
       .query(`
-        INSERT INTO dbo.PaymentGatewayAudit
+        INSERT INTO dbo.NhatKyCongThanhToan
         (
-          PaymentCode,
-          BookingCode,
-          Provider,
-          EventType,
-          Source,
-          VerifyStatus,
-          RequestMac,
-          ComputedMac,
-          AppTransId,
-          GatewayReturnCode,
-          Message,
-          RequestPayload,
-          ResponsePayload,
-          CreatedAt
+          MaThanhToan,
+          MaChuyen,
+          NhaCungCap,
+          LoaiSuKien,
+          Nguon,
+          TrangThaiXacThuc,
+          MacYeuCau,
+          MacTinhToan,
+          MaGiaoDichNCC,
+          MaPhanHoiNCC,
+          NoiDung,
+          DuLieuYeuCau,
+          DuLieuPhanHoi,
+          NgayTao
         )
         VALUES
         (
@@ -5162,6 +5274,9 @@ function buildTripHistoryQuery(roleCode) {
 
 async function enrichTripHistoryRow(row, account = null, options = {}) {
   const shouldResolveLocationFallback = options?.resolveLocationFallback !== false;
+  const resolveLocation = typeof options?.resolveLocation === 'function'
+    ? options.resolveLocation
+    : (location) => resolveLocationPositionWithTimeout(location, options?.resolveLocationTimeoutMs);
   const pickupLabel = normalizeText(row.pickupLabel);
   const destinationLabel = normalizeText(row.destinationLabel);
   const storedRouteGeometry = normalizeStoredRouteGeometry(row.routeGeometryJson);
@@ -5172,8 +5287,8 @@ async function enrichTripHistoryRow(row, account = null, options = {}) {
 
   if (!storedRouteGeometry && shouldResolveLocationFallback) {
     const [pickupPositionRaw, destinationPositionRaw] = await Promise.all([
-      pickupLabel ? resolveLocationPosition({ label: pickupLabel }) : Promise.resolve(null),
-      destinationLabel ? resolveLocationPosition({ label: destinationLabel }) : Promise.resolve(null),
+      pickupLabel ? resolveLocation({ label: pickupLabel }) : Promise.resolve(null),
+      destinationLabel ? resolveLocation({ label: destinationLabel }) : Promise.resolve(null),
     ]);
 
     pickupPosition = pickupPositionRaw;
@@ -5953,9 +6068,35 @@ export async function getTripHistory(payload = {}) {
   // Admin dashboards only need aggregates and key metadata. Skipping geocoder fallback
   // avoids heavy external lookups that can stall large history requests.
   const shouldResolveLocationFallback = roleCode !== 'Q1' && !isAdminDashboardMode;
+  const fallbackRowLimit = shouldResolveLocationFallback
+    ? Math.max(0, Math.min(limit, RIDE_HISTORY_FALLBACK_MAX_ROWS))
+    : 0;
+  const locationResolveMemo = new Map();
+  const resolveLocationForHistory = async (location) => {
+    const label = normalizeText(location?.label);
+
+    if (!label) {
+      return null;
+    }
+
+    const cacheKey = normalizeLocationCacheKey(label);
+
+    if (!locationResolveMemo.has(cacheKey)) {
+      locationResolveMemo.set(
+        cacheKey,
+        resolveLocationPositionWithTimeout({ label }, RIDE_HISTORY_LOCATION_LOOKUP_TIMEOUT_MS).catch(() => null),
+      );
+    }
+
+    return locationResolveMemo.get(cacheKey);
+  };
   const enrichStartedAt = Date.now();
   const items = await Promise.all(
-    rows.slice(0, limit).map((row) => enrichTripHistoryRow(row, resolvedAccount, { resolveLocationFallback: shouldResolveLocationFallback })),
+    rows.slice(0, limit).map((row, index) => enrichTripHistoryRow(row, resolvedAccount, {
+      resolveLocationFallback: shouldResolveLocationFallback && index < fallbackRowLimit,
+      resolveLocation: resolveLocationForHistory,
+      resolveLocationTimeoutMs: RIDE_HISTORY_LOCATION_LOOKUP_TIMEOUT_MS,
+    })),
   );
   const enrichDurationMs = Date.now() - enrichStartedAt;
   const totalDurationMs = Date.now() - traceStartedAt;

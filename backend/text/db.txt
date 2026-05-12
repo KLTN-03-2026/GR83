@@ -46,6 +46,14 @@ IF OBJECT_ID(N'dbo.KhieuNaiHoTro',              N'U') IS NOT NULL DROP TABLE dbo
 GO
 IF OBJECT_ID(N'dbo.TinNhan',                    N'U') IS NOT NULL DROP TABLE dbo.TinNhan;
 GO
+-- Drop new Vietnamese table names (if exist from migration)
+IF OBJECT_ID(N'dbo.TinNhanChatbot',             N'U') IS NOT NULL DROP TABLE dbo.TinNhanChatbot;
+GO
+IF OBJECT_ID(N'dbo.HoiThoaiChatbot',            N'U') IS NOT NULL DROP TABLE dbo.HoiThoaiChatbot;
+GO
+IF OBJECT_ID(N'dbo.NhatKyCongThanhToan',        N'U') IS NOT NULL DROP TABLE dbo.NhatKyCongThanhToan;
+GO
+-- Drop old English table names (for backward compatibility)
 IF OBJECT_ID(N'dbo.ChatbotMessage',             N'U') IS NOT NULL DROP TABLE dbo.ChatbotMessage;
 GO
 IF OBJECT_ID(N'dbo.ChatbotConversation',        N'U') IS NOT NULL DROP TABLE dbo.ChatbotConversation;
@@ -459,11 +467,13 @@ GO
 -- 7) DatXeDieuPhoi — Nhật ký điều phối tài xế cho từng chuyến
 --    MaChuyen  (FK) → DatXe.MaChuyen
 --    MaTKTaiXe (FK) → TaiKhoan.MaTK
+--    MaTX      (FK) → TaiXe.CCCD
 CREATE TABLE dbo.DatXeDieuPhoi
 (
     MaDieuPhoi      INT            IDENTITY(1,1) NOT NULL,
     MaChuyen        VARCHAR(30)    NOT NULL,           -- FK → DatXe.MaChuyen
     MaTKTaiXe       VARCHAR(20)    NOT NULL,           -- FK → TaiKhoan.MaTK
+    MaTX            VARCHAR(20)    NULL,               -- FK → TaiXe.CCCD
     ThuTuDieuPhoi   INT            NOT NULL,           -- thứ tự lần điều phối
     TrangThai       VARCHAR(20)    NOT NULL CONSTRAINT DF_DatXeDieuPhoi_TrangThai DEFAULT 'pending',
     KhoangCachKm    DECIMAL(10,3)  NULL,
@@ -481,7 +491,10 @@ CREATE TABLE dbo.DatXeDieuPhoi
         ON UPDATE NO ACTION ON DELETE CASCADE,
     CONSTRAINT FK_DatXeDieuPhoi_TaiKhoan     FOREIGN KEY (MaTKTaiXe)
         REFERENCES dbo.TaiKhoan(MaTK)
-        ON UPDATE NO ACTION ON DELETE NO ACTION
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT FK_DatXeDieuPhoi_TaiXe        FOREIGN KEY (MaTX)
+        REFERENCES dbo.TaiXe(CCCD)
+        ON UPDATE NO ACTION ON DELETE SET NULL
 );
 GO
 
@@ -571,37 +584,37 @@ BEGIN
 END
 GO
 
--- 8.1) PaymentGatewayAudit — Nhật ký audit callback/query gateway thanh toán
-CREATE TABLE dbo.PaymentGatewayAudit
+-- 8.1) NhatKyCongThanhToan — Nhật ký audit callback/query gateway thanh toán
+CREATE TABLE dbo.NhatKyCongThanhToan
 (
-    AuditId            BIGINT         IDENTITY(1,1) NOT NULL,
-    PaymentCode        VARCHAR(30)    NULL,
-    BookingCode        VARCHAR(30)    NULL,
-    Provider           VARCHAR(20)    NOT NULL,
-    EventType          VARCHAR(40)    NOT NULL,
-    Source             VARCHAR(30)    NOT NULL,
-    VerifyStatus       VARCHAR(20)    NOT NULL,
-    RequestMac         VARCHAR(128)   NULL,
-    ComputedMac        VARCHAR(128)   NULL,
-    AppTransId         VARCHAR(80)    NULL,
-    GatewayReturnCode  INT            NULL,
-    Message            NVARCHAR(500)  NULL,
-    RequestPayload     NVARCHAR(MAX)  NULL,
-    ResponsePayload    NVARCHAR(MAX)  NULL,
-    CreatedAt          DATETIME2(0)   NOT NULL CONSTRAINT DF_PaymentGatewayAudit_CreatedAt DEFAULT SYSUTCDATETIME(),
+    MaNhatKy           BIGINT         IDENTITY(1,1) NOT NULL,
+    MaThanhToan        VARCHAR(30)    NULL,
+    MaChuyen           VARCHAR(30)    NULL,
+    NhaCungCap         VARCHAR(20)    NOT NULL,
+    LoaiSuKien         VARCHAR(40)    NOT NULL,
+    Nguon              VARCHAR(30)    NOT NULL,
+    TrangThaiXacThuc   VARCHAR(20)    NOT NULL,
+    MacYeuCau          VARCHAR(128)   NULL,
+    MacTinhToan        VARCHAR(128)   NULL,
+    MaGiaoDichNCC      VARCHAR(80)    NULL,
+    MaPhanHoiNCC       INT            NULL,
+    NoiDung            NVARCHAR(500)  NULL,
+    DuLieuYeuCau       NVARCHAR(MAX)  NULL,
+    DuLieuPhanHoi      NVARCHAR(MAX)  NULL,
+    NgayTao            DATETIME2(0)   NOT NULL CONSTRAINT DF_PaymentGatewayAudit_CreatedAt DEFAULT SYSUTCDATETIME(),
 
-    CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (AuditId),
-    CONSTRAINT FK_PaymentGatewayAudit_ThanhToan FOREIGN KEY (PaymentCode)
+    CONSTRAINT PK_PaymentGatewayAudit PRIMARY KEY (MaNhatKy),
+    CONSTRAINT FK_PaymentGatewayAudit_ThanhToan FOREIGN KEY (MaThanhToan)
         REFERENCES dbo.ThanhToan(MaTT)
         ON UPDATE NO ACTION ON DELETE NO ACTION,
-    CONSTRAINT FK_PaymentGatewayAudit_DatXe FOREIGN KEY (BookingCode)
+    CONSTRAINT FK_PaymentGatewayAudit_DatXe FOREIGN KEY (MaChuyen)
         REFERENCES dbo.DatXe(MaChuyen)
         ON UPDATE NO ACTION ON DELETE NO ACTION
 );
 GO
 
 CREATE INDEX IX_PaymentGatewayAudit_BookingCode_CreatedAt
-ON dbo.PaymentGatewayAudit (BookingCode, CreatedAt DESC);
+ON dbo.NhatKyCongThanhToan (MaChuyen, NgayTao DESC);
 GO
 
 -- 10) ThongBao — Thông báo tới người dùng
@@ -663,50 +676,53 @@ GO
 CREATE INDEX IX_TinNhan_MaChuyen_NgayTao ON dbo.TinNhan (MaChuyen, NgayTao DESC, MaTinNhan DESC);
 GO
 
--- 10.1) ChatbotConversation — Phiên hội thoại chatbot theo từng tài khoản
-CREATE TABLE dbo.ChatbotConversation
+-- 10.1) HoiThoaiChatbot — Phiên hội thoại chatbot theo từng tài khoản
+CREATE TABLE dbo.HoiThoaiChatbot
 (
-    ConversationId VARCHAR(40)   NOT NULL,
-    AccountId      VARCHAR(20)   NOT NULL,
-    RoleCode       VARCHAR(4)    NULL,
-    Title          NVARCHAR(200) NULL,
-    CreatedAt      DATETIME2(0)  NOT NULL CONSTRAINT DF_ChatbotConversation_CreatedAt DEFAULT SYSUTCDATETIME(),
-    UpdatedAt      DATETIME2(0)  NOT NULL CONSTRAINT DF_ChatbotConversation_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    MaHoiThoai VARCHAR(40)   NOT NULL,
+    MaTK       VARCHAR(20)   NOT NULL,
+    MaQuyen    CHAR(2)       NULL,
+    TieuDe     NVARCHAR(200) NULL,
+    NgayTao    DATETIME2(0)  NOT NULL CONSTRAINT DF_ChatbotConversation_CreatedAt DEFAULT SYSUTCDATETIME(),
+    NgayCapNhat DATETIME2(0) NOT NULL CONSTRAINT DF_ChatbotConversation_UpdatedAt DEFAULT SYSUTCDATETIME(),
 
-    CONSTRAINT PK_ChatbotConversation PRIMARY KEY (ConversationId),
-    CONSTRAINT FK_ChatbotConversation_TaiKhoan FOREIGN KEY (AccountId)
+    CONSTRAINT PK_ChatbotConversation PRIMARY KEY (MaHoiThoai),
+    CONSTRAINT FK_ChatbotConversation_TaiKhoan FOREIGN KEY (MaTK)
         REFERENCES dbo.TaiKhoan(MaTK)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT CK_ChatbotConversation_Title CHECK (Title IS NULL OR LEN(LTRIM(RTRIM(Title))) BETWEEN 1 AND 200)
+    CONSTRAINT FK_ChatbotConversation_Quyen FOREIGN KEY (MaQuyen)
+        REFERENCES dbo.Quyen(MaQuyen)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT CK_ChatbotConversation_Title CHECK (TieuDe IS NULL OR LEN(LTRIM(RTRIM(TieuDe))) BETWEEN 1 AND 200)
 );
 GO
 
 CREATE INDEX IX_ChatbotConversation_AccountId_UpdatedAt
-ON dbo.ChatbotConversation (AccountId, UpdatedAt DESC, ConversationId DESC);
+ON dbo.HoiThoaiChatbot (MaTK, NgayCapNhat DESC, MaHoiThoai DESC);
 GO
 
--- 10.2) ChatbotMessage — Tin nhắn chatbot theo từng phiên
-CREATE TABLE dbo.ChatbotMessage
+-- 10.2) TinNhanChatbot — Tin nhắn chatbot theo từng phiên
+CREATE TABLE dbo.TinNhanChatbot
 (
-    MessageId       BIGINT         IDENTITY(1,1) NOT NULL,
-    ConversationId  VARCHAR(40)    NOT NULL,
-    SenderRole      VARCHAR(20)    NOT NULL,
-    MessageText     NVARCHAR(4000) NOT NULL,
-    Provider        VARCHAR(40)    NULL,
-    ModelName       VARCHAR(120)   NULL,
-    CreatedAt       DATETIME2(0)   NOT NULL CONSTRAINT DF_ChatbotMessage_CreatedAt DEFAULT SYSUTCDATETIME(),
+    MaTinNhan       BIGINT         IDENTITY(1,1) NOT NULL,
+    MaHoiThoai      VARCHAR(40)    NOT NULL,
+    VaiTroNguoiGui  VARCHAR(20)    NOT NULL,
+    NoiDungTinNhan  NVARCHAR(4000) NOT NULL,
+    NhaCungCap      VARCHAR(40)    NULL,
+    TenMoHinh       VARCHAR(120)   NULL,
+    NgayTao         DATETIME2(0)   NOT NULL CONSTRAINT DF_ChatbotMessage_CreatedAt DEFAULT SYSUTCDATETIME(),
 
-    CONSTRAINT PK_ChatbotMessage PRIMARY KEY (MessageId),
-    CONSTRAINT FK_ChatbotMessage_Conversation FOREIGN KEY (ConversationId)
-        REFERENCES dbo.ChatbotConversation(ConversationId)
+    CONSTRAINT PK_ChatbotMessage PRIMARY KEY (MaTinNhan),
+    CONSTRAINT FK_ChatbotMessage_Conversation FOREIGN KEY (MaHoiThoai)
+        REFERENCES dbo.HoiThoaiChatbot(MaHoiThoai)
         ON DELETE CASCADE,
-    CONSTRAINT CK_ChatbotMessage_SenderRole CHECK (SenderRole IN ('user', 'assistant')),
-    CONSTRAINT CK_ChatbotMessage_MessageText CHECK (LEN(LTRIM(RTRIM(MessageText))) BETWEEN 1 AND 4000)
+    CONSTRAINT CK_ChatbotMessage_SenderRole CHECK (VaiTroNguoiGui IN ('user', 'assistant')),
+    CONSTRAINT CK_ChatbotMessage_MessageText CHECK (LEN(LTRIM(RTRIM(NoiDungTinNhan))) BETWEEN 1 AND 4000)
 );
 GO
 
 CREATE INDEX IX_ChatbotMessage_ConversationId_CreatedAt
-ON dbo.ChatbotMessage (ConversationId, CreatedAt DESC, MessageId DESC);
+ON dbo.TinNhanChatbot (MaHoiThoai, NgayTao DESC, MaTinNhan DESC);
 GO
 
 -- Đã bỏ nhóm bảng legacy HoTroAnToanTaiXe/LoaiSuCoHoTroTaiXe để giảm rườm rà schema.
@@ -801,10 +817,7 @@ CREATE TABLE dbo.ViPhamTaiXe
     MaTKXuLy       VARCHAR(20)    NULL,                -- FK → TaiKhoan.MaTK
     MaChuyen       VARCHAR(30)    NULL,                -- FK → DatXe.MaChuyen
     MaKN           INT            NULL,                -- FK → KhieuNaiHoTro.MaKN
-    MaTX           VARCHAR(20)    NULL,
     MaTKTaiXe      VARCHAR(20)    NULL,                -- FK → TaiKhoan.MaTK
-    TenTaiXe       NVARCHAR(120)  NULL,
-    driverPhone    VARCHAR(20)    NULL,
     TenKhachHang   NVARCHAR(120)  NULL,
     DuLieuPhatHien NVARCHAR(2000) NULL,
     NgayPhatHien   DATETIME2(0)   NOT NULL CONSTRAINT DF_ViPhamTaiXe_NgayPhatHien DEFAULT SYSDATETIME(),

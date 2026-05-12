@@ -723,20 +723,19 @@ GO
 
 INSERT INTO dbo.ViPhamTaiXe (
     Fingerprint, NguonPhatHien, LoaiViPham, TenLoaiViPham, MoTa, MucDo, TrangThai,
-    HinhThucXuLy, GhiChuAdmin, MaTKXuLy, MaChuyen, MaKN, MaTX, MaTKTaiXe,
-    TenTaiXe, driverPhone, TenKhachHang, DuLieuPhatHien, NgayPhatHien, NgayXuLy, NgayTao, NgayCapNhat
+    HinhThucXuLy, GhiChuAdmin, MaTKXuLy, MaChuyen, MaKN, MaTKTaiXe,
+    TenKhachHang, DuLieuPhatHien, NgayPhatHien, NgayXuLy, NgayTao, NgayCapNhat
 )
 SELECT
     v.Fingerprint, v.NguonPhatHien, v.LoaiViPham, v.TenLoaiViPham, v.MoTa, v.MucDo, v.TrangThai,
-    v.HinhThucXuLy, v.GhiChuAdmin, v.MaTKXuLy, v.MaChuyen, NULL, v.MaTX, v.MaTKTaiXe,
-    v.TenTaiXe, v.driverPhone, v.TenKhachHang, v.DuLieuPhatHien, v.NgayPhatHien, v.NgayXuLy, v.NgayTao, v.NgayCapNhat
+    v.HinhThucXuLy, v.GhiChuAdmin, v.MaTKXuLy, v.MaChuyen, NULL, v.MaTKTaiXe,
+    v.TenKhachHang, v.DuLieuPhatHien, v.NgayPhatHien, v.NgayXuLy, v.NgayTao, v.NgayCapNhat
 FROM (VALUES
-('VP-CX2026050301-UNSAFE','system','unsafe-driving',N'Lai xe khong an toan',N'Phat hien toc do dot bien tren tuyen duong','high','resolved','warning',N'Nhac nho tai xe tuan thu an toan','TK0001','CX2026050301','202234567890','TK0003',N'Tran Van B','0902222222',N'Tran F',N'{"speedSpike":true,"maxSpeed":78}','2026-06-07T09:08:00','2026-06-07T10:00:00','2026-06-07T09:10:00','2026-06-07T10:00:00'),
-('VP-CX2026050501-ATTITUDE','system','driver-attitude',N'Thai do tai xe',N'Khach danh gia thai do phuc vu chua tot','medium','pending',NULL,NULL,NULL,'CX2026050501','201234567890','TK0002',N'Nguyen Van A','0901111111',N'Vu H',N'{"rating":3,"tags":["thai-do"]}','2026-06-09T18:20:00',NULL,'2026-06-09T18:22:00','2026-06-09T18:22:00')
+('VP-CX2026050301-UNSAFE','system','unsafe-driving',N'Lai xe khong an toan',N'Phat hien toc do dot bien tren tuyen duong','high','resolved','warning',N'Nhac nho tai xe tuan thu an toan','TK0001','CX2026050301',NULL,'TK0003',N'Tran F',N'{"speedSpike":true,"maxSpeed":78}','2026-06-07T09:08:00','2026-06-07T10:00:00','2026-06-07T09:10:00','2026-06-07T10:00:00'),
+('VP-CX2026050501-ATTITUDE','system','driver-attitude',N'Thai do tai xe',N'Khach danh gia thai do phuc vu chua tot','medium','pending',NULL,NULL,NULL,'CX2026050501',NULL,'TK0002',N'Vu H',N'{"rating":3,"tags":["thai-do"]}','2026-06-09T18:20:00',NULL,'2026-06-09T18:22:00','2026-06-09T18:22:00')
 ) AS v(
     Fingerprint, NguonPhatHien, LoaiViPham, TenLoaiViPham, MoTa, MucDo, TrangThai,
-    HinhThucXuLy, GhiChuAdmin, MaTKXuLy, MaChuyen, MaTX, MaTKTaiXe,
-    TenTaiXe, driverPhone, TenKhachHang, DuLieuPhatHien, NgayPhatHien, NgayXuLy, NgayTao, NgayCapNhat
+    HinhThucXuLy, GhiChuAdmin, MaTKXuLy, MaChuyen, MaKN, MaTKTaiXe, TenKhachHang, DuLieuPhatHien, NgayPhatHien, NgayXuLy, NgayTao, NgayCapNhat
 )
 WHERE NOT EXISTS (
     SELECT 1
@@ -745,5 +744,92 @@ WHERE NOT EXISTS (
 );
 GO
 
+-- 11) HoiThoaiChatbot - Phiên hội thoại chatbot (Vietnamese column names)
+INSERT INTO dbo.HoiThoaiChatbot (MaHoiThoai, MaTK, MaQuyen, TieuDe, NgayTao, NgayCapNhat)
+SELECT v.MaHoiThoai, v.MaTK, v.MaQuyen, v.TieuDe, v.NgayTao, v.NgayCapNhat
+FROM (VALUES
+('CONV20260510001','TK0101','Q2',N'Hoi ve gia cuoc','2026-05-10T10:15:00','2026-05-10T10:15:00'),
+('CONV20260511001','TK0102','Q2',N'Yeu cau ho tro dat xe','2026-05-11T14:30:00','2026-05-11T14:30:00'),
+('CONV20260512001','TK0003','Q3',N'Chat voi khach hang','2026-05-12T09:45:00','2026-05-12T09:45:00'),
+('CONV20260513001','TK0103','Q2',N'Thanh toan va vi dien tu','2026-05-13T16:20:00','2026-05-13T16:20:00'),
+('CONV20260514001','TK0004','Q3',N'Hoi ve luong tai xe','2026-05-14T11:00:00','2026-05-14T11:00:00')
+) AS v(MaHoiThoai, MaTK, MaQuyen, TieuDe, NgayTao, NgayCapNhat)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dbo.HoiThoaiChatbot AS htc
+    WHERE htc.MaHoiThoai = v.MaHoiThoai
+);
+GO
+
+-- 11.1) TinNhanChatbot - Tin nhắn chatbot (Vietnamese column names)
+INSERT INTO dbo.TinNhanChatbot (MaHoiThoai, VaiTroNguoiGui, NoiDungTinNhan, NhaCungCap, TenMoHinh, NgayTao)
+SELECT v.MaHoiThoai, v.VaiTroNguoiGui, v.NoiDungTinNhan, v.NhaCungCap, v.TenMoHinh, v.NgayTao
+FROM (VALUES
+('CONV20260510001','user',N'Xin hoi gia cuoc tu Binh Thanh den Tan Binh?','openai','gpt-4o','2026-05-10T10:15:30'),
+('CONV20260510001','assistant',N'Gia cuoc trung binh cho tuyến nay la khoang 45000-55000 dong tuy theo loai xe va thoi gian. Ban muon dat xe ngay khong?','openai','gpt-4o','2026-05-10T10:16:00'),
+('CONV20260511001','user',N'Toi khong nhan duoc don hang, can ho tro khong?','openai','gpt-4o','2026-05-11T14:30:45'),
+('CONV20260511001','assistant',N'Xin loi vi khong tien danh cho ban. Chung toi se dieu tra va lien he voi tai xe. Vui long doi het 24 gio cho phan hoi.','openai','gpt-4o','2026-05-11T14:31:00'),
+('CONV20260512001','user',N'Khach hang o dau?','openai','gpt-4o','2026-05-12T09:45:30'),
+('CONV20260512001','assistant',N'Khach hang tai dia chi: 123 Tran Hung Dao, Q1. Vui long di tu tu can ben tai xe.','openai','gpt-4o','2026-05-12T09:46:00'),
+('CONV20260513001','user',N'Rut tien tu vi duoc khong? Toi can rut 100000 dong.','openai','gpt-4o','2026-05-13T16:20:15'),
+('CONV20260513001','assistant',N'Co the rut tien qua ngan hang. Vui long vao phan rut tien va chon ngan hang ban muon. Rut tien mat chi phi 5000 dong.','openai','gpt-4o','2026-05-13T16:21:00'),
+('CONV20260514001','user',N'Luong tuan nay da duoc thanh toan chua?','openai','gpt-4o','2026-05-14T11:00:45'),
+('CONV20260514001','assistant',N'Luong co the kiem tra trong phan "Thong ke doanh thu". Luong duoc thanh toan vao sieu thi hom Chu Nhat hang tuan.','openai','gpt-4o','2026-05-14T11:01:00')
+) AS v(MaHoiThoai, VaiTroNguoiGui, NoiDungTinNhan, NhaCungCap, TenMoHinh, NgayTao)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dbo.TinNhanChatbot AS tnc
+    WHERE tnc.MaHoiThoai = v.MaHoiThoai
+      AND tnc.NoiDungTinNhan = v.NoiDungTinNhan
+      AND tnc.NgayTao = v.NgayTao
+);
+GO
+
+-- 12) NhatKyCongThanhToan - Nhật ký audit thanh toán (Vietnamese column names, formerly PaymentGatewayAudit)
+INSERT INTO dbo.NhatKyCongThanhToan (
+    MaThanhToan, MaChuyen, NhaCungCap, LoaiSuKien, Nguon, TrangThaiXacThuc,
+    MacYeuCau, MacTinhToan, MaGiaoDichNCC, MaPhanHoiNCC, NoiDung, DuLieuYeuCau, DuLieuPhanHoi, NgayTao
+)
+SELECT v.MaThanhToan, v.MaChuyen, v.NhaCungCap, v.LoaiSuKien, v.Nguon, v.TrangThaiXacThuc,
+       v.MacYeuCau, v.MacTinhToan, v.MaGiaoDichNCC, v.MaPhanHoiNCC, v.NoiDung, v.DuLieuYeuCau, v.DuLieuPhanHoi, v.NgayTao
+FROM (VALUES
+('TT2026041001','CX2026041001','momo','callback','gateway',N'verified',N'001-20260515-001','MOMO-TXN-001',N'MOMO-REF-0001',200001,N'Callback received from MoMo gateway',N'{"status":"success","orderId":"CX2026041001"}',N'{"resultCode":0,"transId":"MOMO-REF-0001"}','2026-05-15T08:06:00'),
+('TT2026041401','CX2026041401','momo','callback','gateway',N'verified',N'001-20260519-001','MOMO-TXN-002',N'MOMO-REF-0002',200002,N'Momo payment confirmed','{"status":"success","orderId":"CX2026041401"}',N'{"resultCode":0,"transId":"MOMO-REF-0002"}','2026-05-19T11:39:00'),
+('TT2026041801','CX2026041801','zalopay','callback','gateway',N'verified',N'001-20260523-001','ZALOPAY-TXN-001',N'ZALOPAY-REF-0001',300001,N'ZaloPay callback success','{"status":"success","orderId":"CX2026041801"}',N'{"returnCode":1,"transToken":"ZALOPAY-REF-0001"}','2026-05-23T08:06:00'),
+('TT2026042201','CX2026042201','momo','query','gateway',N'verified',N'001-20260527-002','MOMO-TXN-003',N'MOMO-REF-0003',200003,N'Query status from MoMo','{"orderId":"CX2026042201"}',N'{"resultCode":0,"transId":"MOMO-REF-0003","status":"SUCCESS"}','2026-05-27T13:47:00'),
+('TT2026050201','CX2026050201','app_wallet','transaction','internal',N'verified',N'001-20260606-001','APPW-TXN-001',NULL,NULL,N'Internal wallet transaction','{"userId":"TK0102","amount":132000}',N'{"status":"completed"}','2026-06-06T12:31:00'),
+('TT2026050301','CX2026050301','momo','callback','gateway',N'verified',N'001-20260607-001','MOMO-TXN-004',N'MOMO-REF-0004',200004,N'Intercity trip payment from MoMo','{"status":"success","orderId":"CX2026050301"}',N'{"resultCode":0,"transId":"MOMO-REF-0004"}','2026-06-07T09:11:00'),
+('TT2026050501','CX2026050501','zalopay','callback','gateway',N'verified',N'001-20260609-001','ZALOPAY-TXN-002',N'ZALOPAY-REF-0002',300002,N'ZaloPay payment verified','{"status":"success","orderId":"CX2026050501"}',N'{"returnCode":1,"transToken":"ZALOPAY-REF-0002"}','2026-06-09T18:06:00')
+) AS v(
+    MaThanhToan, MaChuyen, NhaCungCap, LoaiSuKien, Nguon, TrangThaiXacThuc,
+    MacYeuCau, MacTinhToan, MaGiaoDichNCC, MaPhanHoiNCC, NoiDung, DuLieuYeuCau, DuLieuPhanHoi, NgayTao
+)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dbo.NhatKyCongThanhToan AS nk
+    WHERE nk.MaThanhToan = v.MaThanhToan
+);
+GO
+
+-- 12.1) TinNhan - Tin nhắn trong chuyến xe (sample data)
+INSERT INTO dbo.TinNhan (MaChuyen, MaTK, VaiTro, Ten, SDT, NoiDung, NgayTao, NgayCapNhat)
+SELECT v.MaChuyen, v.MaTK, v.VaiTro, v.Ten, v.SDT, v.NoiDung, v.NgayTao, v.NgayCapNhat
+FROM (VALUES
+('CX2026041001','TK0101','customer',N'Pham Thi D','0910000001',N'Tai xe o dau roi?','2026-05-15T07:55:00','2026-05-15T07:55:00'),
+('CX2026041001','TK0002','driver',N'Nguyen Van A','0901111111',N'Toi dang den, con 2 phut','2026-05-15T07:56:00','2026-05-15T07:56:00'),
+('CX2026041201','TK0102','customer',N'Nguyen H E','0910000002',N'Camon tai xe, di an kem chut','2026-05-17T16:50:00','2026-05-17T16:50:00'),
+('CX2026041401','TK0103','customer',N'Tran F','0910000003',N'Lai chuan hon nhe, hay nguy','2026-05-19T11:20:00','2026-05-19T11:20:00'),
+('CX2026041401','TK0004','driver',N'Le Van C','0903333333',N'Thua, toi se lai cham','2026-05-19T11:21:00','2026-05-19T11:21:00'),
+('CX2026050301','TK0103','customer',N'Tran F','0910000003',N'Co tong tram duong khong?','2026-06-07T06:30:00','2026-06-07T06:30:00'),
+('CX2026050301','TK0003','driver',N'Tran Van B','0902222222',N'Co, tong tram o Phu Loc, do kin','2026-06-07T06:45:00','2026-06-07T06:45:00')
+) AS v(MaChuyen, MaTK, VaiTro, Ten, SDT, NoiDung, NgayTao, NgayCapNhat)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dbo.TinNhan AS tn
+    WHERE tn.MaChuyen = v.MaChuyen
+      AND tn.NoiDung = v.NoiDung
+      AND tn.NgayTao = v.NgayTao
+);
+GO
 
 
