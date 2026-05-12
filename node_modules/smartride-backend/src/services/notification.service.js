@@ -4,6 +4,9 @@ import { getSqlServerPool, isSqlServerConfigured } from './database.service.js';
 const allowedRecipients = new Set(['all', 'customer', 'driver']);
 const allowedStatuses = new Set(['scheduled', 'sent']);
 let notificationSchemaPromise = null;
+const SQL_DEADLOCK_ERROR_NUMBER = 1205;
+const SQL_DEADLOCK_RETRY_ATTEMPTS = 3;
+const SQL_DEADLOCK_RETRY_BASE_DELAY_MS = 120;
 
 function createHttpError(statusCode, message, details = null) {
   const error = new Error(message);
@@ -22,6 +25,46 @@ function normalizeText(value) {
 
 function normalizeToken(value) {
   return normalizeText(value).toLowerCase();
+}
+
+function isSqlDeadlockError(error) {
+  const normalizedMessage = normalizeText(error?.message).toLowerCase();
+  const directErrorNumber = Number(error?.number);
+  const originalErrorNumber = Number(error?.originalError?.number ?? error?.originalError?.info?.number);
+
+  return (
+    directErrorNumber === SQL_DEADLOCK_ERROR_NUMBER
+    || originalErrorNumber === SQL_DEADLOCK_ERROR_NUMBER
+    || normalizedMessage.includes('deadlock')
+  );
+}
+
+function waitForRetryDelay(delayMs) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(delayMs) || 0));
+  });
+}
+
+async function runWithSqlDeadlockRetry(task, operationName = 'sql-transaction') {
+  let attempt = 0;
+
+  while (attempt < SQL_DEADLOCK_RETRY_ATTEMPTS) {
+    attempt += 1;
+
+    try {
+      return await task();
+    } catch (error) {
+      if (!isSqlDeadlockError(error) || attempt >= SQL_DEADLOCK_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      const retryDelayMs = SQL_DEADLOCK_RETRY_BASE_DELAY_MS * (2 ** (attempt - 1));
+      console.warn(`[sql] Deadlock detected in ${operationName}. Retrying (${attempt}/${SQL_DEADLOCK_RETRY_ATTEMPTS})...`);
+      await waitForRetryDelay(retryDelayMs);
+    }
+  }
+
+  return task();
 }
 
 function normalizeRecipientValue(value, fallback = 'customer') {
@@ -423,18 +466,21 @@ export async function syncDueNotifications(referenceTime = new Date()) {
 
   const now = normalizeDateTime(referenceTime, 'Thời điểm đồng bộ thông báo không hợp lệ.');
   const pool = await getSqlServerPool();
-  const queryResult = await pool.request()
-    .input('now', sql.DateTime2(0), now)
-    .query(`
-      UPDATE tb
-      SET
-        tb.TrangThai = 'sent',
-        tb.NgayCapNhat = @now
-      OUTPUT INSERTED.MaTB, INSERTED.MaTK, INSERTED.TieuDe, INSERTED.NoiDung, INSERTED.NguoiNhan, INSERTED.TrangThai, INSERTED.ThoiGianGuiDuKien, INSERTED.NgayTao, INSERTED.NgayCapNhat
-      FROM dbo.ThongBao tb
-      WHERE tb.TrangThai = 'scheduled'
-        AND tb.ThoiGianGuiDuKien <= @now;
-    `);
+  const queryResult = await runWithSqlDeadlockRetry(
+    () => pool.request()
+      .input('now', sql.DateTime2(0), now)
+      .query(`
+        UPDATE tb
+        SET
+          tb.TrangThai = 'sent',
+          tb.NgayCapNhat = @now
+        OUTPUT INSERTED.MaTB, INSERTED.MaTK, INSERTED.TieuDe, INSERTED.NoiDung, INSERTED.NguoiNhan, INSERTED.TrangThai, INSERTED.ThoiGianGuiDuKien, INSERTED.NgayTao, INSERTED.NgayCapNhat
+        FROM dbo.ThongBao tb
+        WHERE tb.TrangThai = 'scheduled'
+          AND tb.ThoiGianGuiDuKien <= @now;
+      `),
+    'syncDueNotifications',
+  );
 
   const notifications = (queryResult.recordset ?? []).map(mapNotificationRow);
 

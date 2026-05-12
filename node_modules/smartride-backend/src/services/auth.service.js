@@ -192,8 +192,8 @@ function parseSignupPayload(payload = {}) {
     throw createHttpError(400, 'Email không đúng định dạng hợp lệ.');
   }
 
-  if (password.length < 3) {
-    throw createHttpError(400, 'Mật khẩu phải có ít nhất 3 ký tự.');
+  if (password.length < 6) {
+    throw createHttpError(400, 'Mật khẩu phải có ít nhất 6 ký tự.');
   }
 
   return {
@@ -768,8 +768,8 @@ function parseChangePasswordPayload(payload = {}) {
     throw createHttpError(400, 'Vui lòng nhập đầy đủ thông tin đổi mật khẩu.');
   }
 
-  if (newPassword.length < 3) {
-    throw createHttpError(400, 'Mật khẩu mới phải có ít nhất 3 ký tự.');
+  if (newPassword.length < 6) {
+    throw createHttpError(400, 'Mật khẩu mới phải có ít nhất 6 ký tự.');
   }
 
   if (currentPassword && currentPassword === newPassword) {

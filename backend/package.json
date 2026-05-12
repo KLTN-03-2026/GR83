@@ -6,7 +6,8 @@
     "dev": "nodemon --watch src --ext js,mjs,cjs,json --delay 1 src/server.js",
     "start": "node src/server.js",
     "build": "node -e \"console.log('No build step required for backend')\"",
-    "probe:momo": "node scripts/probe-momo.mjs"
+    "probe:momo": "node scripts/probe-momo.mjs",
+    "migrate:mssql:pg": "node scripts/migrate-mssql-to-postgres.mjs"
   },
   "dependencies": {
     "amqplib": "^0.10.9",
@@ -17,6 +18,7 @@
     "mssql": "^12.2.1",
     "multer": "^2.1.1",
     "nodemailer": "^8.0.4",
+    "pg": "^8.13.1",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
