@@ -239,6 +239,16 @@ function formatCurrency(value) {
   return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(Math.max(0, normalizedValue))}đ`;
 }
 
+function normalizeStatusToken(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
 function getStatusLabel(status) {
   if (status === 'completed') {
     return 'Hoàn thành';
@@ -317,9 +327,36 @@ function getPaymentMethodLabel(paymentMethod, paymentProvider) {
 }
 
 function buildTripStatus(rawStatus, scheduleEnabled) {
-  const normalizedStatus = normalizeText(rawStatus).toLowerCase();
+  const normalizedStatus = normalizeStatusToken(rawStatus);
 
-  if (normalizedStatus === 'completed' || normalizedStatus === 'scheduled' || normalizedStatus === 'in-progress' || normalizedStatus === 'cancelled') {
+  if (
+    normalizedStatus === 'completed'
+    || normalizedStatus === 'hoanthanh'
+    || normalizedStatus === 'scheduled'
+    || normalizedStatus === 'dattruoc'
+    || normalizedStatus === 'inprogress'
+    || normalizedStatus === 'chodoi'
+    || normalizedStatus === 'cho_tai_xe'
+    || normalizedStatus === 'chotaixe'
+    || normalizedStatus === 'cancelled'
+    || normalizedStatus === 'dahuy'
+  ) {
+    if (normalizedStatus === 'hoanthanh') {
+      return 'completed';
+    }
+
+    if (normalizedStatus === 'dattruoc') {
+      return 'scheduled';
+    }
+
+    if (normalizedStatus === 'chodoi' || normalizedStatus === 'cho_tai_xe' || normalizedStatus === 'chotaixe' || normalizedStatus === 'inprogress') {
+      return scheduleEnabled ? 'scheduled' : 'in-progress';
+    }
+
+    if (normalizedStatus === 'dahuy') {
+      return 'cancelled';
+    }
+
     return normalizedStatus;
   }
 
@@ -334,9 +371,10 @@ function normalizeTripHistoryItem(rawItem = {}, fallbackId = 0) {
   const bookingCode = normalizeText(rawItem.bookingCode ?? rawItem.id ?? `trip-${fallbackId}`);
   const paymentCode = normalizeText(rawItem.paymentCode ?? rawItem.tripCode ?? bookingCode);
   const scheduleEnabled = Boolean(rawItem.scheduleEnabled);
-  const status = buildTripStatus(rawItem.status ?? rawItem.statusCode, scheduleEnabled);
-  const statusLabel = normalizeText(rawItem.statusLabel) || getStatusLabel(status);
-  const statusTone = normalizeText(rawItem.statusTone) || getStatusTone(status);
+  const statusSource = rawItem.tripStatus ?? rawItem.status ?? rawItem.statusCode;
+  const status = buildTripStatus(statusSource, scheduleEnabled);
+  const statusLabel = getStatusLabel(status);
+  const statusTone = getStatusTone(status);
   const bookedAt = normalizeText(rawItem.bookedAt ?? rawItem.completedAt ?? rawItem.createdAt);
   const completedAt = normalizeText(rawItem.completedAt ?? rawItem.paidAt ?? rawItem.bookedAt ?? rawItem.createdAt);
   const pickupLabel = normalizeText(rawItem.pickupLabel);

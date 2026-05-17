@@ -17,6 +17,7 @@ let rideEventQueueName = '';
 let rideEventSetupPromise = null;
 let rideSocketServer = null;
 const latestRideLocationByBookingCode = new Map();
+const latestRideLocationByDriverAccountId = new Map();
 
 function normalizeText(value) {
   return String(value ?? '')
@@ -74,8 +75,10 @@ function normalizePosition(position) {
 
 function normalizeRideLocationEvent(event = {}, socketContext = {}) {
   const bookingCode = normalizeText(event.bookingCode ?? event.booking?.bookingCode);
+  const customerAccountId = normalizeText(event.customerAccountId ?? event.booking?.customerAccountId ?? socketContext.customerAccountId);
+  const driverAccountId = normalizeText(event.driverAccountId ?? event.booking?.driverAccountId ?? socketContext.accountId);
 
-  if (!bookingCode) {
+  if (!bookingCode && !driverAccountId) {
     return null;
   }
 
@@ -84,9 +87,6 @@ function normalizeRideLocationEvent(event = {}, socketContext = {}) {
   if (!normalizedPosition) {
     return null;
   }
-
-  const customerAccountId = normalizeText(event.customerAccountId ?? event.booking?.customerAccountId ?? socketContext.customerAccountId);
-  const driverAccountId = normalizeText(event.driverAccountId ?? event.booking?.driverAccountId ?? socketContext.accountId);
 
   return {
     id: normalizeText(event.id) || randomUUID(),
@@ -114,12 +114,15 @@ function getRideLocationRoomName(bookingCode) {
 
 function storeLatestRideLocation(event) {
   const bookingCode = normalizeText(event?.bookingCode);
+  const driverAccountId = normalizeText(event?.driverAccountId);
 
-  if (!bookingCode) {
-    return;
+  if (bookingCode) {
+    latestRideLocationByBookingCode.set(bookingCode.toLowerCase(), event);
   }
 
-  latestRideLocationByBookingCode.set(bookingCode.toLowerCase(), event);
+  if (driverAccountId) {
+    latestRideLocationByDriverAccountId.set(driverAccountId.toLowerCase(), event);
+  }
 }
 
 function getLatestRideLocation(bookingCode) {
@@ -130,6 +133,36 @@ function getLatestRideLocation(bookingCode) {
   }
 
   return latestRideLocationByBookingCode.get(normalizedBookingCode) ?? null;
+}
+
+function getLatestRideLocationByDriverAccountId(driverAccountId) {
+  const normalizedDriverAccountId = normalizeText(driverAccountId).toLowerCase();
+
+  if (!normalizedDriverAccountId) {
+    return null;
+  }
+
+  return latestRideLocationByDriverAccountId.get(normalizedDriverAccountId) ?? null;
+}
+
+export {
+  getLatestRideLocation,
+  getLatestRideLocationByDriverAccountId,
+};
+
+function createRideLocationSnapshot(event, fallback = {}) {
+  if (!event) {
+    return null;
+  }
+
+  return {
+    ...event,
+    type: 'ride.location.snapshot',
+    routingKey: 'ride.location.snapshot',
+    bookingCode: normalizeText(event.bookingCode ?? fallback.bookingCode),
+    customerAccountId: normalizeText(event.customerAccountId ?? fallback.customerAccountId),
+    driverAccountId: normalizeText(event.driverAccountId ?? fallback.driverAccountId),
+  };
 }
 
 function shouldDeliverRideEventToSocketClient(socket, event) {
@@ -251,8 +284,17 @@ export function registerRideSocketServer(io) {
 
     socket.on('ride.location.subscribe', (payload = {}) => {
       const bookingCode = normalizeText(payload.bookingCode);
+      const driverAccountId = normalizeText(payload.driverAccountId);
 
       if (!bookingCode) {
+        const latestDriverLocation = getLatestRideLocationByDriverAccountId(driverAccountId);
+
+        if (latestDriverLocation) {
+          socket.emit('ride.location.snapshot', createRideLocationSnapshot(latestDriverLocation, {
+            driverAccountId,
+          }));
+        }
+
         return;
       }
 
@@ -261,7 +303,20 @@ export function registerRideSocketServer(io) {
       const latestLocation = getLatestRideLocation(bookingCode);
 
       if (latestLocation) {
-        socket.emit('ride.location.snapshot', latestLocation);
+        socket.emit('ride.location.snapshot', createRideLocationSnapshot(latestLocation, {
+          bookingCode,
+          driverAccountId,
+        }));
+        return;
+      }
+
+      const latestDriverLocation = getLatestRideLocationByDriverAccountId(driverAccountId);
+
+      if (latestDriverLocation) {
+        socket.emit('ride.location.snapshot', createRideLocationSnapshot(latestDriverLocation, {
+          bookingCode,
+          driverAccountId,
+        }));
       }
     });
 
@@ -283,6 +338,11 @@ export function registerRideSocketServer(io) {
       });
 
       if (!normalizedEvent) {
+        return;
+      }
+
+      if (!normalizeText(normalizedEvent.bookingCode)) {
+        storeLatestRideLocation(normalizedEvent);
         return;
       }
 

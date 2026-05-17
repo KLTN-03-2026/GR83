@@ -10,6 +10,7 @@ import {
 	getTripHistoryController,
 	getTripInvoiceController,
 	getTripPaymentStatusController,
+	getTripLocationController,
 	getTripMessagesController,
 	getAdminDriverViolationDetailController,
 	searchRideController,
@@ -90,6 +91,7 @@ router.get('/:bookingCode/issues/meta', getTripIssueReportMetaController);
 router.post('/:bookingCode/issues', complaintUploadMiddleware, createTripIssueReportController);
 router.get('/:bookingCode/invoice', getTripInvoiceController);
 router.get('/:bookingCode/payment-status', getTripPaymentStatusController);
+router.get('/:bookingCode/location', getTripLocationController);
 router.get('/issues/admin', listAdminComplaintRequestsController);
 router.get('/issues/admin/:complaintId', getAdminComplaintDetailController);
 router.patch('/issues/admin/:complaintId', updateAdminComplaintDetailController);

@@ -304,6 +304,8 @@ export default function Header({
   onNotify,
   onHelp,
   onForceTripCancelled,
+  onCustomerWalletModalOpenChange,
+  customerHasActiveTrip = false,
   driverCheckedIn = false,
   driverAutoReceiveEnabled = true,
   onDriverCheckedInChange,
@@ -362,6 +364,10 @@ export default function Header({
     () => notificationItems.filter((item) => !notificationReadIdSet.has(item.id)).length,
     [notificationItems, notificationReadIdSet],
   );
+
+  useEffect(() => {
+    onCustomerWalletModalOpenChange?.(customerWalletModalOpen);
+  }, [customerWalletModalOpen, onCustomerWalletModalOpenChange]);
 
   useEffect(() => {
     const availableItemIds = activeRoleMenu.rows
@@ -1631,6 +1637,7 @@ export default function Header({
         customerId={accountId}
         customerName={accountDisplayName}
         onNotify={onNotify}
+        suspendRealtimeSync={customerHasActiveTrip}
       />
 
       <DriverPersonalInfoModal

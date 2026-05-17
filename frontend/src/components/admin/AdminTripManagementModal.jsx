@@ -72,6 +72,20 @@ function formatDateForFilterValue(dateValue) {
   return format(dateValue, 'yyyy-MM-dd');
 }
 
+function getTripSortTimestamp(item = {}) {
+  const candidates = [item.updatedAt, item.createdAt, item.bookedAt, item.completedAt];
+
+  for (const candidate of candidates) {
+    const time = new Date(candidate).getTime();
+
+    if (Number.isFinite(time)) {
+      return time;
+    }
+  }
+
+  return 0;
+}
+
 function DetailRow({ label, value }) {
   if (!value && value !== 0) return null;
   return (
@@ -409,32 +423,49 @@ export default function AdminTripManagementModal({ open = false, onClose, accoun
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const filteredItems = items.filter((item) => {
+  const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (q) {
-      const customer = String(item.customerName ?? item.accountDisplayName ?? '').toLowerCase();
-      const driver = String(item.driverDisplayName ?? '').toLowerCase();
-      const code = String(item.bookingCode ?? '').toLowerCase();
-      if (!customer.includes(q) && !driver.includes(q) && !code.includes(q)) return false;
-    }
-    if (statusFilter !== 'all') {
-      const ts = String(item.tripStatus ?? item.status ?? '');
-      if (ts !== statusFilter) return false;
-    }
-    if (dateFrom) {
-      const itemDate = new Date(item.bookedAt);
-      const from = new Date(dateFrom);
-      from.setHours(0, 0, 0, 0);
-      if (itemDate < from) return false;
-    }
-    if (dateTo) {
-      const itemDate = new Date(item.bookedAt);
-      const to = new Date(dateTo);
-      to.setHours(23, 59, 59, 999);
-      if (itemDate > to) return false;
-    }
-    return true;
-  });
+
+    return items
+      .filter((item) => {
+        if (q) {
+          const customer = String(item.customerName ?? item.accountDisplayName ?? '').toLowerCase();
+          const driver = String(item.driverDisplayName ?? '').toLowerCase();
+          const code = String(item.bookingCode ?? '').toLowerCase();
+          if (!customer.includes(q) && !driver.includes(q) && !code.includes(q)) return false;
+        }
+
+        if (statusFilter !== 'all') {
+          const ts = String(item.tripStatus ?? item.status ?? '');
+          if (ts !== statusFilter) return false;
+        }
+
+        if (dateFrom) {
+          const itemDate = new Date(item.bookedAt);
+          const from = new Date(dateFrom);
+          from.setHours(0, 0, 0, 0);
+          if (itemDate < from) return false;
+        }
+
+        if (dateTo) {
+          const itemDate = new Date(item.bookedAt);
+          const to = new Date(dateTo);
+          to.setHours(23, 59, 59, 999);
+          if (itemDate > to) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const timeDiff = getTripSortTimestamp(b) - getTripSortTimestamp(a);
+
+        if (timeDiff !== 0) {
+          return timeDiff;
+        }
+
+        return String(b.bookingCode ?? '').localeCompare(String(a.bookingCode ?? ''));
+      });
+  }, [dateFrom, dateTo, items, search, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

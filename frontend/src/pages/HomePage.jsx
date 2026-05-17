@@ -53,7 +53,7 @@ import {
   markDriverRideRequestNotificationSeen,
   removeDriverRideRequest,
 } from '../utils/driverRideRequestQueue';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { format, isValid, parse } from 'date-fns';
@@ -1026,6 +1026,16 @@ function isCompletedRideStatus(value) {
   return normalizedStatusToken === 'hoanthanh' || normalizedStatusToken === 'completed';
 }
 
+function isTerminalCustomerRideStatus(value) {
+  const normalizedStatusToken = resolveRideStatusToken(value);
+
+  if (!normalizedStatusToken) {
+    return false;
+  }
+
+  return isCompletedRideStatus(value) || normalizedStatusToken === 'dahuy' || normalizedStatusToken === 'cancelled';
+}
+
 function isDriverTrackedRideStatus(value) {
   const normalizedStatusToken = resolveRideStatusToken(value);
 
@@ -1547,6 +1557,43 @@ function normalizeBookingPaymentProvider(value) {
   return 'zalopay';
 }
 
+function normalizeBookingPaymentStatusToken(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+function isWalletBookingPaid(value) {
+  return normalizeBookingPaymentStatusToken(value) === 'dathanhtoan';
+}
+
+function isWalletBookingFailed(value) {
+  return normalizeBookingPaymentStatusToken(value) === 'thatbai';
+}
+
+function shouldOpenCustomerTrackingModal(booking) {
+  if (!booking || isCompletedRideStatus(booking)) {
+    return false;
+  }
+
+  const tripStatusToken = resolveRideStatusToken(booking);
+  if (tripStatusToken === 'dahuy' || tripStatusToken === 'cancelled') {
+    return false;
+  }
+
+  const paymentMethod = normalizeBookingPaymentMethod(booking?.paymentMethod);
+  if (paymentMethod !== 'wallet') {
+    return true;
+  }
+
+  return isWalletBookingPaid(booking?.paymentStatus ?? booking?.paymentStatusLabel);
+}
+
 function getBookingPaymentProviderLabel(value) {
   const normalizedProvider = normalizeBookingPaymentProvider(value);
   const providerEntry = BOOKING_WALLET_PROVIDERS.find((provider) => provider.id === normalizedProvider);
@@ -1595,6 +1642,7 @@ export default function HomePage() {
   });
   const [bookingTrackingModalOpen, setBookingTrackingModalOpen] = useState(false);
   const [bookingTrackingBubbleOpen, setBookingTrackingBubbleOpen] = useState(false);
+  const [customerWalletModalOpen, setCustomerWalletModalOpen] = useState(false);
   const [bookingRatingModalOpen, setBookingRatingModalOpen] = useState(false);
   const [driverRideRequestModalOpen, setDriverRideRequestModalOpen] = useState(false);
   const [activeDriverRideRequest, setActiveDriverRideRequest] = useState(null);
@@ -1674,6 +1722,7 @@ export default function HomePage() {
   const customerRideSyncInFlightRef = useRef(false);
   const driverRideSyncInFlightRef = useRef(false);
   const bookingPaymentPollingTimerRef = useRef(null);
+  const zalopayCallbackHandledRef = useRef('');
   const normalizedUserRoleCode = normalizeAppRoleCode(authenticatedUser?.roleCode);
   const isDriverCheckedIn = Boolean(driverDispatchSettings.checkedIn);
   const isDriverAutoReceiveEnabled = true;
@@ -1683,6 +1732,11 @@ export default function HomePage() {
     .trim()
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
+  const customerHasActiveTrip = Boolean(
+    bookingSuccess &&
+    String(bookingSuccess?.bookingCode ?? '').trim() &&
+    isCustomerTrackedRideStatus(bookingSuccess),
+  );
   const activeDriverTripVehicleLabel = String(activeDriverTripAction?.driverVehicleLabel ?? activeDriverTripAction?.vehicleLabel ?? activeDriverTripAction?.rideTitle ?? '').trim();
   const activeDriverTripLicensePlate = String(activeDriverTripAction?.driverLicensePlate ?? activeDriverTripAction?.driverVehicleLicensePlate ?? '').trim();
   const activeDriverDisplayName = String(authenticatedUser?.fullName ?? authenticatedUser?.displayName ?? authenticatedUser?.name ?? '').trim();
@@ -1794,6 +1848,15 @@ export default function HomePage() {
       [field]: normalizedSelection,
     }));
   };
+
+  const showMiniToast = useCallback((message, type = 'success', durationMs = 1600) => {
+    setMiniToast({
+      id: Date.now(),
+      message,
+      type,
+      durationMs,
+    });
+  }, []);
 
   useEffect(() => {
     bookingTrackingModalOpenRef.current = bookingTrackingModalOpen;
@@ -2236,10 +2299,30 @@ export default function HomePage() {
         nextBookingCode && dismissedCustomerTrackingBookingCodeRef.current === nextBookingCode,
       );
       const nextTripStatus = resolveRideStatusToken(nextBooking);
+      const isCompletedTrip = isCompletedRideStatus(nextTripStatus);
+      const isCancelledTrip = nextTripStatus === 'dahuy' || nextTripStatus === 'cancelled';
+
+      if (isCancelledTrip) {
+        if (accountId) {
+          clearPersistedActiveBooking(accountId);
+        }
+
+        setBookingTrackingModalOpen(false);
+        setBookingTrackingBubbleOpen(false);
+        setBookingRatingModalOpen(false);
+        setBookingSuccess(null);
+        dismissedCustomerTrackingBookingCodeRef.current = nextBookingCode;
+        resetBodyScrollLock();
+        return nextBooking;
+      }
+
+      if (isCompletedTrip && accountId) {
+        clearPersistedActiveBooking(accountId);
+      }
 
       setBookingSuccess((currentBooking) => mergeRideBookingSnapshot(currentBooking, nextBooking));
 
-      if (isCompletedRideStatus(nextTripStatus)) {
+      if (isCompletedTrip) {
         dismissedCustomerTrackingBookingCodeRef.current = '';
         setBookingTrackingModalOpen(false);
         setBookingTrackingBubbleOpen(false);
@@ -2248,6 +2331,7 @@ export default function HomePage() {
       if (
         !bookingTrackingModalOpenRef.current &&
         !bookingTrackingBubbleOpenRef.current &&
+        !customerWalletModalOpen &&
         !isDismissedByCustomer &&
         isCustomerTrackedRideStatus(nextBooking)
       ) {
@@ -2285,7 +2369,17 @@ export default function HomePage() {
           roleCode: 'Q2',
           limit: 12,
         });
-        const matchedBooking = findTrackedCustomerRideBooking(response?.items, eventBookingCode);
+        let matchedBooking = findTrackedCustomerRideBooking(response?.items, eventBookingCode);
+
+        if (!matchedBooking) {
+          const fallbackResponse = await rideService.getTripHistory({
+            accountId,
+            roleCode: 'Q2',
+            limit: 100,
+          });
+
+          matchedBooking = findTrackedCustomerRideBooking(fallbackResponse?.items, eventBookingCode);
+        }
 
         if (!isMounted || !matchedBooking) {
           return null;
@@ -2316,7 +2410,17 @@ export default function HomePage() {
           roleCode: 'Q3',
           limit: 12,
         });
-        const matchedBooking = findTrackedDriverRideBooking(response?.items);
+        let matchedBooking = findTrackedDriverRideBooking(response?.items);
+
+        if (!matchedBooking) {
+          const fallbackResponse = await rideService.getTripHistory({
+            accountId,
+            roleCode: 'Q3',
+            limit: 100,
+          });
+
+          matchedBooking = findTrackedDriverRideBooking(fallbackResponse?.items);
+        }
 
         if (!isMounted) {
           return null;
@@ -2652,13 +2756,229 @@ export default function HomePage() {
       disconnectRideEventStream();
     };
   }, [
-    authenticatedUser,
+    authenticatedUser?.id,
     bookingTrackingModalOpen,
+    customerWalletModalOpen,
     driverTripActionModalOpen,
     isDriverAutoReceiveEnabled,
     isDriverCheckedIn,
     normalizedUserRoleCode,
     showMiniToast,
+  ]);
+
+  useEffect(() => {
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+    const isCustomerRole = normalizedUserRoleCode !== 'Q3';
+    const trackedBookingCode = getRideBookingCode(bookingSuccess);
+
+    if (!isCustomerRole || !accountId || !trackedBookingCode || !isCustomerTrackedRideStatus(bookingSuccess)) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    let syncInFlight = false;
+
+    const syncTrackedBookingStatus = async () => {
+      if (!isMounted || syncInFlight) {
+        return;
+      }
+
+      syncInFlight = true;
+
+      try {
+        const response = await rideService.getTripHistory({
+          accountId,
+          roleCode: 'Q2',
+          limit: 12,
+        });
+
+        let matchedBooking = findTrackedCustomerRideBooking(response?.items, trackedBookingCode);
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!matchedBooking) {
+          const fallbackResponse = await rideService.getTripHistory({
+            accountId,
+            roleCode: 'Q2',
+            limit: 100,
+          });
+
+          matchedBooking = findTrackedCustomerRideBooking(fallbackResponse?.items, trackedBookingCode);
+        }
+
+        if (!matchedBooking) {
+          return;
+        }
+
+        setBookingSuccess((currentBooking) => mergeRideBookingSnapshot(currentBooking, matchedBooking));
+      } catch {
+        // Retry on next interval.
+      } finally {
+        syncInFlight = false;
+      }
+    };
+
+    void syncTrackedBookingStatus();
+
+    const intervalId = window.setInterval(() => {
+      void syncTrackedBookingStatus();
+    }, 3500);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    authenticatedUser?.id,
+    bookingSuccess,
+    normalizedUserRoleCode,
+  ]);
+
+  useEffect(() => {
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+    const isDriverRole = normalizedUserRoleCode === 'Q3' && !isDriverFeatureLockedState(authenticatedUser);
+
+    if (!isDriverRole || !accountId) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    let syncInFlight = false;
+
+    const syncActiveDriverTrip = async () => {
+      if (!isMounted || syncInFlight) {
+        return;
+      }
+
+      syncInFlight = true;
+
+      try {
+        const response = await rideService.getTripHistory({
+          accountId,
+          roleCode: 'Q3',
+          limit: 12,
+        });
+
+        let matchedBooking = findTrackedDriverRideBooking(response?.items);
+
+        if (!matchedBooking) {
+          const fallbackResponse = await rideService.getTripHistory({
+            accountId,
+            roleCode: 'Q3',
+            limit: 100,
+          });
+
+          matchedBooking = findTrackedDriverRideBooking(fallbackResponse?.items);
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!matchedBooking) {
+          return;
+        }
+
+        setActiveDriverTripAction((currentRequest) => mergeRideBookingSnapshot(currentRequest, matchedBooking));
+
+        if (!driverTripActionModalOpenRef.current && !driverTripActionBubbleOpenRef.current) {
+          setDriverTripActionModalOpen(true);
+        }
+      } catch {
+        // Retry on next interval.
+      } finally {
+        syncInFlight = false;
+      }
+    };
+
+    void syncActiveDriverTrip();
+
+    const intervalId = window.setInterval(() => {
+      void syncActiveDriverTrip();
+    }, 3500);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    authenticatedUser,
+    authenticatedUser?.id,
+    normalizedUserRoleCode,
+  ]);
+
+  useEffect(() => {
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+    const isDriverRole = normalizedUserRoleCode === 'Q3' && !isDriverFeatureLockedState(authenticatedUser);
+
+    if (!isDriverRole || !accountId) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    let syncInFlight = false;
+
+    const rehydrateActiveDriverTrip = async () => {
+      if (!isMounted || syncInFlight) {
+        return;
+      }
+
+      syncInFlight = true;
+
+      try {
+        const response = await rideService.getTripHistory({
+          accountId,
+          roleCode: 'Q3',
+          limit: 100,
+        });
+        if (!isMounted) {
+          return;
+        }
+
+        let matchedBooking = findTrackedDriverRideBooking(response?.items);
+
+        if (!matchedBooking) {
+          const fallbackResponse = await rideService.getTripHistory({
+            accountId,
+            roleCode: 'Q3',
+            limit: 100,
+          });
+
+          matchedBooking = findTrackedDriverRideBooking(fallbackResponse?.items);
+        }
+
+        if (!matchedBooking) {
+          return;
+        }
+
+        setActiveDriverTripAction((currentRequest) => mergeRideBookingSnapshot(currentRequest, matchedBooking));
+
+        if (!driverTripActionModalOpenRef.current && !driverTripActionBubbleOpenRef.current) {
+          setDriverTripActionModalOpen(true);
+        }
+      } catch {
+        // Retry on the next interval.
+      } finally {
+        syncInFlight = false;
+      }
+    };
+
+    void rehydrateActiveDriverTrip();
+
+    const intervalId = window.setInterval(() => {
+      void rehydrateActiveDriverTrip();
+    }, 3500);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    authenticatedUser,
+    authenticatedUser?.id,
+    normalizedUserRoleCode,
   ]);
 
   const handleDriverCheckedInChange = (nextCheckedIn) => {
@@ -2690,8 +3010,8 @@ export default function HomePage() {
     const shouldTrackLocation =
       normalizedUserRoleCode === 'Q3' &&
       !isDriverFeatureLockedState(authenticatedUser) &&
-      accountId &&
-      activeDriverTripBookingCode;
+      isDriverCheckedIn &&
+      accountId;
 
     if (!shouldTrackLocation || typeof navigator === 'undefined' || !navigator.geolocation) {
       return undefined;
@@ -2723,18 +3043,32 @@ export default function HomePage() {
 
       lastEmitAt = now;
       socket.emit('ride.location.update', {
-        bookingCode: activeDriverTripBookingCode,
-        customerAccountId: activeDriverTripCustomerAccountId,
+        bookingCode: activeDriverTripBookingCode || '',
+        customerAccountId: activeDriverTripCustomerAccountId || '',
         driverAccountId: accountId,
         driverName: activeDriverDisplayName,
         driverVehicleLabel: activeDriverTripVehicleLabel,
         driverLicensePlate: activeDriverTripLicensePlate,
-        tripStatus: activeDriverTripStatusToken,
+        tripStatus: activeDriverTripStatusToken || (isDriverCheckedIn ? 'checked-in' : ''),
         position: coords,
         source: 'driver-web',
         createdAt: new Date().toISOString(),
       });
     };
+
+    void getCurrentPositionAsync({ enableHighAccuracy: true, maximumAge: 2500, timeout: 8000 })
+      .then((position) => {
+        emitLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          heading: position.coords.heading,
+          speed: position.coords.speed,
+        });
+      })
+      .catch(() => {
+        // Keep the ongoing watchPosition flow as the fallback.
+      });
 
     watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -2774,6 +3108,7 @@ export default function HomePage() {
     activeDriverTripStatusToken,
     activeDriverTripVehicleLabel,
     authenticatedUser,
+    isDriverCheckedIn,
     normalizedUserRoleCode,
   ]);
 
@@ -2924,6 +3259,11 @@ export default function HomePage() {
 
     const persistedBooking = readPersistedActiveBooking(accountId);
 
+    if (persistedBooking && isTerminalCustomerRideStatus(persistedBooking)) {
+      clearPersistedActiveBooking(accountId);
+      return;
+    }
+
     if (!persistedBooking) {
       return;
     }
@@ -2933,6 +3273,80 @@ export default function HomePage() {
       return currentBookingCode ? currentBooking : persistedBooking;
     });
   }, [authenticatedUser?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const appTransId = String(params.get('apptransid') ?? '').trim();
+    const statusRaw = String(params.get('status') ?? '').trim();
+
+    if (!appTransId || !statusRaw) {
+      return;
+    }
+
+    const callbackKey = `${appTransId}|${statusRaw}`;
+
+    if (zalopayCallbackHandledRef.current === callbackKey) {
+      return;
+    }
+
+    zalopayCallbackHandledRef.current = callbackKey;
+
+    const accountId = String(authenticatedUser?.id ?? '').trim();
+    const activeBooking = bookingSuccess ?? readPersistedActiveBooking(accountId);
+    const bookingCode = String(activeBooking?.bookingCode ?? '').trim();
+    const isWalletBooking = normalizeBookingPaymentMethod(activeBooking?.paymentMethod) === 'wallet';
+    const isZaloPayProvider = normalizeBookingPaymentProvider(activeBooking?.paymentProvider) === 'zalopay';
+    const normalizedStatus = Number.parseInt(statusRaw, 10);
+    const isSuccessStatus = Number.isFinite(normalizedStatus) && normalizedStatus > 0;
+    const clearCallbackQuery = () => {
+      const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+    };
+
+    if (!bookingCode || !isWalletBooking || !isZaloPayProvider) {
+      clearCallbackQuery();
+      return;
+    }
+
+    if (isSuccessStatus) {
+      showMiniToast('Đã quay về từ ZaloPay. Hệ thống đang xác nhận giao dịch...', 'info', 2200);
+      stopBookingPaymentPolling();
+      void pollBookingPaymentStatus(bookingCode, 0);
+      clearCallbackQuery();
+      return;
+    }
+
+    (async () => {
+      stopBookingPaymentPolling();
+
+      try {
+        await rideService.updateTripStatus(bookingCode, 'DaHuy', {
+          cancelledByAccountId: String(activeBooking?.customerAccountId ?? activeBooking?.accountId ?? accountId).trim(),
+          cancelledByRoleCode: 'Q2',
+          cancelReasonLabel: 'Hủy từ cổng thanh toán ZaloPay',
+          cancelReasonText: 'Giao dịch ZaloPay đã bị hủy hoặc không thành công.',
+        });
+      } catch {
+        // Keep UI cleanup resilient even if server cancel call fails.
+      }
+
+      if (accountId) {
+        clearPersistedActiveBooking(accountId);
+      }
+
+      setBookingTrackingModalOpen(false);
+      setBookingTrackingBubbleOpen(false);
+      setBookingRatingModalOpen(false);
+      setBookingSuccess(null);
+      resetBodyScrollLock();
+      showMiniToast('Giao dịch ZaloPay đã bị hủy. Chuyến đi đã được đánh dấu Đã hủy.', 'error', 3000);
+      clearCallbackQuery();
+    })();
+  }, [authenticatedUser?.id, bookingSuccess]);
 
   useEffect(() => {
     const accountId = String(authenticatedUser?.id ?? '').trim();
@@ -2950,6 +3364,37 @@ export default function HomePage() {
 
     savePersistedActiveBooking(accountId, bookingSuccess);
   }, [authenticatedUser?.id, bookingSuccess]);
+
+  useEffect(() => {
+    const bookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
+
+    if (!bookingCode) {
+      return;
+    }
+
+    if (normalizeBookingPaymentMethod(bookingSuccess?.paymentMethod) !== 'wallet') {
+      return;
+    }
+
+    const paymentStatusToken = normalizeBookingPaymentStatusToken(
+      bookingSuccess?.paymentStatus ?? bookingSuccess?.paymentStatusLabel,
+    );
+
+    if (paymentStatusToken === 'dathanhtoan' || paymentStatusToken === 'thatbai') {
+      return;
+    }
+
+    stopBookingPaymentPolling();
+    void pollBookingPaymentStatus(bookingCode, 0);
+
+    return () => {
+      stopBookingPaymentPolling();
+    };
+  }, [
+    authenticatedUser?.id,
+    bookingSuccess?.bookingCode,
+    bookingSuccess?.paymentMethod,
+  ]);
 
   useEffect(() => {
     if (authenticatedUser?.email) {
@@ -2979,15 +3424,6 @@ export default function HomePage() {
     setLoginPassword('');
     setRememberLogin(false);
   }, [loginModalOpen, loginEmail]);
-
-  function showMiniToast(message, type = 'success', durationMs = 1600) {
-    setMiniToast({
-      id: Date.now(),
-      message,
-      type,
-      durationMs,
-    });
-  }
 
   const openDriverFeatureLockModal = (message = '') => {
     const normalizedMessage = String(message ?? '').trim();
@@ -3020,6 +3456,7 @@ export default function HomePage() {
       });
       const payment = response?.payment ?? null;
       const isPaid = Boolean(payment?.isPaid);
+      const hasFailedPayment = isWalletBookingFailed(payment?.paymentStatus ?? payment?.paymentStatusLabel);
 
       if (payment) {
         setBookingSuccess((current) => {
@@ -3027,14 +3464,38 @@ export default function HomePage() {
             return current;
           }
 
+          const nextPaymentStatus = String(payment.paymentStatus ?? '').trim();
+          const nextPaymentStatusLabel = String(payment.paymentStatusLabel ?? '').trim();
+          const nextPaidAt = String(payment.paidAt ?? '').trim();
+          const nextTripStatus = String(payment.tripStatus ?? current.tripStatus ?? '').trim();
+          const nextTripStatusLabel = String(payment.tripStatusLabel ?? current.tripStatusLabel ?? '').trim();
+
+          const currentPaymentStatus = String(current.paymentStatus ?? '').trim();
+          const currentPaymentStatusLabel = String(current.paymentStatusLabel ?? '').trim();
+          const currentPaidAt = String(current.paidAt ?? '').trim();
+          const currentTripStatus = String(current.tripStatus ?? '').trim();
+          const currentTripStatusLabel = String(current.tripStatusLabel ?? '').trim();
+
+          if (
+            currentPaymentStatus === nextPaymentStatus
+            && currentPaymentStatusLabel === nextPaymentStatusLabel
+            && currentPaidAt === nextPaidAt
+            && currentTripStatus === nextTripStatus
+            && currentTripStatusLabel === nextTripStatusLabel
+          ) {
+            return current;
+          }
+
           return {
             ...current,
-            paymentStatus: payment.paymentStatus,
-            paymentStatusLabel: payment.paymentStatusLabel,
+            paymentStatus: nextPaymentStatus,
+            paymentStatusLabel: nextPaymentStatusLabel,
             paymentSummary: current.paymentProviderLabel
               ? `${current.paymentMethodLabel} - ${current.paymentProviderLabel}`
               : current.paymentMethodLabel,
-            paidAt: payment.paidAt,
+            paidAt: nextPaidAt,
+            tripStatus: nextTripStatus,
+            tripStatusLabel: nextTripStatusLabel,
           };
         });
       }
@@ -3043,6 +3504,24 @@ export default function HomePage() {
         stopBookingPaymentPolling();
         const bookingProviderLabel = getBookingPaymentProviderLabel(bookingSuccessRef.current?.paymentProvider);
         showMiniToast(`Thanh toán ${bookingProviderLabel} thành công.`, 'success', 2200);
+        return;
+      }
+
+      if (hasFailedPayment) {
+        stopBookingPaymentPolling();
+        const currentAccountId = String(authenticatedUser?.id ?? '').trim();
+
+        if (currentAccountId) {
+          clearPersistedActiveBooking(currentAccountId);
+        }
+
+        setBookingTrackingModalOpen(false);
+        setBookingTrackingBubbleOpen(false);
+        setBookingRatingModalOpen(false);
+        setBookingSuccess(null);
+        resetBodyScrollLock();
+        const bookingProviderLabel = getBookingPaymentProviderLabel(bookingSuccessRef.current?.paymentProvider);
+        showMiniToast(`Thanh toán ${bookingProviderLabel} không thành công.`, 'error', 2600);
         return;
       }
     } catch {
@@ -3069,7 +3548,7 @@ export default function HomePage() {
       if (isCompletedRideStatus(bsStatusToken) || bsStatusToken === 'dahuy' || bsStatusToken === 'cancelled') {
         closeCompletedBookingFlow(String(bookingSuccess?.bookingCode ?? '').trim());
         // fall through to run search
-      } else {
+      } else if (shouldOpenCustomerTrackingModal(bookingSuccess)) {
         setBookingTrackingModalOpen(true);
         return;
       }
@@ -3171,6 +3650,7 @@ export default function HomePage() {
       setBookingSuccess(nextBooking);
 
       if (nextBooking) {
+        let shouldOpenTrackingImmediately = shouldOpenCustomerTrackingModal(nextBooking);
         dismissedCustomerTrackingBookingCodeRef.current = '';
         if (!nextBooking.driverRequestNotificationId) {
           enqueueDriverRideRequest(nextBooking, { accountId: authenticatedUser?.id ?? '' });
@@ -3187,10 +3667,12 @@ export default function HomePage() {
 
           if (isAppWalletProvider) {
             showMiniToast('Đặt xe thành công! Đã thanh toán bằng Ví SmartRide.', 'success', 2600);
+            shouldOpenTrackingImmediately = true;
           } else if (isMoMoMockFlow) {
             showMiniToast('Đang xác nhận thanh toán MoMo ngay trên phiên hiện tại...', 'success', 2400);
             stopBookingPaymentPolling();
             void pollBookingPaymentStatus(nextBooking.bookingCode, 0);
+            shouldOpenTrackingImmediately = false;
 
             setTimeout(() => {
               void rideService
@@ -3207,12 +3689,17 @@ export default function HomePage() {
             showMiniToast(`Đã mở ${paymentProviderLabel}. Vui lòng hoàn tất thanh toán để xác nhận chuyến.`, 'success', 2600);
             stopBookingPaymentPolling();
             void pollBookingPaymentStatus(nextBooking.bookingCode, 0);
+            shouldOpenTrackingImmediately = false;
           } else {
             showMiniToast(`Không lấy được liên kết thanh toán ${paymentProviderLabel}. Vui lòng thử đặt lại.`, 'error', 2600);
+            shouldOpenTrackingImmediately = false;
           }
         }
 
-        setBookingTrackingModalOpen(true);
+        setBookingTrackingModalOpen(shouldOpenTrackingImmediately);
+        if (!shouldOpenTrackingImmediately) {
+          setBookingTrackingBubbleOpen(false);
+        }
         closePreviewModal();
       }
     } catch (error) {
@@ -3870,7 +4357,7 @@ export default function HomePage() {
           setBookingSuccess(null);
           dismissedCustomerTrackingBookingCodeRef.current = '';
           resetBodyScrollLock();
-        } else {
+        } else if (shouldOpenCustomerTrackingModal(bookingSuccess)) {
           setBookingTrackingModalOpen(true);
           return;
         }
@@ -3932,7 +4419,7 @@ export default function HomePage() {
     setPreviewModalOpen(false);
   };
 
-  const handleBookingTrackingSync = (nextBooking) => {
+  const handleBookingTrackingSync = useCallback((nextBooking) => {
     if (!nextBooking || typeof nextBooking !== 'object') {
       return;
     }
@@ -3943,16 +4430,20 @@ export default function HomePage() {
       setBookingTrackingModalOpen(false);
       setBookingTrackingBubbleOpen(false);
     }
-  };
+  }, []);
 
-  const closeBookingTrackingModal = () => {
+  const closeBookingTrackingModal = useCallback(() => {
     const currentBookingCode = String(bookingSuccess?.bookingCode ?? '').trim();
     const currentTripStatus = resolveRideStatusToken(bookingSuccess);
 
-    if (bookingSuccess && isCompletedRideStatus(currentTripStatus)) {
+    if (bookingSuccess && isTerminalCustomerRideStatus(bookingSuccess)) {
       // Trip is completed: close the tracking modal/bubble only.
       // The rating dialog useEffect will detect the completed state and open the rating dialog.
       // handleCloseBookingRatingModal → closeCompletedBookingFlow handles final cleanup.
+      if (currentBookingCode) {
+        dismissedCustomerTrackingBookingCodeRef.current = currentBookingCode;
+      }
+
       setBookingTrackingModalOpen(false);
       setBookingTrackingBubbleOpen(false);
       return;
@@ -3986,9 +4477,9 @@ export default function HomePage() {
 
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(false);
-  };
+  }, [bookingSuccess, bookingRatingModalOpen]);
 
-  useEffect(() => () => {
+  useEffect(() => {
     stopBookingPaymentPolling();
   }, []);
 
@@ -4019,9 +4510,14 @@ export default function HomePage() {
   const forceClearBookingTrackingByBookingCode = (bookingCode, message = 'Chuyến đã bị hủy.') => {
     const normalizedBookingCode = String(bookingCode ?? '').trim();
     const activeBookingCode = String(getRideBookingCode(bookingSuccessRef.current) ?? '').trim();
+    const currentAccountId = String(authenticatedUser?.id ?? '').trim();
 
     if (!normalizedBookingCode || !activeBookingCode || activeBookingCode !== normalizedBookingCode) {
       return false;
+    }
+
+    if (currentAccountId) {
+      clearPersistedActiveBooking(currentAccountId);
     }
 
     setBookingTrackingModalOpen(false);
@@ -4086,14 +4582,14 @@ export default function HomePage() {
     };
   }, [bookingSuccess, showMiniToast]);
 
-  const minimizeBookingTrackingModal = () => {
+  const minimizeBookingTrackingModal = useCallback(() => {
     if (!bookingSuccess) {
       setBookingTrackingBubbleOpen(false);
       setBookingTrackingModalOpen(false);
       return;
     }
 
-    if (isCompletedRideStatus(bookingSuccess)) {
+    if (isTerminalCustomerRideStatus(bookingSuccess)) {
       setBookingTrackingModalOpen(false);
       setBookingTrackingBubbleOpen(false);
       return;
@@ -4101,7 +4597,7 @@ export default function HomePage() {
 
     setBookingTrackingModalOpen(false);
     setBookingTrackingBubbleOpen(true);
-  };
+  }, [bookingSuccess]);
 
   const restoreBookingTrackingModal = () => {
     if (!bookingSuccess) {
@@ -4109,7 +4605,7 @@ export default function HomePage() {
       return;
     }
 
-    if (isCompletedRideStatus(bookingSuccess)) {
+    if (isTerminalCustomerRideStatus(bookingSuccess)) {
       setBookingTrackingBubbleOpen(false);
       setBookingTrackingModalOpen(false);
       return;
@@ -4204,7 +4700,7 @@ export default function HomePage() {
     showMiniToast('Bạn đã đánh giá thành công', 'success', 2200);
   };
 
-  const handleCancelBooking = async (cancelDetails = null) => {
+  const handleCancelBooking = useCallback(async (cancelDetails = null) => {
     const cancelReason =
       typeof cancelDetails === 'string'
         ? cancelDetails.trim()
@@ -4240,6 +4736,7 @@ export default function HomePage() {
       setBookingTrackingBubbleOpen(false);
   setBookingRatingModalOpen(false);
       setBookingSuccess(null);
+      clearPersistedActiveBooking(String(authenticatedUser?.id ?? '').trim());
       setBookingError('');
       setSearchError('');
       setSearchResult(null);
@@ -4267,7 +4764,7 @@ export default function HomePage() {
 
       return null;
     }
-  };
+  }, [showMiniToast]);
 
   const closeDriverRideRequestModal = () => {
     setDriverRideRequestModalOpen(false);
@@ -7230,6 +7727,8 @@ export default function HomePage() {
         onNotify={showMiniToast}
         onHelp={() => setBookingGuideModalOpen(true)}
         onForceTripCancelled={handleForceTripCancelled}
+        onCustomerWalletModalOpenChange={setCustomerWalletModalOpen}
+        customerHasActiveTrip={customerHasActiveTrip}
         driverCheckedIn={isDriverCheckedIn}
         driverAutoReceiveEnabled={isDriverAutoReceiveEnabled}
         onDriverCheckedInChange={handleDriverCheckedInChange}
@@ -7403,7 +7902,13 @@ export default function HomePage() {
 
                   {bookingSuccess ? (
                     <div className="booking-results__booking-state booking-results__booking-state--success">
-                      <strong>Đặt xe thành công</strong>
+                      <strong>
+                        {isWalletBookingFailed(bookingSuccess?.paymentStatus ?? bookingSuccess?.paymentStatusLabel)
+                          ? 'Thanh toán không thành công'
+                          : shouldOpenCustomerTrackingModal(bookingSuccess)
+                            ? 'Đặt xe thành công'
+                            : 'Đã tạo yêu cầu chuyến, chờ thanh toán'}
+                      </strong>
                       <span>Mã chuyến: {bookingSuccess.bookingCode}</span>
                       <span>
                         {bookingSuccess.rideTitle} - {bookingSuccess.priceFormatted}
@@ -9776,6 +10281,7 @@ export default function HomePage() {
         <RideTrackingModal
           open={
             bookingTrackingModalOpen &&
+            shouldOpenCustomerTrackingModal(bookingSuccess) &&
             !isCompletedRideStatus(bookingSuccess)
           }
           booking={bookingSuccess}
@@ -9796,6 +10302,7 @@ export default function HomePage() {
         {bookingTrackingBubbleOpen &&
         bookingSuccess &&
         !bookingTrackingModalOpen &&
+        !customerWalletModalOpen &&
         !isCompletedRideStatus(bookingSuccess)
           ? createPortal(
               <button
@@ -9901,7 +10408,7 @@ export default function HomePage() {
       <DestinationPickerModal
         open={locationPicker.open}
         mode={locationPicker.mode}
-        value={locationPicker.mode === 'pickup' ? route.pickup.label : route.destination.label}
+        value={locationPicker.mode === 'pickup' ? route.pickup : route.destination}
         onClose={closeLocationPicker}
         onSelect={(selection) => handleLocationSelect(locationPicker.mode === 'pickup' ? 'pickup' : 'destination', selection)}
       />

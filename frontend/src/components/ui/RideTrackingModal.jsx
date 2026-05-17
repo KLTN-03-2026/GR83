@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import CancelRideReasonDialog from './CancelRideReasonDialog';
 import DriverLocationDialog from './DriverLocationDialog';
@@ -82,6 +82,17 @@ function normalizeText(value) {
   return String(value ?? '')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+function normalizePaymentStatusToken(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
 }
 
 function extractTripHistoryItems(response) {
@@ -309,6 +320,13 @@ export default function RideTrackingModal({
   const [driverInfoDialogOpen, setDriverInfoDialogOpen] = useState(false);
   const [driverLocationDialogOpen, setDriverLocationDialogOpen] = useState(false);
   const cancelRequestInFlightRef = useRef(false);
+  const lastRefreshTimeRef = useRef(0);
+
+  // Memoize normalized bookingCode and accountId to prevent effect from re-running on every render
+  const { normalizedBookingCode, normalizedAccountId } = useMemo(() => ({
+    normalizedBookingCode: normalizeText(booking?.bookingCode ?? ''),
+    normalizedAccountId: normalizeText(booking?.customerAccountId ?? booking?.accountId ?? ''),
+  }), [booking?.bookingCode, booking?.customerAccountId, booking?.accountId]);
 
   useEffect(() => {
     if (!open) {
@@ -334,13 +352,18 @@ export default function RideTrackingModal({
 
   useEffect(() => {
     if (!open) {
+      return;
+    }
+
+    setLiveBooking(booking);
+  }, [booking, open]);
+
+  useEffect(() => {
+    if (!open) {
       return undefined;
     }
 
-    const bookingCode = normalizeText(booking?.bookingCode ?? '');
-    const accountId = normalizeText(booking?.customerAccountId ?? booking?.accountId ?? '');
-
-    if (!bookingCode || !accountId) {
+    if (!normalizedBookingCode || !normalizedAccountId) {
       return undefined;
     }
 
@@ -349,15 +372,28 @@ export default function RideTrackingModal({
     const refreshLiveBooking = async () => {
       try {
         const response = await rideService.getTripHistory({
-          accountId,
+          accountId: normalizedAccountId,
           roleCode: 'Q2',
           limit: 24,
         });
 
-        const matchedBooking = extractTripHistoryItems(response).find((item) => {
+        let matchedBooking = extractTripHistoryItems(response).find((item) => {
           const itemBookingCode = normalizeText(item?.bookingCode ?? item?.id ?? '');
-          return itemBookingCode && itemBookingCode === bookingCode;
+          return itemBookingCode && itemBookingCode === normalizedBookingCode;
         });
+
+        if (!matchedBooking) {
+          const deepHistoryResponse = await rideService.getTripHistory({
+            accountId: normalizedAccountId,
+            roleCode: 'Q2',
+            limit: 100,
+          });
+
+          matchedBooking = extractTripHistoryItems(deepHistoryResponse).find((item) => {
+            const itemBookingCode = normalizeText(item?.bookingCode ?? item?.id ?? '');
+            return itemBookingCode && itemBookingCode === normalizedBookingCode;
+          });
+        }
 
         if (isMounted && matchedBooking) {
           setLiveBooking((current) => ({
@@ -371,17 +407,17 @@ export default function RideTrackingModal({
       }
     };
 
-    void refreshLiveBooking();
-
-    const intervalId = window.setInterval(() => {
+    // Only call if last refresh was more than 1 second ago (debounce rapid effect re-runs)
+    const now = Date.now();
+    if (now - lastRefreshTimeRef.current > 1000) {
+      lastRefreshTimeRef.current = now;
       void refreshLiveBooking();
-    }, 5000);
+    }
 
     return () => {
       isMounted = false;
-      window.clearInterval(intervalId);
     };
-  }, [booking?.accountId, booking?.bookingCode, booking?.customerAccountId, onBookingSync, open]);
+  }, [normalizedBookingCode, normalizedAccountId, onBookingSync, open]);
 
   useEffect(() => {
     if (!open) {
@@ -424,6 +460,7 @@ export default function RideTrackingModal({
   const rideTitle = String(currentBooking?.rideTitle ?? currentBooking?.vehicleLabel ?? '').trim() || 'Chuyến xe';
   const paymentSummary = String(currentBooking?.paymentSummary ?? currentBooking?.paymentMethodLabel ?? '').trim();
   const paymentStatus = String(currentBooking?.paymentStatusLabel ?? '').trim();
+  const paymentStatusToken = normalizePaymentStatusToken(currentBooking?.paymentStatus ?? currentBooking?.paymentStatusLabel);
   const priceLabel = String(currentBooking?.priceFormatted ?? '').trim();
   const routeDistanceLabel = formatKilometers(currentBooking?.routeDistanceKm);
   const etaLabel = formatMinutes(currentBooking?.etaMinutes);
@@ -457,6 +494,13 @@ export default function RideTrackingModal({
     tripStatusToken === 'completed' ||
     tripStatusToken === 'dahuy' ||
     tripStatusToken === 'cancelled';
+  const bookingEyebrow = isOnTripState
+    ? 'Chuyến đang di chuyển'
+    : paymentStatusToken === 'thatbai'
+      ? 'Thanh toán không thành công'
+      : paymentStatusToken === 'dathanhtoan'
+        ? 'Đặt xe thành công'
+        : 'Đang chờ thanh toán';
 
   const handleDismissTracking = () => {
     if (shouldCloseTripFlow) {
@@ -905,7 +949,7 @@ export default function RideTrackingModal({
         </button>
 
         <header className="booking-tracking-modal__header booking-tracking-modal__header--tracking">
-          <p className="booking-tracking-modal__eyebrow">{isOnTripState ? 'Chuyến đang di chuyển' : 'Đặt xe thành công'}</p>
+          <p className="booking-tracking-modal__eyebrow">{bookingEyebrow}</p>
           <h3>{liveStatus.title}</h3>
           <p className="booking-tracking-modal__description">{liveStatus.description}</p>
           <div className="booking-tracking-modal__status-chip-row booking-tracking-modal__status-chip-row--tracking" aria-label="Trạng thái chuyến xe">

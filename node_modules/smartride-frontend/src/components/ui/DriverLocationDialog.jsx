@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { motorbikeIcon } from '../../assets/icons';
 import { createRideSocketConnection } from '../../services/rideRealtimeService';
+import { rideService } from '../../services/rideService';
 import RoutePreviewMap from './RoutePreviewMap';
 import { classNames } from '../../utils/classNames';
 import { acquireBodyScrollLock } from '../../utils/bodyScrollLock';
@@ -107,6 +108,7 @@ export default function DriverLocationDialog({ open = false, booking = null, onC
 
   const bookingCode = normalizeText(booking?.bookingCode);
   const customerAccountId = normalizeText(booking?.customerAccountId ?? booking?.accountId);
+  const driverAccountId = normalizeText(booking?.driverAccountId ?? booking?.driverId);
   const pickupPosition = normalizePosition(booking?.pickup?.position);
   const destinationPosition = normalizePosition(booking?.destination?.position);
   const driverName = normalizeText(booking?.driverDisplayName ?? booking?.driverName);
@@ -145,7 +147,7 @@ export default function DriverLocationDialog({ open = false, booking = null, onC
 
     setDriverPosition(null);
 
-    if (!bookingCode || !customerAccountId) {
+    if ((!bookingCode && !driverAccountId) || !customerAccountId) {
       setSocketState('idle');
       return undefined;
     }
@@ -187,6 +189,7 @@ export default function DriverLocationDialog({ open = false, booking = null, onC
         setSocketState('connected');
         socket?.emit('ride.location.subscribe', {
           bookingCode,
+          driverAccountId,
         });
       },
       onDisconnect: () => {
@@ -212,15 +215,37 @@ export default function DriverLocationDialog({ open = false, booking = null, onC
       return undefined;
     }
 
+    let fallbackActive = true;
+
+    void rideService.getTripLocation(bookingCode, {
+      driverAccountId,
+    }).then((response) => {
+      if (!isMounted || !fallbackActive || !response?.success || !response?.location) {
+        return;
+      }
+
+      const nextPosition = normalizePosition(
+        response.location.position ?? response.location.driverPosition ?? response.location.location ?? response.location.coordinates,
+      );
+
+      if (nextPosition) {
+        setDriverPosition(nextPosition);
+        setSocketState('connected');
+      }
+    }).catch(() => {
+      // Keep waiting for the live socket snapshot.
+    });
+
     return () => {
       isMounted = false;
+      fallbackActive = false;
       socket.emit('ride.location.unsubscribe', {
         bookingCode,
       });
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [bookingCode, customerAccountId, onNotify, open]);
+  }, [bookingCode, customerAccountId, driverAccountId, onNotify, open]);
 
   useEffect(() => {
     if (!open) {

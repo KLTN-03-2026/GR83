@@ -39,7 +39,7 @@ export function createRideSocketConnection({ accountId = '', roleCode = '', onEv
 
   try {
     socket = io(getSocketBaseUrl(), {
-      transports: ['websocket', 'polling'],
+      transports: ['websocket'],
       query: {
         accountId: String(accountId).trim(),
         roleCode: String(roleCode).trim(),

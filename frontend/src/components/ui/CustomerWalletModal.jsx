@@ -2,9 +2,72 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { closeIcon } from '../../assets/icons';
 import { customerWalletService } from '../../services/customerWalletService';
-import { connectRideEventStream } from '../../services/rideRealtimeService';
 
 const WALLET_POLL_INTERVAL_MS = 8000;
+
+function normalizeTripStatusToken(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+function resolveBookingStatusToken(booking) {
+  if (!booking || typeof booking !== 'object') {
+    return '';
+  }
+
+  return (
+    normalizeTripStatusToken(booking.tripStatus)
+    || normalizeTripStatusToken(booking.tripStatusLabel)
+    || normalizeTripStatusToken(booking.status)
+    || normalizeTripStatusToken(booking.statusLabel)
+  );
+}
+
+function isBookingStillActive(booking) {
+  const statusToken = resolveBookingStatusToken(booking);
+
+  if (!statusToken) {
+    return false;
+  }
+
+  return statusToken !== 'hoanthanh'
+    && statusToken !== 'completed'
+    && statusToken !== 'dahuy'
+    && statusToken !== 'cancelled';
+}
+
+function readPersistedActiveBooking(customerId) {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const normalizedCustomerId = String(customerId ?? '').trim().toLowerCase();
+
+  if (!normalizedCustomerId) {
+    return null;
+  }
+
+  try {
+    const storageKey = `smartride.booking.active.${normalizedCustomerId}`;
+    const rawValue = window.sessionStorage.getItem(storageKey);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    const bookingCode = String(parsedValue?.bookingCode ?? '').trim();
+    return bookingCode ? parsedValue : null;
+  } catch {
+    return null;
+  }
+}
 
 const TOPUP_OPTIONS = [100000, 200000, 300000, 500000, 1000000, 2000000];
 const TRANSFER_OPTIONS = [50000, 100000, 200000, 500000];
@@ -114,6 +177,7 @@ export default function CustomerWalletModal({
   customerId = '',
   customerName = '',
   onNotify,
+  suspendRealtimeSync = false,
 }) {
   const [balanceAmount, setBalanceAmount] = useState(0);
   const [showBalance, setShowBalance] = useState(true);
@@ -131,6 +195,7 @@ export default function CustomerWalletModal({
   const walletLoadInFlightRef = useRef(false);
 
   const resolvedCustomerId = String(customerId ?? '').trim();
+  const shouldSuspendRealtimeSync = suspendRealtimeSync || isBookingStillActive(readPersistedActiveBooking(resolvedCustomerId));
 
   const loadWalletData = useCallback(async ({ silent = false } = {}) => {
     if (!resolvedCustomerId) {
@@ -207,41 +272,13 @@ export default function CustomerWalletModal({
 
     void loadWalletData();
 
+    // Poll wallet data periodically, ignoring realtime sync suspend
     const pollId = window.setInterval(() => {
       void loadWalletData({ silent: true });
     }, WALLET_POLL_INTERVAL_MS);
 
     return () => {
       clearInterval(pollId);
-    };
-  }, [loadWalletData, open, resolvedCustomerId]);
-
-  useEffect(() => {
-    if (!open || !resolvedCustomerId) {
-      return undefined;
-    }
-
-    const disconnect = connectRideEventStream({
-      accountId: resolvedCustomerId,
-      roleCode: 'Q2',
-      onEvent: (eventPayload) => {
-        const eventType = String(eventPayload?.type ?? '').trim().toLowerCase();
-
-        if (!eventType.startsWith('ride.')) {
-          return;
-        }
-
-        const booking = eventPayload?.booking ?? eventPayload?.payload?.booking ?? {};
-        const bookingCustomerId = String(booking?.customerAccountId ?? booking?.customerId ?? '').trim();
-
-        if (!bookingCustomerId || bookingCustomerId === resolvedCustomerId) {
-          void loadWalletData({ silent: true });
-        }
-      },
-    });
-
-    return () => {
-      disconnect();
     };
   }, [loadWalletData, open, resolvedCustomerId]);
 

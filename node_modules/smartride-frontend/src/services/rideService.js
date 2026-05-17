@@ -105,6 +105,20 @@ export const rideService = {
       signal,
     });
   },
+  getTripLocation(bookingCode, params = {}, { signal } = {}) {
+    const searchParams = new URLSearchParams();
+
+    if (params.driverAccountId) {
+      searchParams.set('driverAccountId', String(params.driverAccountId));
+    }
+
+    const queryString = searchParams.toString();
+
+    return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/location${queryString ? `?${queryString}` : ''}`, {
+      method: 'GET',
+      signal,
+    });
+  },
   confirmMoMoMockPayment(bookingCode, payload = {}) {
     return request(`/rides/${encodeURIComponent(String(bookingCode ?? '').trim())}/payments/momo/mock-confirm`, {
       method: 'POST',

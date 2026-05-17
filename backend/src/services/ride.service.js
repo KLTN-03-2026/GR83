@@ -806,6 +806,7 @@ async function resolveLocationPositionWithTimeout(location, timeoutMs = RIDE_HIS
   }
 
   let timeoutId = null;
+  const locationLookupPromise = resolveLocationPosition(location).catch(() => null);
 
   try {
     const timeoutPromise = new Promise((resolve) => {
@@ -813,7 +814,7 @@ async function resolveLocationPositionWithTimeout(location, timeoutMs = RIDE_HIS
     });
 
     return await Promise.race([
-      resolveLocationPosition(location),
+      locationLookupPromise,
       timeoutPromise,
     ]);
   } finally {
@@ -3351,10 +3352,37 @@ function buildRideTripStatusUpdatedEvent(bookingCode, tripStatusResult, currentR
       ?? currentRow?.MaTKTaiXeDuocMoi
       ?? currentRow?.MaTX,
   );
+  const driverDisplayName = normalizeText(
+    currentRow?.driverName ?? resolvedBooking?.driverDisplayName ?? resolvedBooking?.driverName,
+  );
+  const driverPhone = normalizeText(currentRow?.driverPhone ?? resolvedBooking?.driverPhone);
+  const driverIdentifier = normalizeText(
+    currentRow?.driverEmail
+      ?? currentRow?.driverUsername
+      ?? resolvedBooking?.driverIdentifier,
+  );
+  const driverStatus = normalizeText(currentRow?.driverStatus ?? resolvedBooking?.driverStatus);
   const driverVehicleLicensePlate = normalizeText(
     currentRow?.driverVehicleLicensePlate ?? resolvedBooking?.driverVehicleLicensePlate ?? resolvedBooking?.driverLicensePlate,
   );
   const driverVehicleName = normalizeText(currentRow?.driverVehicleName ?? resolvedBooking?.driverVehicleName);
+
+  if (driverDisplayName) {
+    resolvedBooking.driverDisplayName = driverDisplayName;
+    resolvedBooking.driverName = driverDisplayName;
+  }
+
+  if (driverPhone) {
+    resolvedBooking.driverPhone = driverPhone;
+  }
+
+  if (driverIdentifier) {
+    resolvedBooking.driverIdentifier = driverIdentifier;
+  }
+
+  if (driverStatus) {
+    resolvedBooking.driverStatus = driverStatus;
+  }
 
   if (driverVehicleLicensePlate) {
     resolvedBooking.driverVehicleLicensePlate = driverVehicleLicensePlate;
@@ -3634,6 +3662,11 @@ async function readTripStatusRow(transaction, bookingCode) {
         tt.ThoiDiemThanhToan AS paymentPaidAt,
         tx.MaTK AS driverAccountId,
         tx.CCCD AS driverCccd,
+        driverTk.Ten AS driverName,
+        driverTk.SDT AS driverPhone,
+        driverTk.Email AS driverEmail,
+        driverTk.TaiKhoan AS driverUsername,
+        tx.TrangThai AS driverStatus,
         JSON_VALUE(tx.ThongTinXe, '$.licensePlate') AS driverVehicleLicensePlate,
         JSON_VALUE(tx.ThongTinXe, '$.name') AS driverVehicleName
       FROM DatXe dx WITH (UPDLOCK, ROWLOCK)
@@ -3641,6 +3674,8 @@ async function readTripStatusRow(transaction, bookingCode) {
         ON tt.MaChuyen = dx.MaChuyen
       LEFT JOIN TaiXe tx
         ON LOWER(ISNULL(tx.CCCD, '')) = LOWER(ISNULL(dx.MaTX, ''))
+      LEFT JOIN TaiKhoan driverTk
+        ON driverTk.MaTK = tx.MaTK
       WHERE dx.MaChuyen = @bookingCode
     `);
 
@@ -4581,13 +4616,23 @@ async function persistBookingToDatabase(booking) {
         )
       `);
 
-    const dispatchResult = await dispatchBookingToNextDriver(transaction, {
-      ...booking,
-      dispatchAttemptOrder: 0,
-    });
+    const shouldDispatchImmediately = normalizeText(booking?.paymentMethod).toLowerCase() === 'cash'
+      || normalizePaymentStatusValue(paymentStatus) === 'DaThanhToan';
 
-    booking.driverAccountId = normalizeText(dispatchResult?.driverSystemAccountId) || '';
-    booking.driverRequestNotificationId = Number(dispatchResult?.notificationId ?? 0) || null;
+    let dispatchResult = null;
+
+    if (shouldDispatchImmediately) {
+      dispatchResult = await dispatchBookingToNextDriver(transaction, {
+        ...booking,
+        dispatchAttemptOrder: 0,
+      });
+
+      booking.driverAccountId = normalizeText(dispatchResult?.driverSystemAccountId) || '';
+      booking.driverRequestNotificationId = Number(dispatchResult?.notificationId ?? 0) || null;
+    } else {
+      booking.driverAccountId = '';
+      booking.driverRequestNotificationId = null;
+    }
 
     await transaction.commit();
 
@@ -6428,6 +6473,11 @@ async function markBookingPaidByGateway({
         dx.MaChuyen AS bookingCode,
         dx.MaTK AS accountId,
         dx.MaTX AS driverAccountId,
+        dx.MaTKTaiXeDuocMoi AS dispatchedDriverSystemAccountId,
+        dx.LanDieuPhoiHienTai AS dispatchAttemptOrder,
+        dx.LoaiXe AS vehicle,
+        dx.DiemDon AS pickupLabel,
+        dx.TrangThaiChuyen AS tripStatus,
         dx.TrangThaiThanhToan AS bookingPaymentStatus,
         tt.TrangThaiThanhToan AS paymentStatus,
         tt.MaTT AS paymentCode,
@@ -6464,13 +6514,43 @@ async function markBookingPaidByGateway({
         AND (TrangThaiThanhToan <> N'DaThanhToan' OR GatewayLastReturnCode IS NULL);
     `);
 
+    let dispatchResult = null;
+    const hasDispatchedDriver = Boolean(normalizeText(currentRow.dispatchedDriverSystemAccountId));
+    const currentTripStatus = normalizeTripStatus(currentRow.tripStatus);
+
+    if (!hasDispatchedDriver && currentTripStatus === 'ChoTaiXe') {
+      dispatchResult = await dispatchBookingToNextDriver(transaction, {
+        bookingCode: normalizedBookingCode,
+        vehicle: normalizeText(currentRow.vehicle),
+        customerAccountId: normalizeText(currentRow.accountId),
+        pickup: {
+          label: normalizeText(currentRow.pickupLabel),
+          position: null,
+        },
+        dispatchAttemptOrder: Number(currentRow.dispatchAttemptOrder ?? 0),
+      });
+    }
+
     await transaction.commit();
 
     const updatedBooking = findRecentBookingByCode(normalizedBookingCode);
     if (updatedBooking) {
       updatedBooking.paymentStatus = 'DaThanhToan';
       updatedBooking.paymentStatusLabel = getPaymentStatusLabel('DaThanhToan');
+      updatedBooking.driverAccountId = normalizeText(dispatchResult?.driverSystemAccountId || updatedBooking.driverAccountId);
+      updatedBooking.driverRequestNotificationId = Number(
+        dispatchResult?.notificationId ?? updatedBooking.driverRequestNotificationId ?? 0,
+      ) || null;
       updatedBooking.updatedAt = new Date().toISOString();
+    }
+
+    if (dispatchResult) {
+      publishRideEventSafely(buildRideBookingCreatedEvent({
+        ...(updatedBooking ?? { bookingCode: normalizedBookingCode }),
+        bookingCode: normalizedBookingCode,
+        driverAccountId: normalizeText(dispatchResult.driverSystemAccountId),
+        driverRequestNotificationId: Number(dispatchResult.notificationId ?? 0) || null,
+      }));
     }
 
     publishRideEventSafely(
@@ -6495,6 +6575,147 @@ async function markBookingPaidByGateway({
       paymentStatusLabel: getPaymentStatusLabel('DaThanhToan'),
       paidAt: (paidAt instanceof Date ? paidAt : new Date(paidAt)).toISOString(),
       booking: updatedBooking ?? null,
+    };
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch {
+      // Ignore rollback failures.
+    }
+
+    throw error;
+  }
+}
+
+async function markBookingFailedByGateway({
+  bookingCode,
+  gatewayReturnCode = null,
+  appTransId = '',
+  gatewayTransToken = '',
+  reason = 'gateway_payment_failed',
+}) {
+  const normalizedBookingCode = normalizeText(bookingCode);
+
+  if (!normalizedBookingCode) {
+    throw createValidationError('Thiếu mã chuyến để cập nhật thanh toán thất bại.');
+  }
+
+  await ensureRideSchema();
+
+  const pool = await getSqlServerPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+
+  try {
+    const request = new sql.Request(transaction)
+      .input('bookingCode', sql.VarChar(30), normalizedBookingCode)
+      .input('gatewayReturnCode', sql.Int, Number.isFinite(Number(gatewayReturnCode)) ? Number(gatewayReturnCode) : null)
+      .input('gatewayAppTransId', sql.VarChar(80), normalizeText(appTransId) || null)
+      .input('gatewayTransToken', sql.VarChar(120), normalizeText(gatewayTransToken) || null)
+      .input('cancelReasonPayload', sql.NVarChar(500), serializeCancellationMeta({
+        cancelledByRoleCode: 'q2',
+        cancelledByAccountId: 'payment-gateway',
+        cancelReason: normalizeText(reason) || 'Thanh toán thất bại hoặc bị hủy.',
+      }));
+
+    const currentResult = await request.query(`
+      SELECT TOP 1
+        dx.MaChuyen AS bookingCode,
+        dx.MaTK AS accountId,
+        dx.TrangThaiChuyen AS tripStatus,
+        tt.MaTT AS paymentCode
+      FROM dbo.DatXe dx
+      LEFT JOIN dbo.ThanhToan tt ON tt.MaChuyen = dx.MaChuyen
+      WHERE dx.MaChuyen = @bookingCode;
+    `);
+
+    const currentRow = currentResult.recordset?.[0] ?? null;
+
+    if (!currentRow?.bookingCode) {
+      throw createNotFoundError(`Khong tim thay chuyen ${normalizedBookingCode}.`);
+    }
+
+    await request.query(`
+      UPDATE dbo.DatXe
+      SET
+        TrangThaiThanhToan = N'ThatBai',
+        TrangThaiChuyen = CASE
+          WHEN TrangThaiChuyen = N'ChoTaiXe' THEN N'DaHuy'
+          ELSE TrangThaiChuyen
+        END,
+        MaTKTaiXeDuocMoi = NULL,
+        MaTBThongBaoTaiXe = NULL,
+        LyDoHuy = CASE
+          WHEN TrangThaiChuyen = N'ChoTaiXe' THEN @cancelReasonPayload
+          ELSE LyDoHuy
+        END,
+        NgayCapNhat = SYSUTCDATETIME()
+      WHERE MaChuyen = @bookingCode
+        AND TrangThaiThanhToan <> N'DaThanhToan';
+
+      UPDATE dbo.ThanhToan
+      SET
+        TrangThaiThanhToan = CASE
+          WHEN TrangThaiThanhToan = N'DaThanhToan' THEN TrangThaiThanhToan
+          ELSE N'ThatBai'
+        END,
+        GatewayAppTransId = COALESCE(GatewayAppTransId, @gatewayAppTransId),
+        GatewayTransToken = COALESCE(GatewayTransToken, @gatewayTransToken),
+        GatewayLastQueryAt = SYSUTCDATETIME(),
+        GatewayLastReturnCode = COALESCE(@gatewayReturnCode, GatewayLastReturnCode),
+        NgayCapNhat = SYSUTCDATETIME()
+      WHERE MaChuyen = @bookingCode;
+    `);
+
+    await transaction.commit();
+
+    const updatedBooking = findRecentBookingByCode(normalizedBookingCode);
+    if (updatedBooking) {
+      updatedBooking.paymentStatus = 'ThatBai';
+      updatedBooking.paymentStatusLabel = getPaymentStatusLabel('ThatBai');
+      if (normalizeTripStatus(currentRow.tripStatus) === 'ChoTaiXe') {
+        updatedBooking.tripStatus = 'DaHuy';
+        updatedBooking.tripStatusLabel = getTripStatusLabel('DaHuy');
+        updatedBooking.tripStatusTone = getTripStatusTone('DaHuy');
+      }
+      updatedBooking.updatedAt = new Date().toISOString();
+    }
+
+    publishRideEventSafely(
+      buildRidePaymentUpdatedEvent(
+        normalizedBookingCode,
+        {
+          paymentCode: normalizeText(currentRow.paymentCode),
+          paymentStatus: 'ThatBai',
+          source: 'gateway-callback',
+        },
+        currentRow,
+        updatedBooking,
+      ),
+    );
+
+    if (normalizeTripStatus(currentRow.tripStatus) === 'ChoTaiXe') {
+      publishRideEventSafely(
+        buildRideTripStatusUpdatedEvent(
+          normalizedBookingCode,
+          buildTripStatusResult(normalizedBookingCode, 'DaHuy', new Date(), '', {
+            cancelledByRoleCode: 'q2',
+            cancelledByAccountId: 'payment-gateway',
+            cancelReason: normalizeText(reason) || 'Thanh toán thất bại hoặc bị hủy.',
+          }),
+          {
+            ...currentRow,
+            TrangThaiChuyen: 'DaHuy',
+          },
+          updatedBooking,
+        ),
+      );
+    }
+
+    return {
+      success: true,
+      bookingCode: normalizedBookingCode,
+      paymentStatus: 'ThatBai',
     };
   } catch (error) {
     try {
@@ -6724,6 +6945,43 @@ export async function handleZaloPayCallback(payload = {}) {
     });
   }
 
+  // Chỉ xử lý thành công khi status === 1
+  const status = Number(parsedCallback?.status ?? 0);
+  if (status !== 1) {
+    try {
+      await runWithSqlDeadlockRetry(
+        () => markBookingFailedByGateway({
+          bookingCode,
+          gatewayReturnCode: status,
+          appTransId,
+          gatewayTransToken: zpTransToken,
+          reason: 'Thanh toán ZaloPay không thành công hoặc đã bị hủy.',
+        }),
+        'markBookingFailedByGateway-zalopay-callback',
+      );
+    } catch {
+      // Keep callback idempotent even if local state update fails.
+    }
+
+    await logPaymentGatewayAudit({
+      bookingCode,
+      provider: 'zalopay',
+      eventType: 'callback',
+      source: 'webhook',
+      verifyStatus: 'not_success_status',
+      requestMac: callbackMac,
+      computedMac: expectedMac,
+      appTransId,
+      gatewayReturnCode: status,
+      requestPayload: parsedCallback,
+      message: `zalopay_status_not_success: ${status}`,
+    });
+    return {
+      return_code: 0,
+      return_message: 'not_success_status',
+    };
+  }
+
   try {
     await runWithSqlDeadlockRetry(
       () => markBookingPaidByGateway({
@@ -6731,7 +6989,7 @@ export async function handleZaloPayCallback(payload = {}) {
         paidAt,
         appTransId,
         zpTransToken,
-        gatewayReturnCode: Number(parsedCallback?.status ?? 1) || 1,
+        gatewayReturnCode: status,
       }),
       'markBookingPaidByGateway-zalopay-callback',
     );
@@ -6745,7 +7003,7 @@ export async function handleZaloPayCallback(payload = {}) {
       requestMac: callbackMac,
       computedMac: expectedMac,
       appTransId,
-      gatewayReturnCode: Number(parsedCallback?.status ?? 1) || 1,
+      gatewayReturnCode: status,
       requestPayload: parsedCallback,
       responsePayload: { return_code: 1, return_message: 'success' },
       message: 'callback_verified_and_applied',

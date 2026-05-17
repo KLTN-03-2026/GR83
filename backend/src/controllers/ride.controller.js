@@ -24,7 +24,11 @@ import {
   updateAdminDriverViolation,
 } from '../services/driverViolation.service.js';
 import { getTripMessages, sendTripMessage } from '../services/tripChat.service.js';
-import { subscribeRideEvents } from '../services/ride.realtime.service.js';
+import {
+  getLatestRideLocation,
+  getLatestRideLocationByDriverAccountId,
+  subscribeRideEvents,
+} from '../services/ride.realtime.service.js';
 
 function sendKnownRideError(response, error) {
   if (!error?.statusCode) {
@@ -225,6 +229,36 @@ export async function getTripPaymentStatusController(request, response, next) {
     });
 
     response.status(200).json(result);
+  } catch (error) {
+    if (sendKnownRideError(response, error)) {
+      return;
+    }
+
+    next(error);
+  }
+}
+
+export async function getTripLocationController(request, response, next) {
+  try {
+    const bookingCode = String(request.params.bookingCode ?? request.query?.bookingCode ?? '').trim();
+    const driverAccountId = String(request.query?.driverAccountId ?? '').trim();
+
+    const latestLocation = getLatestRideLocation(bookingCode)
+      ?? getLatestRideLocationByDriverAccountId(driverAccountId);
+
+    if (!latestLocation) {
+      response.status(404).json({
+        success: false,
+        message: 'Chua co vi tri tai xe gan nhat.',
+      });
+      return;
+    }
+
+    response.status(200).json({
+      success: true,
+      message: 'Lay vi tri tai xe gan nhat thanh cong.',
+      location: latestLocation,
+    });
   } catch (error) {
     if (sendKnownRideError(response, error)) {
       return;

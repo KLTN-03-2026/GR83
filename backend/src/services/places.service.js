@@ -22,6 +22,8 @@ const DA_NANG_VIEWBOX = {
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const PHOTON_FETCH_TIMEOUT_MS = 2500;
 const NOMINATIM_FETCH_TIMEOUT_MS = 2500;
+const NOMINATIM_RATE_LIMIT_COOLDOWN_MS = 2 * 60 * 1000;
+const NOMINATIM_MIN_REQUEST_INTERVAL_MS = 1200;
 const GEOCODER_WARNING_THROTTLE_MS = 10 * 60 * 1000;
 const searchCache = new Map();
 const reverseGeocodeCache = new Map();
@@ -29,6 +31,9 @@ const geocoderWarningTimestamps = new Map();
 let googleGeocodingAvailable = Boolean(env.googleMapsServerApiKey);
 let photonGeocodingAvailable = true;
 let nominatimGeocodingAvailable = true;
+let nominatimRetryAfterTimestamp = 0;
+let lastNominatimRequestAt = 0;
+let nominatimRequestQueue = Promise.resolve();
 
 function warnGeocoderThrottled(key, message, detail = null) {
   const now = Date.now();
@@ -52,6 +57,69 @@ function normalizeCoordinate(value) {
   const coordinate = Number(value);
 
   return Number.isFinite(coordinate) ? coordinate : null;
+}
+
+function isNominatimGeocodingReady() {
+  if (!nominatimGeocodingAvailable) {
+    return false;
+  }
+
+  return Date.now() >= nominatimRetryAfterTimestamp;
+}
+
+function markNominatimRateLimited(reason) {
+  const retryAfterMs = Number(reason?.retryAfterMs);
+  const cooldownMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+    ? Math.max(NOMINATIM_RATE_LIMIT_COOLDOWN_MS, retryAfterMs)
+    : NOMINATIM_RATE_LIMIT_COOLDOWN_MS;
+
+  nominatimRetryAfterTimestamp = Date.now() + cooldownMs;
+
+  const seconds = Math.max(1, Math.ceil(cooldownMs / 1000));
+  const status = Number(reason?.status);
+  const detail = Number.isFinite(status) ? `HTTP ${status}, retry in ${seconds}s` : `retry in ${seconds}s`;
+
+  warnGeocoderThrottled('nominatim-rate-limited', 'Nominatim is rate-limited; will retry after cooldown.', detail);
+}
+
+function parseRetryAfterMs(headerValue) {
+  const rawValue = String(headerValue ?? '').trim();
+
+  if (!rawValue) {
+    return null;
+  }
+
+  const seconds = Number(rawValue);
+
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.ceil(seconds * 1000);
+  }
+
+  const retryAt = Date.parse(rawValue);
+
+  if (Number.isFinite(retryAt) && retryAt > Date.now()) {
+    return retryAt - Date.now();
+  }
+
+  return null;
+}
+
+function waitForNominatimRequestSlot() {
+  const runWhenReady = async () => {
+    const waitMs = Math.max(0, (lastNominatimRequestAt + NOMINATIM_MIN_REQUEST_INTERVAL_MS) - Date.now());
+
+    if (waitMs > 0) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, waitMs);
+      });
+    }
+
+    lastNominatimRequestAt = Date.now();
+  };
+
+  const queuedTask = nominatimRequestQueue.then(runWhenReady, runWhenReady);
+  nominatimRequestQueue = queuedTask.catch(() => undefined);
+  return queuedTask;
 }
 
 function isCoordinateLikeLabel(value) {
@@ -88,6 +156,31 @@ function joinAddressParts(parts) {
   return normalizedParts.join(', ');
 }
 
+function toSingleLineText(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeVnAlleyLabel(value) {
+  const text = toSingleLineText(value);
+
+  if (!text) {
+    return '';
+  }
+
+  if (/^(ki[eệ]t|h[eẻ]m|ng[oõ]|alley)\b/i.test(text)) {
+    return text;
+  }
+
+  // Only coerce numeric lane-like labels to avoid mislabeling localities as alley names.
+  if (/^\d+[a-z0-9\-/.]*$/i.test(text)) {
+    return `Kiệt ${text}`;
+  }
+
+  return '';
+}
+
 function formatReverseAddressLabel(address, fallbackLabel) {
   const normalizedAddress = address && typeof address === 'object' ? address : null;
 
@@ -95,7 +188,12 @@ function formatReverseAddressLabel(address, fallbackLabel) {
     return String(fallbackLabel ?? '').trim();
   }
 
-  const houseNumber = String(normalizedAddress.house_number ?? normalizedAddress.housenumber ?? '').trim();
+  const houseNumber = toSingleLineText(
+    normalizedAddress.house_number
+      ?? normalizedAddress.housenumber
+      ?? normalizedAddress.street_number
+      ?? '',
+  );
   const road = String(
     normalizedAddress.road
       ?? normalizedAddress.pedestrian
@@ -103,14 +201,30 @@ function formatReverseAddressLabel(address, fallbackLabel) {
       ?? normalizedAddress.footway
       ?? normalizedAddress.path
       ?? normalizedAddress.cycleway
-      ?? normalizedAddress.neighbourhood
       ?? '',
   ).trim();
 
+  const alley = normalizeVnAlleyLabel(
+    normalizedAddress.alley
+      ?? normalizedAddress.neighbourhood
+      ?? normalizedAddress.quarter
+      ?? '',
+  );
+
+  const building = toSingleLineText(
+    normalizedAddress.house
+      ?? normalizedAddress.building
+      ?? normalizedAddress.premise
+      ?? normalizedAddress.subpremise
+      ?? '',
+  );
+
   const primaryLine = joinAddressParts([
-    houseNumber && road ? `Số ${houseNumber} ${road}` : '',
+    houseNumber && road ? `${houseNumber} ${road}` : '',
+    houseNumber && alley && road ? `${houseNumber}, ${alley}, ${road}` : '',
+    !houseNumber && alley && road ? `${alley}, ${road}` : '',
     !houseNumber && road ? road : '',
-    !road ? normalizedAddress.house ?? normalizedAddress.building ?? '' : '',
+    !road ? building : '',
   ]);
 
   const localityLine = joinAddressParts([
@@ -614,6 +728,16 @@ async function fetchGooglePredictions(query) {
 }
 
 async function fetchFallbackPredictions(query) {
+  if (!isNominatimGeocodingReady()) {
+    const retryAfterMs = Math.max(1, nominatimRetryAfterTimestamp - Date.now());
+    const error = new Error('Fallback geocoder skipped during cooldown.');
+    error.status = 429;
+    error.retryAfterMs = retryAfterMs;
+    throw error;
+  }
+
+  await waitForNominatimRequestSlot();
+
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.searchParams.set('q', query);
   url.searchParams.set('format', 'jsonv2');
@@ -630,6 +754,7 @@ async function fetchFallbackPredictions(query) {
   if (!response.ok) {
     const error = new Error(`Fallback geocoder returned HTTP ${response.status}`);
     error.status = response.status;
+    error.retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
     throw error;
   }
 
@@ -642,6 +767,16 @@ async function fetchFallbackPredictions(query) {
 }
 
 async function fetchStructuredFallbackPredictions(query) {
+  if (!isNominatimGeocodingReady()) {
+    const retryAfterMs = Math.max(1, nominatimRetryAfterTimestamp - Date.now());
+    const error = new Error('Structured fallback geocoder skipped during cooldown.');
+    error.status = 429;
+    error.retryAfterMs = retryAfterMs;
+    throw error;
+  }
+
+  await waitForNominatimRequestSlot();
+
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.searchParams.set('street', query);
   url.searchParams.set('format', 'jsonv2');
@@ -658,6 +793,7 @@ async function fetchStructuredFallbackPredictions(query) {
   if (!response.ok) {
     const error = new Error(`Structured fallback geocoder returned HTTP ${response.status}`);
     error.status = response.status;
+    error.retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
     throw error;
   }
 
@@ -694,6 +830,16 @@ async function fetchPhotonPredictions(query) {
 }
 
 async function fetchFallbackReverseGeocode(lat, lng) {
+  if (!isNominatimGeocodingReady()) {
+    const retryAfterMs = Math.max(1, nominatimRetryAfterTimestamp - Date.now());
+    const error = new Error('Fallback reverse geocoder skipped during cooldown.');
+    error.status = 429;
+    error.retryAfterMs = retryAfterMs;
+    throw error;
+  }
+
+  await waitForNominatimRequestSlot();
+
   const url = new URL('https://nominatim.openstreetmap.org/reverse');
   url.searchParams.set('format', 'jsonv2');
   url.searchParams.set('lat', String(lat));
@@ -711,6 +857,7 @@ async function fetchFallbackReverseGeocode(lat, lng) {
   if (!response.ok) {
     const error = new Error(`Fallback reverse geocoder returned HTTP ${response.status}`);
     error.status = response.status;
+    error.retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
     throw error;
   }
 
@@ -794,7 +941,7 @@ export async function searchPlaces(query, options = {}) {
     }
   }
 
-  if (nominatimGeocodingAvailable) {
+  if (isNominatimGeocodingReady()) {
     try {
       const fallbackResults = await fetchFallbackPredictions(trimmedQuery);
 
@@ -809,7 +956,7 @@ export async function searchPlaces(query, options = {}) {
       }
     } catch (error) {
       if (isNominatimRateLimitedError(error)) {
-        nominatimGeocodingAvailable = false;
+        markNominatimRateLimited(error);
       } else {
         warnGeocoderThrottled('nominatim-search-failed', 'Free-text Nominatim search failed.', error);
       }
@@ -887,7 +1034,7 @@ export async function reverseGeocodePlace(lat, lng) {
     }
   }
 
-  if (nominatimGeocodingAvailable) {
+  if (isNominatimGeocodingReady()) {
     try {
       const fallbackResult = await fetchFallbackReverseGeocode(latitude, longitude);
 
@@ -898,7 +1045,7 @@ export async function reverseGeocodePlace(lat, lng) {
       return fallbackResult;
     } catch (error) {
       if (isNominatimRateLimitedError(error)) {
-        nominatimGeocodingAvailable = false;
+        markNominatimRateLimited(error);
       } else {
         warnGeocoderThrottled('nominatim-reverse-failed', 'Nominatim reverse geocoding failed.', error);
       }

@@ -54,12 +54,21 @@ function buildShortHouseRoadLabel(rawAddress) {
 
   const houseNumber = String(address.house_number ?? address.housenumber ?? address.street_number ?? '').trim();
   const road = String(address.road ?? address.route ?? address.street ?? '').trim();
+  const building = String(address.premise ?? address.building ?? address.house ?? '').trim();
 
-  if (!houseNumber || !road) {
+  if (!houseNumber && !road && !building) {
     return '';
   }
 
-  return `Số ${houseNumber} ${road}`;
+  if (houseNumber && road) {
+    return `Số ${houseNumber} ${road}`;
+  }
+
+  if (road) {
+    return road;
+  }
+
+  return building;
 }
 
 async function fetchBrowserFallbackReverseGeocode(latitude, longitude, signal) {
@@ -322,7 +331,7 @@ export async function reverseGeocodeCoordinates(lat, lng, options = {}) {
 
   const label = String(response?.label ?? '').trim();
   const shortHouseRoadLabel = buildShortHouseRoadLabel(response?.address);
-  let resolvedLabel = shortHouseRoadLabel || label;
+  let resolvedLabel = label || shortHouseRoadLabel;
 
   if (!resolvedLabel || isCoordinateLikeLabel(resolvedLabel)) {
     try {

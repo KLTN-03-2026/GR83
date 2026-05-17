@@ -11,6 +11,7 @@ const DEFAULT_CENTER = {
   lat: DA_NANG_AIRPORT.position.lat,
   lng: DA_NANG_AIRPORT.position.lng,
 };
+const PLACES_SEARCH_TIMEOUT_MS = 7000;
 
 let googleMapsRenderAvailable = true;
 
@@ -49,6 +50,96 @@ function formatCoordinates(lat, lng) {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
+function isCoordinateLikeLabel(label) {
+  const normalized = String(label ?? '').trim();
+  return /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(normalized);
+}
+
+function calculateDistanceMeters(from, to) {
+  const fromLat = Number(from?.lat);
+  const fromLng = Number(from?.lng);
+  const toLat = Number(to?.lat);
+  const toLng = Number(to?.lng);
+
+  if (!Number.isFinite(fromLat) || !Number.isFinite(fromLng) || !Number.isFinite(toLat) || !Number.isFinite(toLng)) {
+    return null;
+  }
+
+  const earthRadius = 6371000;
+  const toRad = (degrees) => (degrees * Math.PI) / 180;
+  const dLat = toRad(toLat - fromLat);
+  const dLng = toRad(toLng - fromLng);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadius * c;
+}
+
+function canUseReverseLabel(reverseResult, targetPosition) {
+  const label = String(reverseResult?.label ?? '').trim();
+
+  if (!label || isCoordinateLikeLabel(label)) {
+    return false;
+  }
+
+  const distance = calculateDistanceMeters(targetPosition, {
+    lat: reverseResult?.lat,
+    lng: reverseResult?.lng,
+  });
+
+  if (distance === null) {
+    return true;
+  }
+
+  return distance <= 700;
+}
+
+function looksLikeStreetLevelLabel(label) {
+  const raw = String(label ?? '').trim();
+  const normalized = raw.toLowerCase();
+
+  if (!raw || isCoordinateLikeLabel(raw)) {
+    return false;
+  }
+
+  if (raw.length < 5) {
+    return false;
+  }
+
+  const hasStreetKeyword = /\b(số|so)\s*\d+|đường|street|road|lane|alley|ngõ|hẻm|phố|avenue|boulevard|way|rd|st\b/u.test(normalized);
+  const hasHouseNumber = /\b\d+[a-z0-9\/.-]*\b/u.test(normalized);
+  const hasMultipleParts = (raw.match(/,/g) || []).length >= 1;
+
+  return (
+    (hasStreetKeyword && (hasHouseNumber || hasMultipleParts))
+    || (hasHouseNumber && hasMultipleParts)
+  );
+}
+
+function normalizeIncomingLocation(value, mode) {
+  if (typeof value === 'string') {
+    const label = String(value).trim();
+    return label ? { label, position: null, kind: mode, source: 'manual' } : null;
+  }
+
+  const label = String(value?.label ?? '').trim();
+  const lat = Number(value?.position?.lat);
+  const lng = Number(value?.position?.lng);
+  const position = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+
+  if (!label && !position) {
+    return null;
+  }
+
+  return {
+    label: label || (position ? formatCoordinates(position.lat, position.lng) : ''),
+    position,
+    kind: value?.kind ?? mode,
+    source: value?.source ?? 'manual',
+  };
+}
+
 function createLeafletMarkerIcon() {
   return L.divIcon({
     className: 'smartride-leaflet-marker',
@@ -59,7 +150,7 @@ function createLeafletMarkerIcon() {
 }
 
 export default function DestinationPickerModal({ open, value, onClose, onSelect, mode = 'destination' }) {
-  const [query, setQuery] = useState(value);
+  const [query, setQuery] = useState(() => normalizeIncomingLocation(value, mode)?.label ?? '');
   const [predictions, setPredictions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isResolvingCurrentLocation, setIsResolvingCurrentLocation] = useState(false);
@@ -80,6 +171,20 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
   const listenersRef = useRef([]);
   const authFailureObserverRef = useRef(null);
   const reverseGeocodeRequestIdRef = useRef(0);
+  const autoCommitTimeoutRef = useRef(null);
+  const skipNextSearchRef = useRef(false);
+
+  const setQueryFromSelection = (value) => {
+    skipNextSearchRef.current = true;
+    setQuery(value);
+  };
+
+  const clearAutoCommitTimeout = () => {
+    if (autoCommitTimeoutRef.current) {
+      window.clearTimeout(autoCommitTimeoutRef.current);
+      autoCommitTimeoutRef.current = null;
+    }
+  };
 
   const focusMapOnLocation = (position) => {
     if (!position) {
@@ -122,7 +227,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     };
 
     setSelectedLocation(normalizedSelection);
-    setQuery(label);
+    setQueryFromSelection(label);
     setPredictions([]);
     setError('');
     setMapError('');
@@ -139,7 +244,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     };
 
     setSelectedLocation(normalizedSelection);
-    setQuery(label);
+    setQueryFromSelection(label);
     setPredictions([]);
     setError('');
     setMapError('');
@@ -147,7 +252,13 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
   };
 
   const clearMapInstances = () => {
-    listenersRef.current.forEach((listener) => listener.remove());
+    clearAutoCommitTimeout();
+
+    listenersRef.current.forEach((listener) => {
+      if (typeof listener?.remove === 'function') {
+        listener.remove();
+      }
+    });
     listenersRef.current = [];
 
     if (authFailureObserverRef.current) {
@@ -186,6 +297,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
 
   useEffect(() => {
     if (!open) {
+      clearAutoCommitTimeout();
       return undefined;
     }
 
@@ -199,22 +311,25 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     document.body.style.overflow = 'hidden';
 
     return () => {
+      clearAutoCommitTimeout();
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = '';
     };
   }, [open, onClose]);
 
   useEffect(() => {
+    const initialLocation = normalizeIncomingLocation(value, mode);
+
     if (!open) {
       return;
     }
 
-    setQuery(value);
+    setQueryFromSelection(initialLocation?.label ?? '');
     setPredictions([]);
     setError('');
     setMapError('');
     setMapReady(false);
-    setSelectedLocation(value ? { label: value, position: null } : null);
+    setSelectedLocation(initialLocation);
     setPreviewLocation(null);
   }, [mode, open, value]);
 
@@ -237,6 +352,8 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     if (!open) {
       return undefined;
     }
+
+    const initialLocation = normalizeIncomingLocation(value, mode);
 
     let cancelled = false;
     const abortController = new AbortController();
@@ -263,7 +380,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
 
         const resolvedLabel = String(reverseResult?.label ?? '').trim();
 
-        if (resolvedLabel) {
+        if (canUseReverseLabel(reverseResult, latLng)) {
           applySelection(resolvedLabel, latLng);
         }
       } catch (error) {
@@ -391,7 +508,13 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
         map.setCenter(DEFAULT_CENTER);
       });
 
-      await centerMapFromQuery(value.trim());
+      if (initialLocation?.position) {
+        applySelection(initialLocation.label, initialLocation.position);
+        focusMapOnLocation(initialLocation.position);
+        return;
+      }
+
+      await centerMapFromQuery(initialLocation?.label ?? '');
     };
 
     const initializeLeafletMap = async (statusMessage = 'Google Maps chưa sẵn sàng. Đang dùng bản đồ dự phòng.') => {
@@ -464,11 +587,23 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
         map.setView(DEFAULT_CENTER, 13);
       });
 
-      await centerMapFromQuery(value.trim());
+      if (initialLocation?.position) {
+        applySelection(initialLocation.label, initialLocation.position);
+        focusMapOnLocation(initialLocation.position);
+        return;
+      }
+
+      await centerMapFromQuery(initialLocation?.label ?? '');
     };
 
     const initializeMap = async () => {
       try {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          googleMapsRenderAvailable = false;
+          await initializeLeafletMap('Google Maps không khả dụng trên môi trường local. Đang dùng bản đồ dự phòng.');
+          return;
+        }
+
         if (!googleMapsRenderAvailable) {
           await initializeLeafletMap('Google Maps không khả dụng. Đang dùng bản đồ dự phòng.');
           return;
@@ -511,10 +646,17 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
       clearMapInstances();
       setMapReady(false);
     };
-  }, [open, value]);
+  }, [mode, open, value]);
 
   useEffect(() => {
     if (!open) {
+      return undefined;
+    }
+
+    if (skipNextSearchRef.current) {
+      skipNextSearchRef.current = false;
+      setIsLoading(false);
+      setError('');
       return undefined;
     }
 
@@ -532,6 +674,12 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     setIsLoading(true);
 
     const timeoutId = window.setTimeout(async () => {
+      let didSearchTimeout = false;
+      const searchTimeoutId = window.setTimeout(() => {
+        didSearchTimeout = true;
+        abortController.abort();
+      }, PLACES_SEARCH_TIMEOUT_MS);
+
       try {
         const results = await searchGooglePlaces(trimmed, { signal: abortController.signal });
 
@@ -543,6 +691,10 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
         setError('');
       } catch (requestError) {
         if (requestError?.name === 'AbortError') {
+          if (active && didSearchTimeout) {
+            setPredictions([]);
+            setError('Tìm địa điểm quá lâu, vui lòng thử lại.');
+          }
           return;
         }
 
@@ -553,6 +705,8 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
         setPredictions([]);
         setError(requestError.message);
       } finally {
+        window.clearTimeout(searchTimeoutId);
+
         if (active) {
           setIsLoading(false);
         }
@@ -568,6 +722,11 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
 
   useEffect(() => {
     if (!open) {
+      return undefined;
+    }
+
+    if (selectedLocation?.position) {
+      setPreviewLocation(null);
       return undefined;
     }
 
@@ -596,7 +755,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
     focusMapOnLocation(latLng);
 
     return undefined;
-  }, [open, predictions]);
+  }, [open, predictions, selectedLocation?.position]);
 
   if (!open) {
     return null;
@@ -635,7 +794,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
           const reverseResult = await reverseGeocodeCoordinates(latLng.lat, latLng.lng);
           const address = String(reverseResult?.label ?? '').trim();
 
-          if (address) {
+          if (canUseReverseLabel(reverseResult, latLng)) {
             resolvedLabel = address;
           }
         } catch {
@@ -643,14 +802,30 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
         }
 
         focusMapOnLocation(latLng);
+        setPreviewLocation({
+          label: resolvedLabel,
+          position: latLng,
+        });
         setIsResolvingCurrentLocation(false);
         setIsLoading(false);
-        commitSelection({
+        setSelectedLocation({
           label: resolvedLabel,
           position: latLng,
           kind: 'pickup',
           source: 'current-location',
         });
+        setQueryFromSelection(resolvedLabel);
+        setPredictions([]);
+
+        clearAutoCommitTimeout();
+        autoCommitTimeoutRef.current = window.setTimeout(() => {
+          commitSelection({
+            label: resolvedLabel,
+            position: latLng,
+            kind: 'pickup',
+            source: 'current-location',
+          });
+        }, 250);
       },
       (geoError) => {
         setIsResolvingCurrentLocation(false);
@@ -709,7 +884,18 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
 
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
         const latLng = { lat: latitude, lng: longitude };
-        const label = prediction.description ?? prediction.main_text ?? formatCoordinates(latitude, longitude);
+        let label = prediction.description ?? prediction.main_text ?? formatCoordinates(latitude, longitude);
+
+        try {
+          const reverseResult = await reverseGeocodeCoordinates(latitude, longitude);
+          const resolvedLabel = String(reverseResult?.label ?? '').trim();
+
+          if (canUseReverseLabel(reverseResult, latLng)) {
+            label = resolvedLabel;
+          }
+        } catch {
+          // Keep prediction label when reverse geocoding is unavailable.
+        }
 
         focusMapOnLocation(latLng);
 
@@ -798,6 +984,7 @@ export default function DestinationPickerModal({ open, value, onClose, onSelect,
               <input
                 value={query}
                 onChange={(event) => {
+                  skipNextSearchRef.current = false;
                   setQuery(event.target.value);
                   setSelectedLocation(null);
                 }}
