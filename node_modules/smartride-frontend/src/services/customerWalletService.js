@@ -13,29 +13,40 @@ export const customerWalletService = {
 
   listTransactions(customerId, params = {}) {
     const searchParams = new URLSearchParams();
-
     if (params.type) {
       searchParams.set('type', String(params.type));
     }
-
     const queryString = searchParams.toString();
-
     return request(`/customers/${normalizeCustomerId(customerId)}/wallet/transactions${queryString ? `?${queryString}` : ''}`, {
       method: 'GET',
     });
   },
 
-  topup(customerId, payload) {
-    return request(`/customers/${normalizeCustomerId(customerId)}/wallet/topup`, {
+  // Gọi API nạp tiền ví chung cho cả khách và tài xế
+  topupWallet({ userId, amount, method, role }) {
+    return request(`/wallet/topup`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ userId, amount, method, role }),
     });
   },
 
-  transfer(customerId, payload) {
-    return request(`/customers/${normalizeCustomerId(customerId)}/wallet/transfer`, {
+  syncTopupWallet({ userId, role }) {
+    return request('/wallet/topup/sync', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ userId, role }),
+    });
+  },
+
+  // Chuyển tiền ví: gọi API mới /wallet/transfer
+  transfer(senderId, { recipientPhone, amount, description }) {
+    return request(`/wallet/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({
+        senderId,
+        phone: recipientPhone,
+        amount,
+        note: (typeof description === 'string' && description.trim()) ? description.trim() : undefined,
+      }),
     });
   },
 };

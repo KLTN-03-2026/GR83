@@ -22,6 +22,154 @@ import DriverSupportSafetyModal from '../ui/DriverSupportSafetyModal';
 import { notificationService } from '../../services/notificationService';
 import { driverVehicleRequestService } from '../../services/driverVehicleRequestService';
 import { connectRideEventStream } from '../../services/rideRealtimeService';
+import { customerWalletService } from '../../services/customerWalletService';
+import { driverWalletService } from '../../services/driverWalletService';
+
+const WALLET_TOPUP_RETURN_STATE_KEY = 'smartride.wallet.topup.return.v1';
+const WALLET_TOPUP_RETURN_MAX_AGE_MS = 15 * 60 * 1000;
+
+function readWalletTopupReturnState() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(WALLET_TOPUP_RETURN_STATE_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue);
+    const createdAt = Number(parsed?.createdAt ?? 0);
+    const now = Date.now();
+
+    if (!Number.isFinite(createdAt) || createdAt <= 0 || now - createdAt > WALLET_TOPUP_RETURN_MAX_AGE_MS) {
+      window.sessionStorage.removeItem(WALLET_TOPUP_RETURN_STATE_KEY);
+      return null;
+    }
+
+    return {
+      userId: String(parsed?.userId ?? '').trim(),
+      role: String(parsed?.role ?? '').trim().toLowerCase(),
+      method: String(parsed?.method ?? '').trim().toLowerCase(),
+      transactionId: String(parsed?.transactionId ?? '').trim(),
+      createdAt,
+    };
+  } catch {
+    window.sessionStorage.removeItem(WALLET_TOPUP_RETURN_STATE_KEY);
+    return null;
+  }
+}
+
+function clearWalletTopupReturnState() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.sessionStorage.removeItem(WALLET_TOPUP_RETURN_STATE_KEY);
+}
+
+function parseFirstFiniteNumber(...values) {
+  for (const value of values) {
+    const numericValue = Number(value);
+
+    if (Number.isFinite(numericValue)) {
+      return numericValue;
+    }
+  }
+
+  return null;
+}
+
+function parseWalletTopupReturnResultFromUrl() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const currentUrl = new URL(window.location.href);
+  const searchParams = currentUrl.searchParams;
+  const hashParams = new URLSearchParams(String(currentUrl.hash ?? '').replace(/^#/, ''));
+  const getParam = (...keys) => {
+    for (const key of keys) {
+      const searchValue = searchParams.get(key);
+
+      if (searchValue !== null && String(searchValue).trim()) {
+        return String(searchValue).trim();
+      }
+
+      const hashValue = hashParams.get(key);
+
+      if (hashValue !== null && String(hashValue).trim()) {
+        return String(hashValue).trim();
+      }
+    }
+
+    return '';
+  };
+
+  const providerToken = getParam('payment_provider', 'provider');
+  const partnerCode = getParam('partnerCode');
+  const hasMoMoSignal = Boolean(
+    providerToken.toLowerCase() === 'momo'
+    || partnerCode
+    || getParam('orderId', 'requestId', 'transId', 'extraData'),
+  );
+  const hasZaloPaySignal = Boolean(
+    providerToken.toLowerCase() === 'zalopay'
+    || getParam('apptransid', 'app_trans_id', 'zp_trans_token', 'zptranstoken', 'checksum'),
+  );
+
+  if (!hasMoMoSignal && !hasZaloPaySignal) {
+    return null;
+  }
+
+  const provider = hasMoMoSignal ? 'momo' : 'zalopay';
+  const resultCode = parseFirstFiniteNumber(getParam('resultCode', 'errorCode'));
+  const returnCode = parseFirstFiniteNumber(getParam('return_code', 'returnCode'));
+  const status = parseFirstFiniteNumber(getParam('status'));
+  const isCancelled = ['1', 'true', 'yes'].includes(getParam('cancel', 'cancelled', 'isCancelled').toLowerCase());
+  const message = getParam('message', 'localMessage', 'return_message', 'returnMessage', 'errorMessage');
+
+  if (provider === 'momo') {
+    if (resultCode === 0) {
+      return { provider, isFailure: false, isSuccess: true, message };
+    }
+
+    if (resultCode !== null || isCancelled) {
+      return { provider, isFailure: true, isSuccess: false, message };
+    }
+
+    return { provider, isFailure: false, isSuccess: false, message };
+  }
+
+  if (returnCode === 1 || status === 1) {
+    return { provider, isFailure: false, isSuccess: true, message };
+  }
+
+  if (returnCode !== null || status !== null || isCancelled) {
+    return { provider, isFailure: true, isSuccess: false, message };
+  }
+
+  return { provider, isFailure: false, isSuccess: false, message };
+}
+
+function clearWalletTopupReturnParamsFromUrl() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const currentUrl = new URL(window.location.href);
+  currentUrl.search = '';
+  currentUrl.hash = '';
+  window.history.replaceState({}, document.title, currentUrl.toString());
+}
+
+function waitFor(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 const ROLE_LABELS = {
   Q1: 'Quản trị viên',
@@ -346,6 +494,7 @@ export default function Header({
   const roleMenuRef = useRef(null);
   const accountMenuRef = useRef(null);
   const notificationMenuRef = useRef(null);
+  const walletTopupReturnCheckInFlightRef = useRef(false);
 
   const normalizedRoleCode = normalizeRoleCode(isAuthenticated ? accountRoleCode : 'Q2');
   const activeRoleMenu = useMemo(() => ROLE_MENUS[normalizedRoleCode] ?? ROLE_MENUS.Q2, [normalizedRoleCode]);
@@ -368,6 +517,91 @@ export default function Header({
   useEffect(() => {
     onCustomerWalletModalOpenChange?.(customerWalletModalOpen);
   }, [customerWalletModalOpen, onCustomerWalletModalOpenChange]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !accountId) {
+      return undefined;
+    }
+
+    if (normalizedRoleCode !== 'Q2' && normalizedRoleCode !== 'Q3') {
+      return undefined;
+    }
+
+    if (walletTopupReturnCheckInFlightRef.current) {
+      return undefined;
+    }
+
+    const returnState = readWalletTopupReturnState();
+
+    if (!returnState) {
+      return undefined;
+    }
+
+    const accountIdToken = String(accountId).trim();
+    const roleToken = normalizedRoleCode === 'Q3' ? 'driver' : 'customer';
+
+    if (!accountIdToken || returnState.userId !== accountIdToken || returnState.role !== roleToken) {
+      return undefined;
+    }
+
+    const returnResult = parseWalletTopupReturnResultFromUrl();
+
+    walletTopupReturnCheckInFlightRef.current = true;
+    let cancelled = false;
+
+    const runSyncAfterReturn = async () => {
+      const walletService = roleToken === 'driver' ? driverWalletService : customerWalletService;
+      let isTopupSynced = false;
+
+      if (!returnResult?.isFailure) {
+        try {
+          for (let attempt = 1; attempt <= 4; attempt += 1) {
+            const response = await walletService.syncTopupWallet({ userId: accountIdToken, role: roleToken });
+            const synchronizedItems = Array.isArray(response?.synchronized) ? response.synchronized : [];
+
+            if (synchronizedItems.some((item) => item?.synced)) {
+              isTopupSynced = true;
+              break;
+            }
+
+            if (attempt < 4) {
+              await waitFor(1800);
+            }
+          }
+        } catch {
+          // Ignore transient sync failures and let normal wallet flow handle retries.
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      clearWalletTopupReturnState();
+      clearWalletTopupReturnParamsFromUrl();
+
+      if (isTopupSynced) {
+        onNotify?.('Đã nạp tiền thành công.', 'success', 2600);
+      } else {
+        onNotify?.(returnResult?.message || 'Nạp tiền thất bại.', 'error', 2600);
+      }
+
+      if (roleToken === 'driver') {
+        setDriverWalletModalOpen(true);
+      } else {
+        setCustomerWalletModalOpen(true);
+      }
+
+      walletTopupReturnCheckInFlightRef.current = false;
+    };
+
+    void runSyncAfterReturn();
+
+    return () => {
+      cancelled = true;
+      walletTopupReturnCheckInFlightRef.current = false;
+    };
+  }, [accountId, isAuthenticated, normalizedRoleCode, onNotify]);
 
   useEffect(() => {
     const availableItemIds = activeRoleMenu.rows

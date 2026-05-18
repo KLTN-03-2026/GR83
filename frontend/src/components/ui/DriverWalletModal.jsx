@@ -150,6 +150,7 @@ export default function DriverWalletModal({
     }
 
     try {
+      await driverWalletService.syncTopupWallet({ userId: resolvedDriverId, role: 'driver' });
       const response = await driverWalletService.getWallet(resolvedDriverId);
       const nextBalance = Number(response?.wallet?.balance ?? 0);
       const nextTransactions = Array.isArray(response?.transactions) ? response.transactions : [];
@@ -264,14 +265,34 @@ export default function DriverWalletModal({
     setIsSubmitting(true);
 
     try {
-      const response = await driverWalletService.topup(resolvedDriverId, {
+      // Gọi API nạp tiền ví chung
+      const response = await driverWalletService.topupWallet({
+        userId: resolvedDriverId,
         amount: topupAmount,
         method: topupMethod,
+        role: 'driver',
       });
 
-      onNotify?.(response?.message || 'Nạp tiền thành công.', 'success', 2000);
-      setActiveScreen('history');
-      await loadWalletData();
+      if (response?.paymentUrl) {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(
+            'smartride.wallet.topup.return.v1',
+            JSON.stringify({
+              userId: resolvedDriverId,
+              role: 'driver',
+              method: topupMethod,
+              transactionId: response?.transactionId || '',
+              createdAt: Date.now(),
+            }),
+          );
+        }
+        window.location.assign(response.paymentUrl);
+        return;
+      } else {
+        onNotify?.(response?.message || 'Nạp tiền thành công.', 'success', 2000);
+        setActiveScreen('history');
+        await loadWalletData();
+      }
     } catch (error) {
       onNotify?.(error?.message || 'Không thể nạp tiền lúc này.', 'error', 2800);
     } finally {

@@ -8,6 +8,7 @@ import promotionRoutes from './promotion.routes.js';
 import placesRoutes from './places.routes.js';
 import rideRoutes from './ride.routes.js';
 import customerRoutes from './customer.routes.js';
+import walletRoutes from './wallet.routes.js';
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use('/notifications', notificationRoutes);
 router.use('/promotions', promotionRoutes);
 router.use('/places', placesRoutes);
 router.use('/rides', rideRoutes);
+router.use('/wallet', walletRoutes);
 
 export default router;

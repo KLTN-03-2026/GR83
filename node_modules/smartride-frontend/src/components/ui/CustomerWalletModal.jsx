@@ -214,6 +214,7 @@ export default function CustomerWalletModal({
     }
 
     try {
+      await customerWalletService.syncTopupWallet({ userId: resolvedCustomerId, role: 'customer' });
       const response = await customerWalletService.getWallet(resolvedCustomerId);
       const nextBalance = Number(response?.wallet?.balance ?? 0);
       const nextTransactions = Array.isArray(response?.transactions) ? response.transactions : [];
@@ -300,14 +301,34 @@ export default function CustomerWalletModal({
     setIsSubmitting(true);
 
     try {
-      const response = await customerWalletService.topup(resolvedCustomerId, {
+      // Gọi API nạp tiền ví chung
+      const response = await customerWalletService.topupWallet({
+        userId: resolvedCustomerId,
         amount: topupAmount,
         method: topupMethod,
+        role: 'customer',
       });
 
-      onNotify?.(response?.message || 'Nạp tiền thành công.', 'success', 2000);
-      setActiveScreen('history');
-      await loadWalletData();
+      if (response?.paymentUrl) {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(
+            'smartride.wallet.topup.return.v1',
+            JSON.stringify({
+              userId: resolvedCustomerId,
+              role: 'customer',
+              method: topupMethod,
+              transactionId: response?.transactionId || '',
+              createdAt: Date.now(),
+            }),
+          );
+        }
+        window.location.assign(response.paymentUrl);
+        return;
+      } else {
+        onNotify?.(response?.message || 'Nạp tiền thành công.', 'success', 2000);
+        setActiveScreen('history');
+        await loadWalletData();
+      }
     } catch (error) {
       onNotify?.(error?.message || 'Không thể nạp tiền lúc này.', 'error', 2800);
     } finally {
@@ -322,27 +343,35 @@ export default function CustomerWalletModal({
 
     const amount = Number(sanitizeDigits(transferAmount));
 
-    if (!transferPhone || !amount || amount <= 0) {
-      onNotify?.('Vui lòng nhập đầy đủ số điện thoại và số tiền chuyển.', 'error', 2800);
+
+    // Chỉ kiểm tra số điện thoại và số tiền > 0
+    if (!transferPhone || amount <= 0) {
+      onNotify?.('Vui lòng nhập số điện thoại và số tiền hợp lệ.', 'error', 2800);
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const response = await customerWalletService.transfer(resolvedCustomerId, {
-        recipientPhone: transferPhone,
-        amount,
-        description: transferNote,
-      });
 
-      onNotify?.(response?.message || 'Chuyển tiền thành công.', 'success', 2200);
-      setTransferAmount('');
-      setTransferNote('');
-      setActiveScreen('history');
-      await loadWalletData();
+      // Nếu không nhập nội dung, truyền undefined để backend dùng mặc định
+      const response = await customerWalletService.transfer(resolvedCustomerId, {
+        phone: transferPhone,
+        amount,
+        note: (typeof transferNote === 'string' && transferNote.trim()) ? transferNote.trim() : undefined,
+      });
+      if (response?.success) {
+        onNotify?.(response?.message || 'Chuyển tiền thành công.', 'success', 2200);
+        setTransferAmount('');
+        setTransferNote('');
+        setActiveScreen('history');
+        await loadWalletData();
+      } else {
+        onNotify?.(response?.message || 'Chuyển tiền thất bại.', 'error', 2800);
+      }
     } catch (error) {
-      onNotify?.(error?.message || 'Không thể chuyển tiền lúc này.', 'error', 2800);
+      // Hiển thị rõ lỗi trả về từ backend
+      onNotify?.(error?.message || (error?.body && error.body.message) || 'Không thể chuyển tiền lúc này.', 'error', 2800);
     } finally {
       setIsSubmitting(false);
     }

@@ -1529,6 +1529,20 @@ export async function ensureRideSchema() {
           ON dbo.DatXeDieuPhoi (MaTKTaiXe, NgayMoi DESC, MaDieuPhoi DESC);
         END
 
+        IF COL_LENGTH(N'dbo.DatXeDieuPhoi', N'TrangThai') IS NOT NULL
+          AND COL_LENGTH(N'dbo.DatXeDieuPhoi', N'MaChuyen') IS NOT NULL
+          AND COL_LENGTH(N'dbo.DatXeDieuPhoi', N'NgayTao') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE name = N'IX_DatXeDieuPhoi_TrangThai_MaChuyen_NgayTao'
+              AND object_id = OBJECT_ID(N'dbo.DatXeDieuPhoi')
+          )
+        BEGIN
+          CREATE INDEX IX_DatXeDieuPhoi_TrangThai_MaChuyen_NgayTao
+          ON dbo.DatXeDieuPhoi (TrangThai, MaChuyen, NgayTao DESC, MaDieuPhoi DESC);
+        END
+
       `);
 
       await pool.request().query(`
